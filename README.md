@@ -17,7 +17,7 @@ streamlit run app.py
 
 | Folder | Content |
 |---|---|
-| `procsim/` | Engine, no Streamlit dependency: component library, PR EOS + flashes (`thermo.py`), streams, unit operations, flowsheet solver with recycles and adjusts, examples |
+| `procsim/` | Engine, no Streamlit dependency: component library, PR EOS + flashes (`thermo.py`), streams, unit operations, subsea equipment (`surf.py` + `data/surf_catalogue.csv`), subsea CAPEX / umbilical / tie-back screening (`subsea_design.py`), slugging / turndown / field layout (`subsea_ops.py`), flowsheet solver with recycles and adjusts, examples |
 | `pfd_canvas/` | Bidirectional Streamlit component — vanilla JavaScript + SVG, no build step (`frontend/pfd.js`) |
 | `ui/` | Session/model sync, property views, fluid package manager, workbook, charts, help |
 | `tests/` | Verification suites — `python tests/run_all.py` |
@@ -30,6 +30,27 @@ gas scrubber (Souders-Brown sizing: mesh pad / vane / cyclones), column (absorbe
 stabiliser, distillation with partial or total condenser; inside-out solver with rigorous PR stages, bottoms TVP),
 compressor performance curves (fan laws, surge / stonewall margins, performance map) with anti-surge recycle
 control, recycle (Wegstein), adjust.
+
+**Subsea (SURF):** wells (gas back-pressure, PI or Vogel inflow + Beggs & Brill tubing lift with a geothermal
+ambient → wellhead P/T, AOF, GOR, water cut), subsea Xmas tree + choke (critical-flow and hydrate check),
+templates / manifolds (slot count, header loss), jumpers, spools, PLET and PLEM (fitting losses), flowlines with
+design presets (wet insulation, pipe-in-pipe, flexible, bundle, buried) and direct electrical heating, risers
+(vertical, SCR, lazy-wave, free-hanging, hybrid tower) with a riser-base severe-slugging screen (Bøe), SSIV and
+HIPPS valves, and subsea boosters (helico-axial / hybrid multiphase pumps, wet-gas compressor, liquid pump, with
+GVF window, boost and power-rating checks). A **Subsea (SURF)** tab summarises wells and equipment, draws a
+reservoir-to-arrival pressure budget, builds an equipment list with a class 5 CAPEX roll-up, sizes the umbilical
+(chemical-injection tubes, topside pump pressures) and the booster power cable, and screens tie-back distance vs
+rate (arrival pressure, hydrate margin, maximum distance). Operability: a field-layout plan view, a turndown
+envelope (operating window, limiting constraints, ramp-up liquid sweep-out) and a transient-lite slug assessment
+(hydrodynamic slug statistics, severe-slug volume and build-up time, design surge volume). The printable report
+gains a subsea section. Wells can solve their own rate for a wellhead pressure (with a deliverability
+curve); boosters take a performance curve and machines in parallel / series; a cool-down view gives the
+no-touch time after shutdown.
+
+**Scenarios:** save named cases of the flowsheet with their key results (production, power, CO₂, arrival
+conditions, CAPEX, no-touch time, slug surge) and compare them side by side, as differences to a base case,
+in a chart and in the report. Equipment data come from `procsim/data/surf_catalogue.csv`, which holds **generic, illustrative values
+only**; upload your own CSV in the app and it is stored with the flowsheet file, never in the repository.
 
 **Display units:** SI or Field (°F, psia, MMscf/d, bbl/d, lb/h, hp, MMBtu/h …) for every table, input, chart,
 label and report; the engine always calculates in SI.
@@ -53,11 +74,13 @@ P-VF flashes, Peneloux densities, LBC viscosities (Vogel for water), Motiee hydr
 **Examples:** two-stage gas compression with liquid recycle; oil stabilisation (3-stage separation +
 recompression); JT dew-point control with a gas/gas exchanger, recycle and adjust; subsea tie-back (choke,
 25 km flowline, riser, arrival separator) with 90 wt% lean-MEG injection; condensate stabiliser column with an
-Adjust on the reboiler temperature to meet a TVP of 0.80 bar.
+Adjust on the reboiler temperature to meet a TVP of 0.80 bar; subsea field with four wells on a 4-slot
+template, a spool, a 25 km pipe-in-pipe flowline, an SSIV and a lazy-wave riser to the arrival separator; its
+late-life variant with a subsea wet-gas compressor and a 45 km step-out.
 
 ## Verification
 
-`python tests/run_all.py` runs five suites (451 checks):
+`python tests/run_all.py` runs six suites (808 checks):
 
 * **thermo** — PR against NIST WebBook (vapour pressures; methane density, Cp, Joule-Thomson coefficient,
   viscosity), thermodynamic consistency, flash round trips, iso-fugacity, three-phase monotonicity, MEG properties,
@@ -70,6 +93,14 @@ Adjust on the reboiler temperature to meet a TVP of 0.80 bar.
   machine held on the control line, power floor, cooler duty, energy balance); economics arithmetic (grid, gas
   turbine, fired heating, intensity); columns — every stage in PR equilibrium
   (|y − Kx| < 1e-7), distillate at its bubble point, specs met, reflux and lean-oil trends, TVP Adjust.
+* **surf** — the IPRs against their formulas (back-pressure, PI, Vogel, AOF), the well's tubing against the pipe
+  model, choke specs and critical ratio, template slots and header loss, jumper fitting losses, flowline presets
+  and DEH, riser geometries and the Bøe number from its definition, SSIV / HIPPS trips, catalogue parsing,
+  validation and swapping, and balances (incl. reservoir heat, DEH and elevation) on the SURF field example;
+  boosters (power = F·ΔH, isentropic at 100 %, GVF window, rating), CAPEX arithmetic, Hagen–Poiseuille tube
+  ΔP, tube and cable selection, and tie-back screening reproducing the flowsheet arrival pressure; slug
+  correlations against their formulas, the severe-slug gas balance, turndown reproducing the flowsheet and its
+  low-rate hydrate limit, operating-window logic, and layout geometry (distances, bearings, well ring).
 * **ui** — a headless run of the Streamlit app against stubs that validate widget arguments and Plotly property
   names (and forbid dual-axis charts), driving every property view, the analysis tab, case study and report.
 * **browser** — the PFD canvas in real headless Chromium (Playwright): every example drawn and fitted, palette

@@ -13,7 +13,8 @@ from procsim.streams import stream_properties, hydrate_risk
 from procsim.examples import EXAMPLES, WET_GAS
 
 ENERGY_DIR = {"compressor": "in", "pump": "in", "heater": "in", "expander": "out", "cooler": "out",
-              "aircooler": "out"}
+              "aircooler": "out", "subsea_booster": "in"}
+WORK_TYPES = ("compressor", "pump", "expander", "subsea_booster")
 
 
 # --------------------------------------------------------------- formatting
@@ -94,6 +95,7 @@ def bump(fit=False):
 
 def load_model(m, fit=True):
     normalize(m)
+    st.session_state.auto_paused = False
     st.session_state.model = m
     st.session_state.selected = []
     st.session_state.sol = None
@@ -110,7 +112,9 @@ def canvas_structure(model):
 
 
 SHORT = {"column": "Column", "hx": "Heat exchanger", "separator": "2-phase separator",
-         "separator3": "3-phase separator", "feed": "Feed stream", "product": "Product stream", "splitter": "Tee"}
+         "separator3": "3-phase separator", "feed": "Feed stream", "product": "Product stream", "splitter": "Tee",
+         "well": "Well", "xmas_tree": "Xmas tree", "template": "Template", "jumper": "Jumper / PLET",
+         "flowline": "Flowline", "riser": "Riser", "subsea_valve": "SSIV / HIPPS", "subsea_booster": "Subsea booster"}
 
 
 def catalogue_payload():
@@ -217,17 +221,39 @@ def process_canvas_value(key="pfd"):
 
 def model_hash(model):
     m = copy.deepcopy(model)
-    m.pop("economics", None)          # economics are post-processing: editing them never re-solves
+    for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios"):   # post-processing settings: editing them never re-solves
+        m.pop(k, None)
     for u in m["units"].values():
         for k in ("x", "y", "flip"):
             u.pop(k, None)
     return hashlib.sha1(json.dumps(m, sort_keys=True, default=str).encode()).hexdigest()
 
 
+SOL_CACHE_SIZE = 6
+
+
+def _cache_put(h, sol):
+    ss = st.session_state
+    cache = ss.setdefault("sol_cache", {})
+    cache.pop(h, None)
+    cache[h] = sol
+    while len(cache) > SOL_CACHE_SIZE:
+        cache.pop(next(iter(cache)))
+
+
 def ensure_solved(force=False):
+    """Solve when the model changed. Recent solutions are kept by model hash, so undo, toggling a specification
+    back, or returning to an earlier case is instant. Auto-solve pauses itself after a solve that took longer
+    than the time limit (large subsea flowsheets), until the user solves by hand or raises the limit."""
     ss = st.session_state
     h = model_hash(ss.model)
-    if not force and (not ss.auto_solve or h == ss.sol_hash):
+    if h == ss.sol_hash and ss.sol is not None and not force:
+        return
+    cached = (ss.get("sol_cache") or {}).get(h)
+    if cached is not None and not force:
+        ss.sol, ss.sol_hash, ss.solve_error = cached, h, None
+        return
+    if not force and (not ss.auto_solve or ss.get("auto_paused")):
         return
     if not ss.model["units"]:
         ss.sol, ss.sol_hash, ss.solve_error = None, h, None
@@ -237,6 +263,7 @@ def ensure_solved(force=False):
             fp = build_fluid(ss.model)
             sol = solve(ss.model, fp)
         ss.sol, ss.sol_hash, ss.solve_error = sol, h, None
+        _cache_put(h, sol)
         # Adjust writes its converged value back into the variable, as in HYSYS
         changed = False
         for a, (vu, vp, val) in sol.adjusted.items():
@@ -245,9 +272,15 @@ def ensure_solved(force=False):
                 changed = True
         if changed:
             ss.sol_hash = model_hash(ss.model)
+            _cache_put(ss.sol_hash, sol)
             ss.widget_ver += 1
+        limit = float(ss.get("auto_limit", AUTO_LIMIT_DEFAULT))
+        ss.auto_paused = bool(ss.auto_solve and sol.seconds > limit)
     except Exception as e:   # fluid-package problems etc.
         ss.sol, ss.sol_hash, ss.solve_error = None, h, f"{type(e).__name__}: {e}"
+
+
+AUTO_LIMIT_DEFAULT = 10.0
 
 
 def sol_is_current():
@@ -268,7 +301,24 @@ def _unit_label(u, res):
         tv = res.get("Bottoms TVP @ 37.8 °C [bar(a)]")
         return (f"{qfmt('Top T [°C]', res['Top T [°C]'], 0)} / {qfmt('Bottom T [°C]', res['Bottom T [°C]'], 0)}"
                 + (f" · TVP {qfmt('TVP [bar(a)]', tv, 2)}" if tv is not None else ""))
-    if t == "pipe" and res.get("Pressure drop [bar]") is not None:
+    if t == "well" and res.get("Wellhead P [bar(a)]") is not None:
+        return (f"WH {qfmt('Wellhead P [bar(a)]', res['Wellhead P [bar(a)]'], 0)} · "
+                f"{qfmt('Wellhead T [°C]', res['Wellhead T [°C]'], 0)} · "
+                f"{qfmt('Gas [MSm³/d]', res.get('Gas rate [MSm³/d]', 0.0), 2)}")
+    if t == "xmas_tree" and res.get("Choke ΔP [bar]") is not None:
+        crit = " · critical" if str(res.get("Choke flow", "")).startswith("Critical") else ""
+        return f"choke ΔP {qfmt('Choke ΔP [bar]', res['Choke ΔP [bar]'], 1)}{crit}"
+    if t == "subsea_booster" and res.get("Shaft power [kW]") is not None:
+        return (f"{qfmt('Shaft power [kW]', res['Shaft power [kW]'], 0 if 'SI' in _sys() else 0)} · "
+                f"GVF {res['Inlet GVF [%]']:.0f} %")
+    if t == "template" and res.get("Slots used"):
+        return f"{res['Slots used']} slots"
+    if t == "subsea_valve" and res.get("Position"):
+        return res["Position"]
+    if t == "riser" and res.get("Pressure drop [bar]") is not None:
+        risk = " · SLUGGING" if str(res.get("Riser-base slugging risk", "")).startswith("High") else ""
+        return f"ΔP {qfmt('Pressure drop [bar]', res['Pressure drop [bar]'], 1)}{risk}"
+    if t in ("pipe", "flowline", "jumper") and res.get("Pressure drop [bar]") is not None:
         return f"ΔP {qfmt('Pressure drop [bar]', res['Pressure drop [bar]'], 2)} · {res.get('Flow regime (dominant)', '')}"
     if t == "compressor" and res.get("Surge margin [%]") is not None and res.get("Power [kW]") is not None:
         rec = res.get("Anti-surge recycle [% of throughput]") or 0.0
@@ -334,7 +384,7 @@ def results_payload():
         if t == "pipe" and u["params"].get("heat") == "Overall U to ambient" and float(u["params"].get("U", 0)) > 0:
             dirn = "out"
         if dirn:
-            kind = "work" if t in ("compressor", "pump", "expander") else "heat"
+            kind = "work" if t in WORK_TYPES else "heat"
             name = energy_name(u, kind)
             if sol and current:
                 for en in sol.energy:
@@ -378,6 +428,8 @@ def status_line():
     if ss.solve_error:
         return f"Fluid package error: {ss.solve_error}"
     if not sol_is_current():
+        if ss.get("auto_paused"):
+            return f"{n_u} unit ops · {n_s} streams · changed since the last solve (auto-solve paused: press Solve)"
         return f"{n_u} unit ops · {n_s} streams · not solved (press Solve)"
     bad = [k for k, v in sol.status.items() if v in ("error", "missing", "unsolved")]
     flag = "solved" if not bad and sol.converged else f"{len(bad)} object(s) need attention"

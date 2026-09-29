@@ -25,10 +25,11 @@ import numpy as np
 from .components import Component, LIBRARY
 from .thermo import FluidPackage, FlashError, V_STD_GAS
 from .streams import MaterialStream, EnergyStream, make_stream, zero_stream, stream_properties
-from .unitops import CATALOGUE, CALC, UnitError, default_params, hx_post, K0
+from .unitops import CATALOGUE, CALC, UnitError, default_params, hx_post, K0, PROFILE_TYPES
+from . import surf
 
 LOGICAL = ("feed", "product", "recycle", "adjust")
-EXTRAS = ("_post", "_profile", "_map", "_column")     # per-unit post-processing data kept with cached results
+EXTRAS = ("_post", "_profile", "_map", "_column", "_inlet_F")     # per-unit post-processing data kept with cached results
 
 
 # --------------------------------------------------------------------------
@@ -325,6 +326,13 @@ def _single_pass(model, fp, values, sol, cache=None):
                 sol.status[uid] = "error"
                 sol.errors[uid] = f"{type(e).__name__}: {e}"
                 continue
+            if u.get("_inlet_F") is not None:
+                # a unit that sets its own rate (a well on a wellhead-pressure spec) writes it back to its inlet
+                for sid in ins_sid.get("in", []):
+                    if sid in values and not values[sid].empty:
+                        st_in = values[sid].copy()
+                        st_in.F = float(u["_inlet_F"])
+                        values[sid] = st_in
             for port, lst in out_map[uid].items():
                 produced = outs.get(port, [])
                 for k, sid in enumerate(lst):
@@ -458,6 +466,7 @@ def solve(model_in, fp: FluidPackage | None = None) -> Solution:
     t0 = time.time()
     model = copy.deepcopy(model_in)
     normalize(model)
+    surf.activate(model.get("surf_catalogue"))
     fp = fp or build_fluid(model)
     sol = Solution(fp)
     units = model["units"]
@@ -490,6 +499,13 @@ def solve(model_in, fp: FluidPackage | None = None) -> Solution:
                     st = feeds.get(f"__feed_{uid}")
                     s.status[uid] = "ok"
                     s.results[uid] = {"Molar flow [kmol/h]": st.F, "Phase": st.flash.phase_label if st.flash else "-"}
+                    outs_ = port_edges(model, uid, "out").get("out", [])
+                    if outs_ and outs_[0] in s.streams and abs(s.streams[outs_[0]].F - st.F) > 1e-9 * max(st.F, 1.0):
+                        dst = units[model["streams"][outs_[0]]["dst"][0]]["name"]
+                        s.results[uid] = {"Molar flow [kmol/h]": s.streams[outs_[0]].F,
+                                          "Specified flow [kmol/h]": st.F,
+                                          "Rate set by": f"{dst} (wellhead-pressure specification)",
+                                          "Phase": st.flash.phase_label if st.flash else "-"}
                     if not port_edges(model, uid, "out"):
                         s.status[uid] = "missing"
                         s.errors[uid] = "Feed not connected"
@@ -583,9 +599,9 @@ def solve(model_in, fp: FluidPackage | None = None) -> Solution:
     for uid, u in units.items():
         if sol.status.get(uid) not in ("ok", "warning"):
             continue
-        if u["type"] == "pipe" and "_profile" in u:
+        if u["type"] in PROFILE_TYPES and "_profile" in u:
             sol.profiles[uid] = u["_profile"]
-        if u["type"] == "compressor" and "_map" in u:
+        if u["type"] in ("compressor", "subsea_booster") and "_map" in u:
             sol.maps[uid] = u["_map"]
         if u["type"] == "column" and "_column" in u:
             sol.columns[uid] = u["_column"]

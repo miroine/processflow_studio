@@ -1054,6 +1054,12 @@ def pipe_gradient(fp, st, D, eps, theta, method, sigma):
 
 
 def calc_pipe(unit, ins, fp):
+    """Pipe segment (Beggs & Brill or homogeneous), marched in increments with a Heun predictor-corrector.
+
+    Optional private parameters used by the subsea (SURF) units that build on this model:
+    ``T_amb_out`` - ambient temperature at the outlet (linear ambient profile, e.g. a geothermal gradient);
+    ``q_in_W_m`` - heat input per metre (direct electrical heating); ``z0``/``L0`` - elevation and
+    distance at the inlet, for multi-section profiles."""
     p = unit["params"]
     s = _one(ins, "in")
     if s.empty:
@@ -1068,41 +1074,69 @@ def calc_pipe(unit, ins, fp):
     n = max(1, int(round(p.get("n_seg", 10))))
     dL = L / n
     U = float(p.get("U", 0.0)) if p.get("heat") == "Overall U to ambient" else 0.0
-    Tamb = float(p.get("T_amb", 4.0)) + K0
+    Tamb_in = float(p.get("T_amb", 4.0)) + K0
+    Tamb_out = float(p.get("T_amb_out", p.get("T_amb", 4.0))) + K0
+    q_in = float(p.get("q_in_W_m", 0.0) or 0.0)            # W/m heat input (DEH)
+    z0, L0 = float(p.get("z0", 0.0)), float(p.get("L0", 0.0))
     method = p.get("method", "Beggs & Brill")
     sigma = float(p.get("sigma", 0.02))
     n_mol = s.F * 1000.0 / 3600.0            # mol/s
     MW = s.MW
     st = s
-    prof = {"L": [0.0], "P": [s.P], "T": [s.T - K0], "HL": [], "regime": [], "vm": []}
+    prof = {"L": [L0], "P": [s.P], "T": [s.T - K0], "HL": [], "regime": [], "vm": [], "z": [z0],
+            "Hm": [_hyd_margin(s, fp)]}
     Qtot = 0.0
     evr = 0.0
 
-    def advance(state, grad):
-        P2 = state.P - grad * dL / 1e5
+    def advance(state, grad, Tamb, h):
+        P2 = state.P - grad * h / 1e5
         if P2 <= 0.2:
             raise UnitError(f"{unit['name']}: pressure falls below 0.2 bar - line too small or too long")
-        # heat loss: exact exponential approach to ambient over the increment (stable for any U)
+        # heat loss: exact exponential approach to ambient over the step (stable for any U)
         ncp = n_mol * max(state.flash.Cp, 1.0)                # W/K
-        q = ncp * (state.T - Tamb) * (1.0 - math.exp(-U * math.pi * D * dL / ncp)) if U > 0 else 0.0
-        H2 = state.H - q / n_mol - MW / 1000.0 * G * dL * math.sin(theta)
+        q = ncp * (state.T - Tamb) * (1.0 - math.exp(-U * math.pi * D * h / ncp)) if U > 0 else 0.0
+        q -= q_in * h
+        H2 = state.H - q / n_mol - MW / 1000.0 * G * h * math.sin(theta)
         fr = _ph(fp, state.z, P2, H2, state.T, state.flash.Kset)
         return make_stream("", fp, state.F, state.z, fr), q
 
+    h_min = dL / 256.0
     for k in range(n):
+        Tamb = Tamb_in + (Tamb_out - Tamb_in) * (k + 0.5) / n
         g1, d1 = pipe_gradient(fp, st, D, eps, theta, method, sigma)
-        trial, _ = advance(st, g1)
-        g2, d2 = pipe_gradient(fp, trial, D, eps, theta, method, sigma)
-        st_new, q = advance(st, 0.5 * (g1 + g2))           # Heun predictor-corrector
-        Qtot += q
+        # Heun predictor-corrector; where the pressure falls fast (gas expanding near the end of a long
+        # line) the increment is sub-stepped so that no step loses more than 5 % of the local pressure
+        rem, cur, g = dL, st, g1
+        while rem > dL * 1e-9:
+            h = rem
+            if g > 0 and g * h / 1e5 > 0.05 * cur.P:
+                h = min(rem, max(0.05 * cur.P * 1e5 / g, h_min))
+            while True:
+                try:
+                    trial, _ = advance(cur, g, Tamb, h)
+                    g2, _ = pipe_gradient(fp, trial, D, eps, theta, method, sigma)
+                    nxt, q = advance(cur, 0.5 * (g + g2), Tamb, h)
+                    break
+                except UnitError:
+                    if h <= h_min * 1.0001:
+                        raise
+                    h = max(h / 4.0, h_min)
+            Qtot += q
+            rem -= h
+            cur = nxt
+            if rem > dL * 1e-9:
+                g, _ = pipe_gradient(fp, cur, D, eps, theta, method, sigma)
+        st_new = cur
         evr = max(evr, d1["vm"] / (122.0 / math.sqrt(max(d1["rho_ns"], 1e-6))))
         prof["HL"].append(d1["HL"])
         prof["regime"].append(d1["regime"])
         prof["vm"].append(d1["vm"])
         st = st_new
-        prof["L"].append((k + 1) * dL)
+        prof["L"].append(L0 + (k + 1) * dL)
         prof["P"].append(st.P)
         prof["T"].append(st.T - K0)
+        prof["z"].append(z0 + (k + 1) * dL * math.sin(theta))
+        prof["Hm"].append(_hyd_margin(st, fp))
     _, dl = pipe_gradient(fp, st, D, eps, theta, method, sigma)
     prof["HL"].append(dl["HL"])
     prof["regime"].append(dl["regime"])
@@ -1116,11 +1150,25 @@ def calc_pipe(unit, ins, fp):
            "Liquid inventory [m³]": float(np.mean(prof["HL"])) * math.pi * D * D / 4 * L,
            "Erosional velocity ratio (API RP 14E, C=100)": evr, "Heat loss [kW]": Qtot / 1000.0,
            "Inclination [°]": math.degrees(theta)}
+    hm = [x for x in prof["Hm"] if x is not None]
+    if hm:
+        res["Min. hydrate margin along line [°C]"] = min(hm)
     if evr > 1.0:
         res["Warning"] = f"Mixture velocity exceeds the API RP 14E erosional velocity (ratio {evr:.2f})"
     unit["_profile"] = prof
-    en = [_energy(unit, -Qtot / 1000.0)] if U > 0 else []
+    en = [_energy(unit, -Qtot / 1000.0)] if (U > 0 or q_in > 0) else []
     return {"out": [make_stream("", fp, st.F, st.z, st.flash)]}, res, en
+
+
+def _hyd_margin(st, fp):
+    """Hydrate margin (T - inhibited hydrate T, °C) of a stream that carries water, else None."""
+    from .streams import hydrate_state
+    if st.empty or fp.iw < 0 or st.z[fp.iw] <= 1e-9:
+        return None
+    try:
+        return hydrate_state(st, fp)[2]
+    except Exception:
+        return None
 
 
 # ---- column ---------------------------------------------------------------
@@ -1222,3 +1270,8 @@ CALC = {
     "heater": calc_heater, "cooler": calc_cooler, "hx": calc_hx, "aircooler": calc_aircooler,
     "pipe": calc_pipe, "column": calc_column,
 }
+
+
+# ---- subsea (SURF) equipment: procsim/surf.py registers itself on import ----
+PROFILE_TYPES = ("pipe", "well", "jumper", "flowline", "riser")     # units that leave a line profile
+from . import surf as _surf   # noqa: E402,F401  (needs the helpers above; works whichever module loads first)

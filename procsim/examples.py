@@ -193,10 +193,66 @@ def condensate_stabiliser():
     return m
 
 
+
+def subsea_field(n_wells=4, boosted=False):
+    """SURF tie-back: wells (IPR + tubing) -> Xmas trees with chokes -> 4-slot template -> spool ->
+    pipe-in-pipe flowline -> SSIV -> lazy-wave riser -> arrival separator.  Generic illustrative data.
+
+    ``boosted``: a late-life, long step-out variant - depleted reservoir, chokes nearly open, a subsea
+    wet-gas compressor after the template and a 45 km flowline."""
+    m = new_model()
+    wf = dict(WET_GAS)
+    wells = [(320.0, 1.20, 520.0, 3450.0), (312.0, 1.00, 480.0, 3300.0), (328.0, 1.35, 560.0, 3600.0),
+             (316.0, 1.10, 500.0, 3400.0)][:n_wells]
+    dp_res, qf, P_choke, L_fl, dx = (0.0, 1.0, 150.0, 25000.0, 0) if not boosted else (110.0, 0.75, 50.0, 45000.0, 150)
+    tmp = add_unit(m, "template", 330, 200, "TMP-100 Template", {"template": "4-slot template"})
+    for k, (Pr, q, C, md) in enumerate(wells, start=1):
+        y = 20 + 120 * (k - 1)
+        f = add_unit(m, "feed", -260, y, f"Reservoir W-{k}", {"T_C": 110.0, "P_bar": Pr - dp_res, "flow_basis": "MSm³/d",
+                                                              "flow": q * qf, "composition": dict(wf)})
+        w = add_unit(m, "well", -110, y, f"W-{k}", {"C": C, "n": 0.8, "MD": md, "TVD": 3000.0, "ID": 125.0})
+        xt = add_unit(m, "xmas_tree", 60, y, f"XT-{k}", {"tree": "Horizontal Xmas tree (HXT)", "P_out": P_choke})
+        connect(m, f, "out", w, "in")
+        connect(m, w, "out", xt, "in", f"W-{k} wellhead")
+        connect(m, xt, "out", tmp, "in", f"XT-{k} outlet")
+    up = tmp
+    if boosted:
+        bst = add_unit(m, "subsea_booster", 520, 200, "P-100 Subsea compressor",
+                       {"btype": "Wet-gas compressor", "dP": 55.0})
+        connect(m, tmp, "out", bst, "in", "Template outlet")
+        up = bst
+    sp = add_unit(m, "jumper", 540 + dx, 200, "J-100 Spool", {"kind": "Rigid spool (Z-shape)", "ID": 305.0})
+    fl = add_unit(m, "flowline", 750 + dx, 200, "FL-100 Flowline", {"design": "Pipe-in-pipe", "length": L_fl,
+                                                                       "ID": 305.0, "dz": -100.0, "n_seg": 10})
+    sv = add_unit(m, "subsea_valve", 930 + dx, 200, "XV-100 SSIV", {"kind": "SSIV"})
+    rs = add_unit(m, "riser", 1090 + dx, 130, "RSR-100 Riser", {"rtype": "Lazy-wave (flexible)", "depth": 350.0,
+                                                               "ID": 305.0 if boosted else 254.0, "fl_len": L_fl,
+                                                               "n_seg": 9})
+    ar = add_unit(m, "separator3", 1270 + dx, 60, "V-100 Arrival sep")
+    gas = add_unit(m, "product", 1450 + dx, -30, "Gas to process")
+    cond = add_unit(m, "product", 1470 + dx, 160, "Condensate")
+    wat = add_unit(m, "product", 1340 + dx, 240, "Produced water")
+    connect(m, up, "out", sp, "in", "Booster outlet" if boosted else "Template outlet")
+    connect(m, sp, "out", fl, "in", "Flowline inlet")
+    connect(m, fl, "out", sv, "in", "Riser base")
+    connect(m, sv, "out", rs, "in", "Riser inlet")
+    connect(m, rs, "out", ar, "feed", "Topside arrival")
+    connect(m, ar, "vapour", gas, "in")
+    connect(m, ar, "oil", cond, "in")
+    connect(m, ar, "water", wat, "in")
+    return m
+
+
+def subsea_field_boosted():
+    return subsea_field(boosted=True)
+
+
 EXAMPLES = {
     "Two-stage gas compression with liquid recycle": compression_train,
     "Oil stabilisation: 3-stage separation + recompression": oil_stabilisation,
     "JT dew-point control: gas/gas exchanger + LTS + Adjust": jt_dewpoint,
     "Subsea tie-back: MEG injection + flowline + riser (Beggs & Brill, hydrate check)": subsea_tieback,
     "Condensate stabiliser column with TVP spec (Adjust)": condensate_stabiliser,
+    "Subsea field (SURF): 4 wells, template, pipe-in-pipe flowline, lazy-wave riser": subsea_field,
+    "Subsea boosting (SURF): late life, wet-gas compressor, 45 km step-out": subsea_field_boosted,
 }

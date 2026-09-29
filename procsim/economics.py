@@ -34,6 +34,7 @@ DEFAULTS = {
     "co2_tax": 2000.0,            # currency / t CO2 (tax + quota; enter your own)
 }
 BOE_PER_SM3OE = 6.29
+ENV_TYPES = ("pipe", "well", "flowline", "riser", "jumper")   # heat to/from the sea or formation
 
 
 def params(model):
@@ -70,6 +71,13 @@ def compute(model, sol, p=None):
         duty = e.duty_kW
         if abs(duty) < 1e-9:
             continue
+        if utype in ENV_TYPES:
+            # heat exchanged with the surroundings (sea, formation) and reservoir heat on inflow: no utility cost
+            rows.append({"Energy stream": e.name, "Unit": e.unit, "Category": "Environment",
+                         "Utility": "Reservoir heat" if e.name.endswith(" reservoir") else "Heat exchange with ambient",
+                         "Duty [kW]": duty, "Energy [MWh/y]": abs(duty) * hours / 1000.0, "Fuel gas [Sm³/h]": 0.0,
+                         "Energy cost [cur/y]": 0.0, "CO₂ [t/y]": 0.0, "CO₂ cost [cur/y]": 0.0})
+            continue
         if e.kind == "work":
             cat = "Power (credit)" if duty < 0 else "Power"
             cost, co2, fuel = power_cost(duty)
@@ -90,7 +98,7 @@ def compute(model, sol, p=None):
         else:
             cat = "Cooling"
             energy = -duty * hours / 1000.0
-            if utype in ("aircooler", "pipe"):
+            if utype == "aircooler":
                 cost = co2 = fuel = 0.0
                 util = "Air (fan power counted as power)" if utype == "aircooler" else "Heat loss to ambient"
             else:
@@ -101,6 +109,16 @@ def compute(model, sol, p=None):
                      "Duty [kW]": duty, "Energy [MWh/y]": energy, "Fuel gas [Sm³/h]": fuel,
                      "Energy cost [cur/y]": cost, "CO₂ [t/y]": co2,
                      "CO₂ cost [cur/y]": co2 * float(p["co2_tax"])})
+
+    # direct electrical heating of flowlines is electric power
+    for uid, u in model["units"].items():
+        deh = (sol.results.get(uid) or {}).get("DEH power [kW]")
+        if u["type"] == "flowline" and deh:
+            cost, co2, fuel = power_cost(deh)
+            rows.append({"Energy stream": f"DEH-{u['name']}", "Unit": u["name"], "Category": "Power",
+                         "Utility": p["driver"] + " (direct electrical heating)", "Duty [kW]": deh,
+                         "Energy [MWh/y]": deh * hours / 1000.0, "Fuel gas [Sm³/h]": fuel, "Energy cost [cur/y]": cost,
+                         "CO₂ [t/y]": co2, "CO₂ cost [cur/y]": co2 * float(p["co2_tax"])})
 
     gas = liq = 0.0
     for sid, s in model["streams"].items():

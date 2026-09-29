@@ -21,7 +21,7 @@ import os                                              # noqa: E402
 import sys                                             # noqa: E402
 import traceback                                       # noqa: E402
 
-APP_VERSION = "4.1"
+APP_VERSION = "5.3"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _PKGS = ("procsim", "ui", "pfd_canvas")
 if _ROOT not in sys.path:
@@ -33,7 +33,7 @@ def _code_fingerprint():
     for pkg in _PKGS:
         for dirpath, _, files in os.walk(os.path.join(_ROOT, pkg)):
             for f in files:
-                if f.endswith((".py", ".js", ".html")):
+                if f.endswith((".py", ".js", ".html", ".csv")):
                     path = os.path.join(dirpath, f)
                     try:
                         stt = os.stat(path)
@@ -59,7 +59,7 @@ sys._pfs_code_fp = _fp_now
 
 
 def _import_project():
-    global pfd_canvas, EXAMPLES, new_model, normalize, S, panels, fluid_tab, workbook_tab, theme, ui
+    global pfd_canvas, EXAMPLES, new_model, normalize, S, panels, fluid_tab, workbook_tab, theme, ui, procsim
     from pfd_canvas import pfd_canvas
     from procsim.examples import EXAMPLES
     from procsim.flowsheet import new_model, normalize
@@ -67,7 +67,8 @@ def _import_project():
     from ui import panels
     from ui.fluid import fluid_tab, workbook_tab
     from ui import theme
-    import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units   # noqa: E401,F401 - import everything up front
+    import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units, ui.surf, ui.scenarios   # noqa: E401,F401
+    import procsim.surf, procsim.subsea_design, procsim.subsea_ops, procsim.scenarios   # noqa: E401,F401
     import procsim, ui
     if getattr(procsim, "__version__", None) != APP_VERSION or getattr(ui, "__version__", None) != APP_VERSION:
         raise ImportError(f"version mismatch: app.py {APP_VERSION}, procsim {getattr(procsim, '__version__', '?')}, "
@@ -95,10 +96,12 @@ ss = st.session_state
 if _code_changed:
     # objects built by the previous code version must not be reused
     ss.sol, ss.sol_hash = None, None
+    ss.sol_cache = {}
     ss.widget_ver = ss.get("widget_ver", 0) + 1
 from ui import units as UN                             # noqa: E402
 
 UN.set_system(ss.get("units_sys", UN.SI))
+procsim.surf.activate(ss.model.get("surf_catalogue"))   # the flowsheet's SURF catalogue feeds the property views
 S.process_canvas_value("pfd")
 
 # ------------------------------------------------------------------ sidebar
@@ -110,6 +113,14 @@ with st.sidebar:
         S.ensure_solved(force=True)
     ss.auto_solve = c2.toggle("Auto-solve", value=ss.auto_solve,
                               help="Re-solve whenever a specification or connection changes")
+
+    def _limit_changed():
+        ss.auto_paused = False
+
+    st.number_input("Auto-solve time limit [s]", min_value=1.0, max_value=600.0, step=1.0, format="%.4g",
+                    value=float(ss.get("auto_limit", S.AUTO_LIMIT_DEFAULT)), key="auto_limit", on_change=_limit_changed,
+                    help="If a solve takes longer than this, auto-solve pauses until you press Solve — large subsea "
+                         "flowsheets stay responsive while you edit several specifications")
     st.divider()
     st.markdown("**Flowsheet**")
     ex = st.selectbox("Example", list(EXAMPLES.keys()), label_visibility="collapsed")
@@ -152,12 +163,16 @@ S.ensure_solved()
 theme.header()
 
 # ------------------------------------------------------------------ main
-tab_pfd, tab_an, tab_wb, tab_case, tab_fluid, tab_help = st.tabs(
-    ["🧩 Flowsheet", "📈 Analysis", "📋 Workbook", "🔬 Case study", "🧪 Fluid package", "ℹ️ Help & methods"])
+tab_pfd, tab_an, tab_wb, tab_case, tab_sc, tab_surf, tab_fluid, tab_help = st.tabs(
+    ["🧩 Flowsheet", "📈 Analysis", "📋 Workbook", "🔬 Case study", "⚖️ Scenarios", "🌊 Subsea (SURF)",
+     "🧪 Fluid package", "ℹ️ Help & methods"])
 
 with tab_pfd:
     if ss.solve_error:
         st.error(ss.solve_error)
+    if ss.get("auto_paused") and ss.sol is not None:
+        st.info(f"Auto-solve is paused: the last solve took {ss.sol.seconds:.1f} s (limit {ss.get('auto_limit', 10):g} s). "
+                "Edit freely, then press **▶ Solve** — or raise the limit in the sidebar.")
     pfd_canvas(S.canvas_structure(ss.model), S.catalogue_payload(), S.results_payload(), ss.nonce,
                selected=ss.selected, height=height, status=S.status_line(), fit=ss.fit, key="pfd")
     ss.fit = False
@@ -176,6 +191,12 @@ with tab_wb:
 
 with tab_case:
     ui.casestudy.case_study_tab()
+
+with tab_sc:
+    ui.scenarios.scenarios_tab()
+
+with tab_surf:
+    ui.surf.surf_tab()
 
 with tab_fluid:
     fluid_tab()

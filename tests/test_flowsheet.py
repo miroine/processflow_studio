@@ -17,7 +17,7 @@ from procsim.flowsheet import (new_model, add_unit, connect, solve, build_fluid,
 from procsim.examples import EXAMPLES, WET_GAS, DRY_GAS                        # noqa: E402
 from procsim.streams import stream_properties                                   # noqa: E402
 from procsim.thermo import FluidPackage, R                                      # noqa: E402
-from procsim.unitops import CATALOGUE                                            # noqa: E402
+from procsim.unitops import CATALOGUE, PROFILE_TYPES                             # noqa: E402
 
 c = Checker("flowsheet")
 
@@ -54,9 +54,10 @@ def unit_balances(model, sol, label):
             pass   # expander energy stream is negative (work out) -> hin + q = hout
         ref = max(abs(hin), abs(hout), 1.0)
         err = abs(hin + q - hout) / ref
-        if u["type"] == "pipe":
+        if u["type"] in PROFILE_TYPES:
             # potential energy of the elevation change leaves the enthalpy balance
-            pe = sum(x.F * x.MW for x in ins) * 9.80665 * u["params"].get("dz", 0.0) / 1000.0 / 3600.0
+            dz = sol.results[uid].get("Elevation change [m]", u["params"].get("dz", 0.0))
+            pe = sum(x.F * x.MW for x in ins) * 9.80665 * dz / 1000.0 / 3600.0
             err = abs(hin + q - pe - hout) / ref
         if u["type"] == "separator" or u["type"] == "separator3":
             err = abs(hin + u["params"].get("duty", 0.0) - hout) / ref

@@ -125,13 +125,16 @@ def case_study_tab():
         else:
             values = np.linspace(lo, hi, int(n))
             prog = st.progress(0.0, text="Starting…")
+            deps = list(dict.fromkeys(deps))                       # no repeated results
             df = run_case(model, uid, key, values, deps, prog)
-            ss.case = {"df": df, "xlabel": f"{uname} · {labels[key]}", "deps": [_label(o) for o in deps]}
+            # the swept input gets its own label: recording the same quantity as a result (e.g. sweep the feed
+            # temperature and also record that stream's temperature) must not create two identical columns
+            ss.case = {"df": df, "xlabel": f"Input: {uname} · {labels[key]}", "deps": [_label(o) for o in deps]}
     case = ss.get("case")
     if not case:
         st.caption("The base flowsheet is not changed by a case study; each case is solved on a copy.")
         return
-    df = U.df_display(case["df"].rename(columns={"x": case["xlabel"]}))
+    df = U.unique_columns(U.df_display(case["df"].rename(columns={"x": case["xlabel"]})))
     ren = {c: U.key(c) for c in [case["xlabel"]] + case["deps"]}
     ok = df["Converged"].sum()
     st.caption(f"{ok} of {len(df)} cases converged.")

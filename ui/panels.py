@@ -7,7 +7,7 @@ import streamlit as st
 
 from procsim.components import LIBRARY
 from procsim.flowsheet import rename, delete, port_edges, build_fluid
-from procsim.unitops import CATALOGUE, parse_fractions
+from procsim.unitops import CATALOGUE, parse_fractions, PROFILE_TYPES
 from procsim.streams import stream_properties, phase_table, composition_table
 
 from .state import fmt, bump, connections, sol_is_current
@@ -275,9 +275,9 @@ def unit_view(uid):
         tabs.append("Heat curve")
     if t == "recycle":
         tabs.append("Convergence")
-    if t == "pipe":
+    if t in PROFILE_TYPES:
         tabs.append("Profile")
-    if t == "compressor":
+    if t in ("compressor", "subsea_booster"):
         tabs.append("Performance curve")
     if t == "column":
         tabs.append("Profiles")
@@ -306,12 +306,17 @@ def unit_view(uid):
                 st.plotly_chart(charts.hx_figure(c, u["name"]), width="stretch", key=f"hxfig_{uid}")
             else:
                 st.caption("Solve the flowsheet to see the heat curve.")
-    if t == "pipe":
+    if t in PROFILE_TYPES:
         with tb[2]:
             prof = sol.profiles.get(uid) if sol else None
             if prof:
                 st.plotly_chart(charts.pipe_figure(prof, u["name"]), width="stretch", key=f"pipefig_{uid}")
+                if t != "pipe":
+                    st.plotly_chart(charts.surf_profile_figure(prof, u["name"]), width="stretch",
+                                    key=f"surffig_{uid}")
                 st.plotly_chart(charts.holdup_figure(prof, u["name"]), width="stretch", key=f"pipehl_{uid}")
+                if t == "well":
+                    well_deliverability_panel(uid, u, sol, res)
                 import pandas as _pd
                 n = len(prof["L"])
                 st.dataframe(U.df_display(_pd.DataFrame({"Distance [m]": prof["L"], "P [bar(a)]": prof["P"],
@@ -324,6 +329,9 @@ def unit_view(uid):
     if t == "compressor":
         with tb[2]:
             compressor_curve_panel(uid, u, sol, res)
+    if t == "subsea_booster":
+        with tb[2]:
+            booster_curve_panel(uid, u, sol, res)
     if t == "column":
         with tb[2]:
             column_profiles_panel(uid, u, sol)
@@ -552,3 +560,81 @@ def column_profiles_panel(uid, u, sol):
     df = U.df_display(pd.DataFrame({"Stage": prof["labels"], "T [°C]": prof["T"], "P [bar(a)]": prof["P"],
                                     "Liquid [kmol/h]": prof["L"], "Vapour [kmol/h]": prof["V"]}))
     st.dataframe(df.map(lambda v: fmt(v) if not isinstance(v, str) else v), hide_index=True, width="stretch")
+
+
+def well_deliverability_panel(uid, u, sol, res):
+    """On-demand wellhead-pressure vs rate curve for a well (nodal-analysis view)."""
+    from procsim import surf
+    ss = st.session_state
+    key = f"deliv_{uid}"
+    if st.button("Compute deliverability curve", key=f"{key}_btn",
+                 help="Wellhead pressure at 10 %–200 % of the current rate (about 0.5–1 s per point)"):
+        sid = (port_edges(ss.model, uid, "in").get("in") or [None])[0]
+        s_in = sol.streams.get(sid) if sid else None
+        if s_in is not None and not s_in.empty:
+            with st.spinner("Computing the deliverability curve…"):
+                ss[key] = {"hash": ss.sol_hash, "pts": surf.deliverability_curve(u, s_in, sol.fp)}
+    d = ss.get(key)
+    if not d or d["hash"] != ss.sol_hash:
+        st.caption("Press **Compute deliverability curve** for the wellhead pressure the well delivers at other rates.")
+        return
+    liquid = u["params"].get("ipr", surf.IPR_GAS) != surf.IPR_GAS
+    q = (res.get("Oil/condensate rate [Sm³/d]", 0) + res.get("Water rate [Sm³/d]", 0)) if liquid else res.get("Gas rate [MSm³/d]")
+    op = (q, res["Wellhead P [bar(a)]"]) if q is not None and res.get("Wellhead P [bar(a)]") is not None else None
+    target = u["params"].get("WHP") if u["params"].get("rate_spec") == surf.RATE_WHP else None
+    st.plotly_chart(charts.deliverability_figure(d["pts"], u["name"], op, target, liquid), width="stretch",
+                    key=f"{key}_fig")
+
+
+def booster_curve_panel(uid, u, sol, res):
+    """Design-speed curve of one subsea booster machine: boost ΔP and efficiency vs actual flow per machine."""
+    from procsim.surf import typical_booster_curve
+    ss = st.session_state
+    p = u["params"]
+    curve = p.get("curve") or {}
+    st.caption("Design-speed curve of **one machine**: actual inlet flow [m³/h], boost ΔP [bar], efficiency [%]. "
+               "The first row is the minimum-flow limit, the last the run-out. Other speeds follow the fan laws. "
+               "With a curve, a boost or outlet-pressure spec reports the speed needed; **Performance curve** as the "
+               "specification lets the curve and speed set the boost. Machines in parallel split the flow; in series "
+               "they share the boost.")
+    si_cols = ["Actual liquid flow [m³/h]", "Boost ΔP [bar]", "Efficiency [%]"]
+    df = pd.DataFrame({si_cols[0]: curve.get("flow", []), si_cols[1]: curve.get("head", []),
+                       si_cols[2]: curve.get("eff", [])})
+    dfd = U.df_display(df)
+    ed = st.data_editor(dfd, key=_wkey(uid, "__bcurve"), num_rows="dynamic", width="stretch",
+                        column_config={c: st.column_config.NumberColumn(format="%.2f") for c in dfd.columns})
+    cols = list(dfd.columns)
+    new = {k: [float(x) for x in U.column_to_si(si, ed[c].dropna())]
+           for k, si, c in zip(("flow", "head", "eff"), si_cols, cols)}
+    old = {k: list(map(float, curve.get(k, []))) for k in new}
+    changed = len({len(v) for v in new.values()}) == 1 and (
+        [len(v) for v in new.values()] != [len(v) for v in old.values()] or
+        any(abs(a - b) > 1e-6 * max(1.0, abs(b)) for k in new for a, b in zip(new[k], old[k])))
+    if changed:
+        p["curve"] = new if new["flow"] else {}
+        st.rerun()
+    c1, c2 = st.columns(2)
+    q, dp, eff = res.get("Flow per machine [m³/h]"), res.get("Boost per machine [bar]"), res.get("Efficiency used [%]")
+    if c1.button("Generate a typical curve through the current operating point", key=_wkey(uid, "__genbcurve"),
+                 disabled=not (q and dp and eff), width="stretch"):
+        p["curve"] = typical_booster_curve(q, dp, eff)
+        p["N_design"] = float(p.get("speed", 3600.0) or 3600.0)
+        ss.widget_ver += 1
+        st.rerun()
+    if c2.button("Clear curve", key=_wkey(uid, "__clrbcurve"), disabled=not curve, width="stretch"):
+        p["curve"] = {}
+        if p.get("spec") == "Performance curve":
+            p["spec"] = "Pressure boost"
+        ss.widget_ver += 1
+        st.rerun()
+    mp = sol.maps.get(uid) if sol else None
+    if mp:
+        st.plotly_chart(charts.booster_map(mp, u["name"]), width="stretch", key=f"bmap_{uid}")
+        k = [x for x in ("Speed [rpm]", "Speed to meet duty [rpm]", "Minimum-flow margin [%]", "Curve efficiency [%]")
+             if res.get(x) is not None]
+        if k:
+            cc = st.columns(len(k))
+            for c, key in zip(cc, k):
+                c.metric(key, fmt(res[key]))
+    elif curve:
+        st.caption("Solve the flowsheet to place the operating point on the map.")

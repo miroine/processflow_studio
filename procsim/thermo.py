@@ -128,6 +128,7 @@ class FluidPackage:
         # polar components that belong to the aqueous phase (for phase labelling)
         self.polar = np.array([c.key in ("H2O", "MeOH", "MEG") for c in self.comps])
         self._kcache = {}
+        self._tcache = {}
         # Peneloux with a Rackett Z_RA works well for hydrocarbons but badly for
         # water; calibrate water's shift to its 15 degC density instead.
         for i, c in enumerate(self.comps):
@@ -169,19 +170,28 @@ class FluidPackage:
     # --------------------------------------------------------- mixture
     def _mix(self, x, T, idx):
         """Return mixture a, b, dadT, and the vector sum_j x_j a_ij (for lnphi)."""
-        a, dadT = self._a(T, idx)
         key = idx.tobytes()
-        k = self._kcache.get(key)
-        if k is None:
-            k = self.kij[np.ix_(idx, idx)]
-            self._kcache[key] = k
-        sqa = np.sqrt(a)
-        aij = (1.0 - k) * np.outer(sqa, sqa)
+        # a_ij(T) and da_ij/dT depend on T and the component set only: flashes evaluate many compositions at the
+        # same temperature (successive substitution, stability tests), so keep the matrices for recent T
+        tk = (T, key)
+        hit = self._tcache.get(tk)
+        if hit is None:
+            a, dadT = self._a(T, idx)
+            k = self._kcache.get(key)
+            if k is None:
+                k = self.kij[np.ix_(idx, idx)]
+                self._kcache[key] = k
+            sqa = np.sqrt(a)
+            aij = (1.0 - k) * np.outer(sqa, sqa)
+            # d(aij)/dT = (1-k) * 0.5 * sqrt(ai aj) (ai'/ai + aj'/aj)
+            r = dadT / a
+            daij = 0.5 * aij * (r[:, None] + r[None, :])
+            if len(self._tcache) > 512:
+                self._tcache.clear()
+            self._tcache[tk] = hit = (aij, daij)
+        aij, daij = hit
         xa = aij @ x
         am = float(x @ xa)
-        # d(aij)/dT = (1-k) * 0.5 * sqrt(ai aj) (ai'/ai + aj'/aj)
-        r = dadT / a
-        daij = 0.5 * aij * (r[:, None] + r[None, :])
         dam = float(x @ daij @ x)
         bm = float(x @ self.b[idx])
         return am, bm, dam, xa, aij, daij
@@ -349,8 +359,11 @@ class FluidPackage:
 
         def run(rows):
             self._last_lnK = None
+            self._last_conv = False
             ph = self._ss(zl, T, P, idx, np.array(rows))
-            if ph is not None and len(ph) > 1 and self._last_lnK is not None \
+            # keep K as a warm-start seed only when every row describes a present phase: with a vanished
+            # reference phase the relative K are ill-defined and would seed a wrong (unconverged) split
+            if ph is not None and len(ph) == nrow + 1 and self._last_conv and self._last_lnK is not None \
                     and self._last_lnK.shape[0] == nrow:
                 full = np.ones((nrow, self.n))
                 full[:, idx] = np.exp(self._last_lnK)
@@ -385,11 +398,11 @@ class FluidPackage:
         phases = None
         if K0 is not None and np.ndim(K0) == 2 and K0.shape == (nrow, self.n):
             phases = run([np.maximum(K0[r][idx], 1e-30) for r in range(nrow)])      # warm start
-            if phases is not None and len(phases) > 1 and not complete(phases):
+            if phases is not None and (not self._last_conv or (len(phases) > 1 and not complete(phases))):
                 phases = None
         elif K0 is not None and np.ndim(K0) == 1 and len(K0) == self.n:
             phases = run([np.maximum(K0[idx], 1e-30)] + ([free_water()] if three else []))
-            if phases is not None and len(phases) > 1 and not complete(phases):
+            if phases is not None and (not self._last_conv or (len(phases) > 1 and not complete(phases))):
                 phases = None
         if phases is None or len(phases) == 1:
             # Michelsen stability test first: a stable feed is single phase (cheap exit);
@@ -536,7 +549,12 @@ class FluidPackage:
             # trivial-solution detection: all non-ref phases collapsing onto the reference
             if it > 8 and np.all(np.max(np.abs(lnK), axis=1) < 1e-4):
                 return None
+            # the reference phase has vanished from a three-phase split: its K are then ill-defined and
+            # SS crawls, so re-reference to the two phases that remain and finish as a two-phase flash
+            if npha == 3 and it > 6 and beta[0] <= 0.0 and beta[1] > 0.0 and beta[2] > 0.0:
+                return self._ss(zl, T, P, idx, np.exp(lnK[1] - lnK[0])[None, :])
         self._last_lnK = lnK
+        self._last_conv = err < 1e-7
         K = np.vstack([np.ones(idx.size), np.exp(lnK)])
         beta, E = self._rr(zl, K, beta)
         xref = zl / E

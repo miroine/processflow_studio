@@ -142,6 +142,14 @@ def build_report(model, sol, svg=None, title="Process simulation report", projec
                      _table(["Quantity", "Value"], erows))
     except Exception:            # economics are optional in the report
         pass
+    try:
+        parts.append(_surf_section(model, sol))
+    except Exception as e:       # optional section: note the failure instead of breaking the report
+        parts.append(f"<p class='note'>Subsea section unavailable ({_e(type(e).__name__)}: {_e(e)})</p>")
+    try:
+        parts.append(_scenario_section(model, sol))
+    except Exception as e:       # optional section: note the failure instead of breaking the report
+        parts.append(f"<p class='note'>Scenario comparison unavailable ({_e(type(e).__name__)}: {_e(e)})</p>")
     fl = [[c.key, c.name, fmt(c.MW), fmt(c.Tc - 273.15), fmt(c.Pc), fmt(c.omega)] for c in fp.comps]
     parts.append("<h2>Fluid package</h2><p>Peng-Robinson (1978), Peneloux volume shift, LBC viscosity; "
                  "standard conditions 15 °C / 1.01325 bar.</p>" +
@@ -152,3 +160,63 @@ def build_report(model, sol, svg=None, title="Process simulation report", projec
     parts.append(f"<div class='credit'>Made by <b>{_e(AUTHOR)}</b> · {_e(DISCLAIMER)}</div>")
     parts.append("</body></html>")
     return "".join(parts)
+
+
+def _surf_section(model, sol):
+    """Subsea equipment list, CAPEX roll-up and umbilical sizing (only when the flowsheet has SURF units)."""
+    from procsim import surf, subsea_design as sd
+    if not any(u["type"] in surf.SURF_TYPES for u in model["units"].values()):
+        return ""
+    items, tot = sd.equipment_list(model, sol)
+    out = ["<h2 class='break'>Subsea system (SURF, screening)</h2>",
+           "<p class='note'>Class 5 estimate from the catalogue's illustrative costs and the cost basis saved with "
+           "this flowsheet.</p>",
+           _table(["Item", "Type", "Qty", "Unit", "Unit cost [MUSD]", "Total [MUSD]"],
+                  [[i["Item"], i["Type"], fmt(i["Qty"], 2), i["Unit"],
+                    "—" if i["Unit cost [MUSD]"] is None else fmt(i["Unit cost [MUSD]"], 2), fmt(i["Total [MUSD]"], 1)]
+                   for i in items]),
+           "<h3>CAPEX roll-up</h3>",
+           _table(["Line", "MUSD"], [[k.replace(" [MUSD]", ""), fmt(v, 1)] for k, v in tot.items() if k.endswith("[MUSD]")])]
+    um = sd.umbilical_design(model, sol)
+    out.append(f"<h3>Umbilical ({um['length_km']:.1f} km, {um['depth_m']:.0f} m water depth)</h3>")
+    out.append(_table(["Service", "Fluid", "Flow [L/h]", "Tube", "Friction ΔP [bar]", "Topside pump P [bar(a)]", "Status"],
+                      [[r["Service"], r["Fluid"], fmt(r["Flow [L/h]"], 0), r["Tube"],
+                        fmt(r.get("Friction ΔP [bar]"), 1), fmt(r.get("Topside pump P [bar(a)]"), 1), r["Status"]]
+                       for r in um["services"]]))
+    cab = um["cable"]
+    if cab:
+        out.append(f"<p>Booster power {um['booster_kW']:,.0f} kW: {cab['Voltage [kV]']:g} kV, 3 × {cab['Conductor [mm²]']} "
+                   f"mm², {cab['Current [A]']:,.0f} A, voltage drop {cab['Voltage drop [%]']:.1f} %.</p>")
+    for n in um["notes"]:
+        out.append(f"<p class='warn'>{_e(n)}</p>")
+    from procsim import subsea_ops as so
+    sl = so.slug_assessment(model, sol)
+    if sl:
+        out.append("<h3>Slugging (screening, 20 % margin)</h3>")
+        out.append(_table(["Flowline", "Riser", "Regime at riser base", "1-in-1000 slug [m³]", "Severe-slug risk",
+                           "Severe slug [m³]", "Governing", "Design surge [m³]"],
+                          [[r["Flowline"], r["Riser"], r["hydro"]["Flow regime"],
+                            fmt(r["hydro"]["1-in-1000 slug volume [m³]"] if r["hydro"]["Slugging"] else 0.0, 1),
+                            str((r.get("severe") or {}).get("Risk", "—")).split(":")[0],
+                            fmt((r.get("severe") or {}).get("Severe slug volume [m³]"), 1), r["Governing slug"],
+                            fmt(r["Design surge volume [m³]"], 1)] for r in sl]))
+    cd = so.cooldown(model, sol)
+    if cd:
+        out.append("<h3>Cool-down after shut-in (screening)</h3>")
+        out.append(_table(["Line", "Type", "U [W/m²·K]", "Critical point [m]", "Hydrate T at shut-in [°C]", "No-touch time [h]"],
+                          [[r["Line"], r["Type"], fmt(r["U [W/m²·K]"], 1), fmt(r["Critical point [m]"], 0),
+                            fmt(r["Hydrate T at critical point [°C]"], 1),
+                            "no hydrate risk" if r["No-touch time [h]"] == float("inf") else fmt(r["No-touch time [h]"], 1)]
+                           for r in cd]))
+    return "".join(out)
+
+
+def _scenario_section(model, sol):
+    from procsim import scenarios as SC
+    scs = model.get("scenarios") or []
+    if not scs:
+        return ""
+    labels, cols = SC.comparison(scs, SC.scenario_kpis(model, sol))
+    rows = [[U.key(lab)] + [fmt(U.kv(lab, kp.get(lab))[1]) if not isinstance(kp.get(lab), str) else kp.get(lab)
+                            for kp in cols.values()] for lab in labels]
+    return "<h2 class='break'>Scenario comparison</h2>" + _table(["Result"] + list(cols), rows)

@@ -172,7 +172,22 @@ def df_display(df):
         si = m.group(1)
         out[c] = [value(si, v, str(c)) if not isinstance(v, str) else v for v in df[c]]
         ren[c] = key(str(c))
-    return out.rename(columns=ren)
+    return unique_columns(out.rename(columns=ren))
+
+
+def unique_columns(df):
+    """Make DataFrame column names unique ('Name', 'Name (2)', ...): Streamlit/Arrow and Plotly (narwhals)
+    both reject duplicate column names."""
+    seen = {}
+    cols = []
+    for c in df.columns:
+        n = seen.get(c, 0)
+        seen[c] = n + 1
+        cols.append(c if n == 0 else f"{c} ({n + 1})")
+    if cols != list(df.columns):
+        df = df.copy()
+        df.columns = cols
+    return df
 
 
 def column_to_si(si_label, values):

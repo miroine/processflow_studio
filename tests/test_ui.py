@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 os.chdir(ROOT)
 
 import streamlit as st                     # the stub                                    # noqa: E402
+S_ = None
 from check import Checker                  # noqa: E402
 
 c = Checker("ui")
@@ -306,6 +307,27 @@ if case is not None:
 c.eq("case study leaves the base model unchanged", ss.model["units"][fl]["params"]["U"], 8.0)
 print(f"  case study {time.time() - t:.1f} s")
 
+# regression (Streamlit Cloud): sweep a feed temperature AND record that same stream's temperature
+ws = uid_by_name("Wellstream")
+run()
+ss[f"cs_obj_{ss.cs_sig}"] = "Wellstream"
+run()
+ss[f"cs_key_{ws}"] = "T_C"
+run()
+ss[f"cs_lo_{ws}_T_C_SI"] = 70.0
+ss[f"cs_hi_{ws}_T_C_SI"] = 80.0
+ss["cs_n"] = 2
+same = [o for o in dependent_options(ss.model, ss.sol) if o[1] == "Wellstream" and o[2] == "Temperature [°C]"]
+st.HOOK["values"][f"cs_deps_{ss.cs_sig}_{ss.sol_hash[:8]}"] = same + same     # also picked twice
+st.HOOK["press"].add("cs_run")
+st.HOOK["errors"].clear()
+run()
+case = ss.get("case")
+c.check("sweeping a variable and recording the same quantity no longer duplicates columns",
+        case is not None and not case["df"].columns.duplicated().any() and len(case["df"]) == 2, "")
+ys = list(case["df"]["Wellstream · Temperature [°C]"]) if case is not None else []
+c.check("recorded feed temperature follows the swept input", [round(y, 6) for y in ys] == [70.0, 80.0], str(ys))
+
 # ---- 13. printable report --------------------------------------------------------------------------
 from ui.report import build_report   # noqa: E402
 ss.svg = "<svg xmlns='http://www.w3.org/2000/svg'><rect width='10' height='10'/></svg>"
@@ -407,6 +429,254 @@ c.check("anti-surge recycle shown on the compressor label", "ASC" in canvas_args
 pending.append(("units_sys", "SI (metric)"))
 run()
 c.check("back to SI: labels in °C", any("°C" in (v.get("label") or "") for v in canvas_args()["results"]["streams"].values()), "")
+
+# ---- 16b. subsea (SURF) example, property views, SURF tab and catalogue ------------------------------
+import json as _json                                   # noqa: E402
+SURF_EX = "Subsea field (SURF): 4 wells, template, pipe-in-pipe flowline, lazy-wave riser"
+st.HOOK["values"]["selectbox:Example:"] = SURF_EX
+st.HOOK["press"].add("Load example")
+run()
+a = canvas_args()
+surf_ids = [k for k, u in ss.model["units"].items() if u["type"] in
+            ("well", "xmas_tree", "template", "jumper", "flowline", "riser", "subsea_valve")]
+c.eq("SURF example has 13 subsea units", len(surf_ids), 13)
+c.check("SURF example solved, every subsea unit ok",
+        ss.sol is not None and all(ss.sol.status.get(k) == "ok" for k in surf_ids),
+        str({ss.model["units"][k]["name"]: ss.sol.errors.get(k) for k in surf_ids if ss.sol.status.get(k) != "ok"}))
+c.check("canvas palette offers the SURF group",
+        sum(1 for v in a["catalogue"].values() if v["category"] == "Subsea (SURF)") == 8, "")
+w1, tmp = uid_by_name("W-1"), uid_by_name("TMP-100 Template")
+c.check("well label shows wellhead P and T", a["results"]["units"][w1]["label"].startswith("WH"),
+        a["results"]["units"][w1]["label"])
+c.eq("template label shows slot use", a["results"]["units"][tmp]["label"], "4/4 slots")
+c.check("SURF tab: well table and equipment table rendered",
+        any("Wells: inflow and lift" in t for t in st.HOOK["texts"]) and
+        any("Subsea equipment" in t for t in st.HOOK["texts"]), "")
+c.check("SURF tab: pressure budget chart rendered",
+        any("Pressure budget" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("SURF tab: riser geometry / hydrate-margin chart rendered",
+        any("RSR-100 Riser — geometry" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+for k in surf_ids:
+    ss.selected = [k]
+    st.HOOK["errors"].clear()
+    run()
+    nm = ss.model["units"][k]["name"]
+    t = ss.model["units"][k]["type"]
+    c.check(f"property view renders without errors: {nm}", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+    if t in ("well", "jumper", "flowline", "riser"):
+        c.check(f"profile tab charts for {nm}",
+                sum(1 for f in st.HOOK["charts"] if nm in str(f.layout.get("title", ""))) >= 3, "")
+from ui.surf import apply_catalogue, budget_steps, reset_catalogue   # noqa: E402
+from procsim import surf as _surf                                     # noqa: E402
+steps = budget_steps(ss.model, ss.sol, w1)
+c.close("pressure budget starts at reservoir pressure", steps[0][1], 320.0, 1e-9)
+arr = next(s_ for s_, x in ss.model["streams"].items() if x["name"] == "Topside arrival")
+c.close("pressure budget ends at the arrival pressure", steps[-1][2], ss.sol.streams[arr].P, 1e-9)
+c.check("pressure budget steps chain (each inlet = previous outlet, template aside)",
+        all(abs(a_[2] - b_[1]) < 1e-9 for a_, b_ in zip(steps, steps[1:]) if "Template" not in b_[0]), str(steps))
+c.check("bad catalogue CSV is reported, model untouched",
+        apply_catalogue(ss.model, "category,item\nwidget,X\n") is not None and "surf_catalogue" not in ss.model, "")
+txt = _surf.to_csv(_surf.rows()).replace(
+    "Pipe-in-pipe,Carrier pipe with dry insulation in the annulus,1,", "Pipe-in-pipe,Carrier pipe with dry insulation in the annulus,2.5,")
+old_hash = ss.sol_hash
+c.check("custom catalogue CSV accepted", apply_catalogue(ss.model, txt) is None and "surf_catalogue" in ss.model, "")
+run()
+fl = uid_by_name("FL-100 Flowline")
+c.check("custom catalogue re-solves the flowsheet", ss.sol_hash != old_hash, "")
+c.close("custom catalogue value used by the flowline", ss.sol.results[fl]["U used [W/m²·K]"], 2.5, 1e-12)
+c.check("custom catalogue travels with the saved flowsheet",
+        _json.loads(_json.dumps(ss.model, default=float))["surf_catalogue"][0]["category"] == "flowline", "")
+reset_catalogue(ss.model)
+run()
+c.close("reset brings back the built-in catalogue", ss.sol.results[fl]["U used [W/m²·K]"], 1.0, 1e-12)
+pending.append(("units_sys", "Field"))
+st.HOOK["errors"].clear()
+run()
+c.check("SURF tab renders in field units", not st.HOOK["errors"] and
+        any("Pressure [psia]" in str(f.layout.get("yaxis", {}).get("title", "")) for f in st.HOOK["charts"]),
+        str(st.HOOK["errors"])[:200])
+pending.append(("units_sys", "SI (metric)"))
+run()
+fx = _json.load(open(os.path.join(ROOT, "tests", "canvas_fixture.json"), encoding="utf-8"))
+from procsim.unitops import CATALOGUE as _CAT   # noqa: E402
+c.eq("canvas test fixture lists every unit type", sorted(fx["catalogue"]), sorted(_CAT))
+
+# ---- 16c. SURF Phase 2: boosting, CAPEX, umbilical, tie-back screening, report ----------------------------
+st.HOOK["values"]["selectbox:Example:"] = "Subsea boosting (SURF): late life, wet-gas compressor, 45 km step-out"
+st.HOOK["press"].add("Load example")
+run()
+a = canvas_args()
+bu = uid_by_name("P-100 Subsea compressor")
+c.check("boosted example solved", ss.sol is not None and ss.sol.status.get(bu) == "ok", ss.sol.errors.get(bu) if ss.sol else "")
+c.check("booster label shows power and GVF", "GVF" in a["results"]["units"][bu]["label"], a["results"]["units"][bu]["label"])
+c.eq("booster work drawn as an incoming energy stream", a["results"]["units"][bu]["energy"][0]["dir"], "in")
+c.check("CAPEX tab: total and chart rendered", any("Total CAPEX" in t for t in st.HOOK["texts"]) and
+        any("CAPEX estimate" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("umbilical tab: booster power cable sized", any("Booster power cable" in t for t in st.HOOK["texts"]), "")
+ss.selected = [bu]
+st.HOOK["errors"].clear()
+run()
+c.check("booster property view renders", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+# a cost-basis edit is stored in the model and does not re-solve
+h0 = ss.sol_hash
+pending.append((f"capex_install_pct_{ss.widget_ver}", 40.0))
+run()
+c.close("cost basis edit saved with the flowsheet", ss.model.get("capex", {}).get("install_pct"), 40.0, 1e-12)
+c.eq("cost basis edits do not re-solve", ss.sol_hash, h0)
+from procsim import subsea_design as _sd   # noqa: E402
+_, _tot = _sd.equipment_list(ss.model, ss.sol)
+c.check("CAPEX follows the edited installation %", any(f"{_tot['Total CAPEX [MUSD]']:,.0f} MUSD" in t for t in st.HOOK["texts"]), "")
+# edit the injection services in the data editor
+import pandas as _pd   # noqa: E402
+svc = _pd.DataFrame([{"Service": "MEG", "Fluid": "MEG (90 wt%)", "Flow [L/h]": 3000.0, "Delivery P [bar(a)]": 0.0}])
+st.HOOK["values"][f"umb_services_{ss.widget_ver}"] = svc
+run()
+c.eq("service table edits are saved in the model", ss.model["umbilical"]["services"][0]["Flow [L/h]"], 3000.0)
+c.eq("service edits do not re-solve", ss.sol_hash, h0)
+# tie-back screening on a small grid
+ss["tb_dist"] = "20, 45"
+ss["tb_rates"] = "1"
+run()
+st.HOOK["press"].add("tb_run")
+run()
+tb = ss.get("tieback")
+c.check("tie-back screening ran 2 cases", tb is not None and len(tb["rows"]) == 2, "")
+c.check("tie-back charts rendered", any("arrival pressure" in str(f.layout.get("title", "")) for f in st.HOOK["charts"])
+        and any("hydrate margin" in str(f.layout.get("title", "")).lower() and "Tie-back" in str(f.layout.get("title", ""))
+                for f in st.HOOK["charts"]), "")
+c.check("maximum tie-back table rendered", any("Maximum tie-back distance" in t for t in st.HOOK["texts"]), "")
+ss["tb_rates"] = "1, 1.2"
+run()
+c.check("changed screening inputs mark the results as stale", any("different inputs" in t for t in st.HOOK["texts"]), "")
+html = build_report(ss.model, ss.sol, None, "Boosted tie-back")
+c.check("report has the subsea section with CAPEX and umbilical",
+        "Subsea system (SURF" in html and "CAPEX roll-up" in html and "Umbilical" in html and "kV" in html, "")
+pending.append(("units_sys", "Field"))
+st.HOOK["errors"].clear()
+run()
+c.check("SURF Phase 2 panels render in field units", not st.HOOK["errors"] and
+        any("Tie-back distance [mi]" in str(f.layout.get("xaxis", {}).get("title", "")) for f in st.HOOK["charts"]),
+        str(st.HOOK["errors"])[:200])
+pending.append(("units_sys", "SI (metric)"))
+run()
+
+# ---- 16d. SURF Phase 3: field layout, slugging, turndown --------------------------------------------------
+st.HOOK["values"]["selectbox:Example:"] = SURF_EX
+st.HOOK["press"].add("Load example")
+run()
+c.check("field layout plan view rendered", any("Field layout" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+lay_fig = next(f for f in st.HOOK["charts"] if "Field layout" in str(f.layout.get("title", "")))
+c.eq("layout plan view keeps a 1:1 aspect", lay_fig.layout["yaxis"].get("scaleanchor"), "x")
+rsu = uid_by_name("RSR-100 Riser")
+h0 = ss.sol_hash
+pending.append((f"lay_b_{rsu}_{ss.widget_ver}", 90.0))
+run()
+c.close("bearing edit saved with the flowsheet", ss.model["layout"]["bearing"][rsu], 90.0, 1e-12)
+c.eq("bearing edits do not re-solve", ss.sol_hash, h0)
+c.check("slugging view: surge volume and table rendered", any("Arrival surge volume" in t for t in st.HOOK["texts"]), "")
+ss["td_rates"] = "0.3, 1"
+run()
+st.HOOK["press"].add("td_run")
+run()
+td = ss.get("turndown")
+c.check("turndown ran 2 rates", td is not None and len(td["rows"]) == 2, "")
+c.check("turndown chart and window rendered", any("Turndown envelope" in str(f.layout.get("title", "")) for f in st.HOOK["charts"])
+        and any("Turndown ratio" in t for t in st.HOOK["texts"]), "")
+run()                                                   # the slugging view sits before the turndown view
+c.check("slugging view picks up the ramp-up sweep-out", any("Ramp-up sweep-out (turndown tab)" in t and "run the turndown" not in t
+                                                            for t in st.HOOK["texts"]), "")
+html = build_report(ss.model, ss.sol, None, "SURF field")
+c.check("report has the slugging table", "Slugging (screening" in html, "")
+pending.append(("units_sys", "Field"))
+st.HOOK["errors"].clear()
+run()
+c.check("Phase 3 views render in field units", not st.HOOK["errors"] and
+        any("North [mi]" in str(f.layout.get("yaxis", {}).get("title", "")) for f in st.HOOK["charts"]),
+        str(st.HOOK["errors"])[:200])
+pending.append(("units_sys", "SI (metric)"))
+run()
+
+from ui import state as S_   # noqa: E402
+
+# ---- 16e. v5.3: solution cache, auto-solve limit, WHP spec, deliverability, booster map, cool-down, scenarios --
+st.HOOK["values"]["selectbox:Example:"] = SURF_EX
+st.HOOK["press"].add("Load example")
+run()
+base_sol, base_hash = ss.sol, ss.sol_hash
+xv = uid_by_name("XV-100 SSIV")
+ss.model["units"][xv]["params"]["dP"] = 0.5
+run()
+c.check("a changed spec re-solves", ss.sol_hash != base_hash, "")
+ss.model["units"][xv]["params"]["dP"] = 0.0
+run()
+c.check("changing the spec back reuses the cached solution instantly", ss.sol is base_sol and ss.sol_hash == base_hash, "")
+pending.append(("auto_limit", 1.0))
+run()
+ss.model["units"][xv]["params"]["dP"] = 0.4
+run()
+c.check("a solve slower than the limit pauses auto-solve", ss.get("auto_paused") is True, "")
+ss.model["units"][xv]["params"]["dP"] = 0.45
+run()
+c.check("while paused, edits do not re-solve and the user is told", not S_.sol_is_current() and
+        any("Auto-solve is paused" in t for t in st.HOOK["texts"]), "")
+st.HOOK["press"].add("▶ Solve")
+run()
+c.check("Solve still works while paused", S_.sol_is_current(), "")
+pending.append(("auto_limit", 600.0))
+run()
+c.check("raising the limit resumes auto-solve", not ss.get("auto_paused"), "")
+w1 = uid_by_name("W-1")
+ss.model["units"][w1]["params"].update({"rate_spec": "Wellhead pressure", "WHP": 170.0})
+run()
+c.close("WHP spec solved in the app", ss.sol.results[w1]["Wellhead P [bar(a)]"], 170.0, 0.05)
+ss.selected = [w1]
+run()
+st.HOOK["press"].add(f"deliv_{w1}_btn")
+run()
+c.check("deliverability curve rendered in the well view", any("deliverability" in str(f.layout.get("title", ""))
+                                                               for f in st.HOOK["charts"]), "")
+c.check("cool-down view rendered", any("Shortest no-touch time" in t for t in st.HOOK["texts"]) and
+        any("Cool-down after shut-in" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+# booster curve in the boosted example
+st.HOOK["values"]["selectbox:Example:"] = "Subsea boosting (SURF): late life, wet-gas compressor, 45 km step-out"
+st.HOOK["press"].add("Load example")
+run()
+bu = uid_by_name("P-100 Subsea compressor")
+ss.selected = [bu]
+run()
+st.HOOK["press"].add(f"{bu}__genbcurve_{ss.widget_ver}" if False else "Generate a typical curve through the current operating point")
+run()
+run()
+c.check("booster curve generated from the operating point", bool(ss.model["units"][bu]["params"].get("curve")), "")
+c.check("booster map rendered", any("booster map" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+# scenarios
+h0 = ss.sol_hash
+st.HOOK["press"].add("sc_save")
+run()
+c.eq("scenario saved", [x["name"] for x in ss.model.get("scenarios", [])], ["Case 1"])
+c.eq("saving a scenario does not re-solve", ss.sol_hash, h0)
+ss.model["units"][bu]["params"]["dP"] = 60.0
+ss.model["units"][bu]["params"]["curve"] = {}
+run()
+st.HOOK["press"].add("sc_save")
+run()
+c.eq("second scenario saved", len(ss.model["scenarios"]), 2)
+c.check("scenario comparison rendered", any(type(f.data[0]).__name__ == "Bar" and "Saved scenarios" in str(f.layout.get("title", ""))
+                                            for f in st.HOOK["charts"] if f.data), "")
+ss["sc_diff"] = True
+run()
+c.check("difference view renders", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+html = build_report(ss.model, ss.sol, None, "Scenarios")
+c.check("report has the scenario comparison and cool-down", "Scenario comparison" in html and "Cool-down after shut-in" in html,
+        f"scenarios={'Scenario comparison' in html} cooldown={'Cool-down after shut-in' in html} surf={'Subsea system' in html}")
+ss["sc_pick"] = "Case 1"
+st.HOOK["press"].add("sc_load")
+run()
+c.close("loading a scenario restores its specification", ss.model["units"][bu]["params"]["dP"], 55.0, 1e-12)
+c.eq("the loaded flowsheet keeps the scenario list", len(ss.model.get("scenarios", [])), 2)
+st.HOOK["press"].add("sc_del")
+run()
+c.eq("delete a scenario from the tab", [x["name"] for x in ss.model["scenarios"]], ["Case 2"])
 
 # ---- 17. stale modules after an update (the Streamlit Cloud ImportError) ---------------------------
 import types   # noqa: E402

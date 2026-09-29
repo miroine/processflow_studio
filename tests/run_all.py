@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-suites = [[sys.executable, os.path.join(HERE, f)] for f in ("test_thermo.py", "test_flowsheet.py", "test_ui.py", "test_browser.py")]
+suites = [[sys.executable, os.path.join(HERE, f)] for f in ("test_thermo.py", "test_flowsheet.py", "test_surf.py", "test_ui.py", "test_browser.py")]
 if shutil.which("node"):
     suites.append(["node", os.path.join(HERE, "test_canvas.js")])
 else:

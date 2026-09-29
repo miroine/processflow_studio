@@ -1,1 +1,643 @@
-{"model": {"units": {"u1": {"type": "feed", "name": "Rich gas", "x": 30, "y": 150, "flip": false}, "u2": {"type": "hx", "name": "E-100 Gas/gas", "x": 200, "y": 140, "flip": false}, "u3": {"type": "valve", "name": "VLV-100 JT", "x": 380, "y": 260, "flip": false}, "u4": {"type": "separator", "name": "V-100 LTS", "x": 520, "y": 250, "flip": false}, "u5": {"type": "product", "name": "NGL", "x": 660, "y": 380, "flip": false}, "u6": {"type": "product", "name": "Sales gas", "x": 30, "y": 40, "flip": false}, "u7": {"type": "adjust", "name": "ADJ-1", "x": 380, "y": 380, "flip": false}, "u8": {"type": "recycle", "name": "RCY-1", "x": 380, "y": 40, "flip": false}}, "streams": {"s9": {"name": "Rich gas", "src": ["u1", "out"], "dst": ["u2", "tube_in"]}, "s10": {"name": "2", "src": ["u2", "tube_out"], "dst": ["u3", "in"]}, "s11": {"name": "3", "src": ["u3", "out"], "dst": ["u4", "feed"]}, "s12": {"name": "Cold gas", "src": ["u4", "vapour"], "dst": ["u8", "in"]}, "s13": {"name": "4", "src": ["u8", "out"], "dst": ["u2", "shell_in"]}, "s14": {"name": "Sales gas", "src": ["u2", "shell_out"], "dst": ["u6", "in"]}, "s15": {"name": "NGL", "src": ["u4", "liquid"], "dst": ["u5", "in"]}}}, "catalogue": {"feed": {"label": "Material stream (feed)", "prefix": "Feed", "category": "Streams", "ports": {"in": {}, "out": {"out": {"multi": false}}}}, "product": {"label": "Material stream (product)", "prefix": "Product", "category": "Streams", "ports": {"in": {"in": {"multi": false}}, "out": {}}}, "valve": {"label": "Valve", "prefix": "VLV", "category": "Pressure change", "ports": {"in": {"in": {"multi": false}}, "out": {"out": {"multi": false}}}}, "mixer": {"label": "Mixer", "prefix": "MIX", "category": "Piping", "ports": {"in": {"in": {"multi": true}}, "out": {"out": {"multi": false}}}}, "splitter": {"label": "Tee (splitter)", "prefix": "TEE", "category": "Piping", "ports": {"in": {"in": {"multi": false}}, "out": {"out": {"multi": true}}}}, "separator": {"label": "2-phase separator", "prefix": "V", "category": "Separation", "ports": {"in": {"feed": {"multi": true}}, "out": {"vapour": {"multi": false}, "liquid": {"multi": false}}}}, "separator3": {"label": "3-phase separator", "prefix": "V", "category": "Separation", "ports": {"in": {"feed": {"multi": true}}, "out": {"vapour": {"multi": false}, "oil": {"multi": false}, "water": {"multi": false}}}}, "compressor": {"label": "Compressor", "prefix": "K", "category": "Rotating", "ports": {"in": {"in": {"multi": false}}, "out": {"out": {"multi": false}}}}, "expander": {"label": "Expander", "prefix": "EX", "category": "Rotating", "ports": {"in": {"in": {"multi": false}}, "out": {"out": {"multi": false}}}}, "pump": {"label": "Pump", "prefix": "P", "category": "Rotating", "ports": {"in": {"in": {"multi": false}}, "out": {"out": {"multi": false}}}}, "heater": {"label": "Heater", "prefix": "E", "category": "Heat transfer", "ports": {"in": {"in": {"multi": false}}, "out": {"out": {"multi": false}}}}, "cooler": {"label": "Cooler", "prefix": "E", "category": "Heat transfer", "ports": {"in": {"in": {"multi": false}}, "out": {"out": {"multi": false}}}}, "hx": {"label": "Heat exchanger (shell & tube)", "prefix": "E", "category": "Heat transfer", "ports": {"in": {"tube_in": {"multi": false}, "shell_in": {"multi": false}}, "out": {"tube_out": {"multi": false}, "shell_out": {"multi": false}}}}, "aircooler": {"label": "Air cooler", "prefix": "AC", "category": "Heat transfer", "ports": {"in": {"in": {"multi": false}}, "out": {"out": {"multi": false}}}}, "pipe": {"label": "Pipe segment", "prefix": "PIPE", "category": "Piping", "ports": {"in": {"in": {"multi": false}}, "out": {"out": {"multi": false}}}}, "recycle": {"label": "Recycle", "prefix": "RCY", "category": "Logical", "ports": {"in": {"in": {"multi": false}}, "out": {"out": {"multi": false}}}}, "adjust": {"label": "Adjust", "prefix": "ADJ", "category": "Logical", "ports": {"in": {}, "out": {}}}}}
+{
+ "model": {
+  "units": {
+   "u1": {
+    "type": "feed",
+    "name": "Rich gas",
+    "x": 30,
+    "y": 150,
+    "flip": false
+   },
+   "u2": {
+    "type": "hx",
+    "name": "E-100 Gas/gas",
+    "x": 200,
+    "y": 140,
+    "flip": false
+   },
+   "u3": {
+    "type": "valve",
+    "name": "VLV-100 JT",
+    "x": 380,
+    "y": 260,
+    "flip": false
+   },
+   "u4": {
+    "type": "separator",
+    "name": "V-100 LTS",
+    "x": 520,
+    "y": 250,
+    "flip": false
+   },
+   "u5": {
+    "type": "product",
+    "name": "NGL",
+    "x": 660,
+    "y": 380,
+    "flip": false
+   },
+   "u6": {
+    "type": "product",
+    "name": "Sales gas",
+    "x": 30,
+    "y": 40,
+    "flip": false
+   },
+   "u7": {
+    "type": "adjust",
+    "name": "ADJ-1",
+    "x": 380,
+    "y": 380,
+    "flip": false
+   },
+   "u8": {
+    "type": "recycle",
+    "name": "RCY-1",
+    "x": 380,
+    "y": 40,
+    "flip": false
+   }
+  },
+  "streams": {
+   "s9": {
+    "name": "Rich gas",
+    "src": [
+     "u1",
+     "out"
+    ],
+    "dst": [
+     "u2",
+     "tube_in"
+    ]
+   },
+   "s10": {
+    "name": "2",
+    "src": [
+     "u2",
+     "tube_out"
+    ],
+    "dst": [
+     "u3",
+     "in"
+    ]
+   },
+   "s11": {
+    "name": "3",
+    "src": [
+     "u3",
+     "out"
+    ],
+    "dst": [
+     "u4",
+     "feed"
+    ]
+   },
+   "s12": {
+    "name": "Cold gas",
+    "src": [
+     "u4",
+     "vapour"
+    ],
+    "dst": [
+     "u8",
+     "in"
+    ]
+   },
+   "s13": {
+    "name": "4",
+    "src": [
+     "u8",
+     "out"
+    ],
+    "dst": [
+     "u2",
+     "shell_in"
+    ]
+   },
+   "s14": {
+    "name": "Sales gas",
+    "src": [
+     "u2",
+     "shell_out"
+    ],
+    "dst": [
+     "u6",
+     "in"
+    ]
+   },
+   "s15": {
+    "name": "NGL",
+    "src": [
+     "u4",
+     "liquid"
+    ],
+    "dst": [
+     "u5",
+     "in"
+    ]
+   }
+  }
+ },
+ "catalogue": {
+  "feed": {
+   "label": "Material stream (feed)",
+   "short": "Feed stream",
+   "prefix": "Feed",
+   "category": "Streams",
+   "ports": {
+    "in": {},
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "product": {
+   "label": "Material stream (product)",
+   "short": "Product stream",
+   "prefix": "Product",
+   "category": "Streams",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {}
+   }
+  },
+  "valve": {
+   "label": "Valve",
+   "short": "Valve",
+   "prefix": "VLV",
+   "category": "Pressure change",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "mixer": {
+   "label": "Mixer",
+   "short": "Mixer",
+   "prefix": "MIX",
+   "category": "Piping",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": true
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "splitter": {
+   "label": "Tee (splitter)",
+   "short": "Tee",
+   "prefix": "TEE",
+   "category": "Piping",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": true
+     }
+    }
+   }
+  },
+  "separator": {
+   "label": "2-phase separator",
+   "short": "2-phase separator",
+   "prefix": "V",
+   "category": "Separation",
+   "ports": {
+    "in": {
+     "feed": {
+      "multi": true
+     }
+    },
+    "out": {
+     "vapour": {
+      "multi": false
+     },
+     "liquid": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "scrubber": {
+   "label": "Gas scrubber",
+   "short": "Gas scrubber",
+   "prefix": "V",
+   "category": "Separation",
+   "ports": {
+    "in": {
+     "feed": {
+      "multi": true
+     }
+    },
+    "out": {
+     "vapour": {
+      "multi": false
+     },
+     "liquid": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "separator3": {
+   "label": "3-phase separator",
+   "short": "3-phase separator",
+   "prefix": "V",
+   "category": "Separation",
+   "ports": {
+    "in": {
+     "feed": {
+      "multi": true
+     }
+    },
+    "out": {
+     "vapour": {
+      "multi": false
+     },
+     "oil": {
+      "multi": false
+     },
+     "water": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "compressor": {
+   "label": "Compressor",
+   "short": "Compressor",
+   "prefix": "K",
+   "category": "Rotating",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "expander": {
+   "label": "Expander",
+   "short": "Expander",
+   "prefix": "EX",
+   "category": "Rotating",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "pump": {
+   "label": "Pump",
+   "short": "Pump",
+   "prefix": "P",
+   "category": "Rotating",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "heater": {
+   "label": "Heater",
+   "short": "Heater",
+   "prefix": "E",
+   "category": "Heat transfer",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "cooler": {
+   "label": "Cooler",
+   "short": "Cooler",
+   "prefix": "E",
+   "category": "Heat transfer",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "hx": {
+   "label": "Heat exchanger (shell & tube)",
+   "short": "Heat exchanger",
+   "prefix": "E",
+   "category": "Heat transfer",
+   "ports": {
+    "in": {
+     "tube_in": {
+      "multi": false
+     },
+     "shell_in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "tube_out": {
+      "multi": false
+     },
+     "shell_out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "aircooler": {
+   "label": "Air cooler",
+   "short": "Air cooler",
+   "prefix": "AC",
+   "category": "Heat transfer",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "pipe": {
+   "label": "Pipe segment",
+   "short": "Pipe segment",
+   "prefix": "PIPE",
+   "category": "Piping",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "column": {
+   "label": "Column (absorber / stabiliser / distillation)",
+   "short": "Column",
+   "prefix": "T",
+   "category": "Separation",
+   "ports": {
+    "in": {
+     "feed_top": {
+      "multi": false,
+      "optional": true
+     },
+     "feed": {
+      "multi": true,
+      "optional": true
+     },
+     "feed_bottom": {
+      "multi": false,
+      "optional": true
+     }
+    },
+    "out": {
+     "overhead": {
+      "multi": false
+     },
+     "bottoms": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "recycle": {
+   "label": "Recycle",
+   "short": "Recycle",
+   "prefix": "RCY",
+   "category": "Logical",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "adjust": {
+   "label": "Adjust",
+   "short": "Adjust",
+   "prefix": "ADJ",
+   "category": "Logical",
+   "ports": {
+    "in": {},
+    "out": {}
+   }
+  },
+  "well": {
+   "label": "Well (IPR + tubing)",
+   "short": "Well",
+   "prefix": "W",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "xmas_tree": {
+   "label": "Subsea Xmas tree + choke",
+   "short": "Xmas tree",
+   "prefix": "XT",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "template": {
+   "label": "Template / manifold",
+   "short": "Template",
+   "prefix": "TMP",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": true
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "jumper": {
+   "label": "Jumper / spool / PLET / PLEM",
+   "short": "Jumper / PLET",
+   "prefix": "J",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "flowline": {
+   "label": "Subsea flowline",
+   "short": "Flowline",
+   "prefix": "FL",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "riser": {
+   "label": "Riser",
+   "short": "Riser",
+   "prefix": "RSR",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "subsea_booster": {
+   "label": "Subsea booster (pump / compressor)",
+   "short": "Subsea booster",
+   "prefix": "P",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "subsea_valve": {
+   "label": "SSIV / HIPPS valve",
+   "short": "SSIV / HIPPS",
+   "prefix": "XV",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  }
+ }
+}

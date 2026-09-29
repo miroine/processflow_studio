@@ -22,9 +22,11 @@ LEAN_RHO = {"MEG": 1105.0, "MeOH": 792.0}      # kg/m3 of the lean solution (90 
 
 def _kpis(model, sol):
     fp = sol.fp
+    from procsim.economics import ENV_TYPES
+    env = {u["name"] for u in model["units"].values() if u["type"] in ENV_TYPES}   # heat to/from sea or formation
     work = sum(e.duty_kW for e in sol.energy if e.kind == "work" and e.duty_kW > 0)
-    heat = sum(e.duty_kW for e in sol.energy if e.kind == "heat" and e.duty_kW > 0)
-    cool = -sum(e.duty_kW for e in sol.energy if e.kind == "heat" and e.duty_kW < 0)
+    heat = sum(e.duty_kW for e in sol.energy if e.kind == "heat" and e.duty_kW > 0 and e.unit not in env)
+    cool = -sum(e.duty_kW for e in sol.energy if e.kind == "heat" and e.duty_kW < 0 and e.unit not in env)
     gas = liq = 0.0
     for sid, s in model["streams"].items():
         if model["units"][s["dst"][0]]["type"] != "product":
@@ -219,8 +221,9 @@ def analysis_tab():
             if any(u["type"] == "compressor" for u in model["units"].values()):
                 st.plotly_chart(charts.compressor_figure(model, sol), width="stretch", key="an_comp")
         for uid, mp in sol.maps.items():
-            st.plotly_chart(charts.compressor_map(mp, model["units"][uid]["name"]), width="stretch",
-                            key=f"an_map_{uid}")
+            fig = (charts.booster_map if mp.get("kind") == "booster" else charts.compressor_map)(
+                mp, model["units"][uid]["name"])
+            st.plotly_chart(fig, width="stretch", key=f"an_map_{uid}")
         for uid, c in sol.hx_curves.items():
             st.plotly_chart(charts.hx_figure(c, model["units"][uid]["name"]), width="stretch", key=f"an_hx_{uid}")
         for uid, pr in sol.columns.items():

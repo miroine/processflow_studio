@@ -44,6 +44,15 @@
     pipe:       { w: 84, h: 26, ports: { in: [-42, 0, "L"], out: [42, 0, "R"] }, energy: [0, -10, "U"] },
     recycle:    { w: 36, h: 36, ports: { in: [-18, 0, "L"], out: [18, 0, "R"] } },
     adjust:     { w: 40, h: 40, ports: {} },
+    // subsea (SURF)
+    well:         { w: 40, h: 76, ports: { in: [-20, 30, "L"], out: [20, -30, "R"] } },
+    xmas_tree:    { w: 50, h: 56, ports: { in: [-25, 18, "L"], out: [25, -8, "R"] } },
+    template:     { w: 96, h: 60, ports: { in: [-48, 8, "L"], out: [48, 8, "R"] } },
+    jumper:       { w: 76, h: 34, ports: { in: [-38, 10, "L"], out: [38, 10, "R"] } },
+    flowline:     { w: 104, h: 30, ports: { in: [-52, 0, "L"], out: [52, 0, "R"] } },
+    riser:        { w: 64, h: 96, ports: { in: [-32, 40, "L"], out: [32, -40, "R"] } },
+    subsea_valve: { w: 40, h: 40, ports: { in: [-20, 10, "L"], out: [20, 10, "R"] } },
+    subsea_booster: { w: 60, h: 58, ports: { in: [-30, 4, "L"], out: [30, 4, "R"] }, energy: [0, 29, "D"] },
   };
 
   function portPos(u, port) {
@@ -196,6 +205,9 @@
       <path d="M0,0 L10,5 L0,10 z" fill="var(--sel)"/></marker>
     <marker id="mEn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="var(--energy)"/></marker>
+    <pattern id="rock" width="6" height="6" patternUnits="userSpaceOnUse">
+      <rect width="6" height="6" fill="#efe3c8"/><circle cx="2" cy="2" r=".9" fill="#a88f5f"/>
+      <circle cx="5" cy="5" r=".7" fill="#a88f5f"/></pattern>
     <pattern id="mesh" width="4" height="4" patternUnits="userSpaceOnUse">
       <path d="M0,0 L4,4 M4,0 L0,4" stroke="#6f7c8a" stroke-width=".6"/></pattern>
     <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
@@ -311,6 +323,73 @@
       <circle cx="0" cy="0" r="16" fill="url(#gG)" ${STK}/>
       <path d="M-9,-7 A11,11 0 0 1 10,-5" fill="none" stroke="#1f5a37" stroke-width="1.4" marker-end="url(#mMat)"/>`,
     adjust: () => `<path d="M0,-19 L19,0 L0,19 L-19,0 Z" fill="url(#gG)" ${STK}/>`,
+    // ---- subsea (SURF): schematic symbols -------------------------------------------------
+    well: () => `
+      <path d="M-18,24 L18,24 L18,36 L-18,36 Z" fill="url(#rock)" stroke="#6f5a3a" stroke-width="1"/>
+      <line x1="-18" y1="-24" x2="18" y2="-24" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>
+      <rect x="-9" y="-24" width="18" height="52" fill="url(#gV)" ${STK}/>
+      <rect x="-4" y="-24" width="8" height="52" fill="#f4f7fa" stroke="#4d5a68" stroke-width=".9"/>
+      <path d="M-9,28 L-14,26 M-9,32 L-14,34 M9,28 L14,26 M9,32 L14,34" stroke="#b5451b" stroke-width="1.3"/>
+      <rect x="-7" y="-36" width="14" height="12" rx="2" fill="url(#gB)" ${STK}/>
+      <line x1="7" y1="-30" x2="20" y2="-30" stroke="#2f3a46" stroke-width="2"/>`,
+    xmas_tree: () => `
+      <rect x="-9" y="-26" width="18" height="50" rx="2" fill="url(#gV)" ${STK}/>
+      <path d="M-6,-16 L6,-16 L-6,-8 L6,-8 Z" fill="url(#gB)" stroke="#2f3a46" stroke-width="1"/>
+      <path d="M-6,4 L6,4 L-6,12 L6,12 Z" fill="url(#gB)" stroke="#2f3a46" stroke-width="1"/>
+      <line x1="9" y1="-8" x2="25" y2="-8" stroke="#2f3a46" stroke-width="2"/>
+      <path d="M12,-14 L12,-2 L19,-8 Z M26,-14 L26,-2 L19,-8 Z" fill="url(#gV)" stroke="#2f3a46" stroke-width="1"/>
+      <path d="M14,-20 L23,-2 M23,-2 L22.6,-7.4 M23,-2 L18.8,-5.4" fill="none" stroke="#b5451b" stroke-width="1.4"
+            stroke-linecap="round"/>
+      <line x1="-25" y1="18" x2="-9" y2="18" stroke="#2f3a46" stroke-width="2"/>
+      <rect x="-12" y="24" width="24" height="4" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
+    template: () => `
+      <rect x="-44" y="-22" width="88" height="44" fill="#eef2f6" ${STK}/>
+      <path d="M-44,-22 L-22,22 L0,-22 L22,22 L44,-22" fill="none" stroke="#8792a0" stroke-width="1"/>
+      <rect x="-44" y="4" width="88" height="8" fill="url(#gH)" ${STK}/>
+      <circle cx="-30" cy="-10" r="6" fill="url(#gB)" ${STK}/><circle cx="-10" cy="-10" r="6" fill="url(#gB)" ${STK}/>
+      <circle cx="10" cy="-10" r="6" fill="url(#gB)" ${STK}/><circle cx="30" cy="-10" r="6" fill="url(#gB)" ${STK}/>
+      <line x1="-30" y1="-4" x2="-30" y2="4" stroke="#2f3a46"/><line x1="-10" y1="-4" x2="-10" y2="4" stroke="#2f3a46"/>
+      <line x1="10" y1="-4" x2="10" y2="4" stroke="#2f3a46"/><line x1="30" y1="-4" x2="30" y2="4" stroke="#2f3a46"/>
+      <path d="M-48,26 L48,26" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    jumper: () => `
+      <path d="M-34,10 L-24,10 L-24,-10 L-8,-10 L-8,6 L8,6 L8,-10 L24,-10 L24,10 L34,10" fill="none"
+            stroke="#2f3a46" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M-34,10 L-24,10 L-24,-10 L-8,-10 L-8,6 L8,6 L8,-10 L24,-10 L24,10 L34,10" fill="none"
+            stroke="#c9d3de" stroke-width="3.4" stroke-linejoin="round"/>
+      <rect x="-38" y="4" width="6" height="12" rx="1" fill="url(#gV)" ${STK}/>
+      <rect x="32" y="4" width="6" height="12" rx="1" fill="url(#gV)" ${STK}/>`,
+    flowline: () => `
+      <rect x="-46" y="-10" width="92" height="20" rx="3" fill="#e9d9b8" ${STK}/>
+      <rect x="-46" y="-5" width="92" height="10" fill="url(#gH)" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-52" y="-12" width="6" height="24" rx="1" fill="url(#gV)" ${STK}/>
+      <rect x="46" y="-12" width="6" height="24" rx="1" fill="url(#gV)" ${STK}/>
+      <path d="M-30,-10 L-26,-5 M-10,-10 L-6,-5 M10,-10 L14,-5 M30,-10 L34,-5" stroke="#a08a5c" stroke-width="1"/>
+      <line x1="-52" y1="15" x2="52" y2="15" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    riser: () => `
+      <path d="M-30,-40 q7.5,-4 15,0 t15,0 t15,0 t15,0" fill="none" stroke="#2d6db5" stroke-width="1.4"/>
+      <line x1="-32" y1="46" x2="32" y2="46" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>
+      <path d="M-32,40 C-18,40 -14,10 -2,6 C8,3 8,24 14,18 C22,8 24,-24 26,-40 L32,-40" fill="none"
+            stroke="#2f3a46" stroke-width="5" stroke-linecap="round"/>
+      <path d="M-32,40 C-18,40 -14,10 -2,6 C8,3 8,24 14,18 C22,8 24,-24 26,-40 L32,-40" fill="none"
+            stroke="#c9d3de" stroke-width="2.6" stroke-linecap="round"/>
+      <ellipse cx="-8" cy="10" rx="4" ry="3" fill="#f2b33d" stroke="#2f3a46" stroke-width=".8"/>
+      <ellipse cx="-1" cy="6" rx="4" ry="3" fill="#f2b33d" stroke="#2f3a46" stroke-width=".8"/>
+      <ellipse cx="6" cy="7" rx="4" ry="3" fill="#f2b33d" stroke="#2f3a46" stroke-width=".8"/>`,
+    subsea_booster: () => `
+      <rect x="-22" y="-26" width="44" height="10" rx="2" fill="#f2b33d" ${STK}/>
+      <line x1="-10" y1="-21" x2="10" y2="-21" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-26" y="-14" width="52" height="30" rx="6" fill="url(#gB)" ${STK}/>
+      <path d="M-20,1 C-16,-9 -12,-9 -8,1 S0,11 4,1 S12,-9 16,1" fill="none" stroke="#1d4f86" stroke-width="2"/>
+      <line x1="-22" y1="1" x2="22" y2="1" stroke="#34507a" stroke-width=".8" stroke-dasharray="2 2"/>
+      <rect x="-30" y="-2" width="5" height="12" rx="1" fill="url(#gV)" ${STK}/>
+      <rect x="25" y="-2" width="5" height="12" rx="1" fill="url(#gV)" ${STK}/>
+      <rect x="-3" y="16" width="6" height="10" fill="url(#gMot)" stroke="#2f3a46" stroke-width="1"/>
+      <line x1="-30" y1="26" x2="30" y2="26" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    subsea_valve: () => `
+      <path d="M-18,1 L-18,19 L0,10 Z M18,1 L18,19 L0,10 Z" fill="url(#gV)" ${STK}/>
+      <line x1="0" y1="10" x2="0" y2="-6" stroke="#2f3a46" stroke-width="1.4"/>
+      <rect x="-9" y="-18" width="18" height="12" rx="2" fill="#f2b33d" ${STK}/>
+      <path d="M-5,-12 L5,-12" stroke="#2f3a46" stroke-width="1.2"/>`,
   };
   const ICON_TEXT = { recycle: "R", adjust: "A" };
 
@@ -405,7 +484,8 @@
   }
 
   // -------------------------------------------------------------- palette
-  const PAL_ORDER = ["Streams", "Separation", "Pressure change", "Rotating", "Heat transfer", "Piping", "Logical"];
+  const PAL_ORDER = ["Streams", "Separation", "Pressure change", "Rotating", "Heat transfer", "Piping",
+                     "Subsea (SURF)", "Logical"];
   let paletteBuilt = "";
   function buildPalette() {
     const key = JSON.stringify(Object.keys(S.catalogue));

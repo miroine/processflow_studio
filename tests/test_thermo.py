@@ -218,4 +218,41 @@ c.check("every conversion inverts exactly (display -> SI)", ok, "")
 UN.set_system(UN.SI)
 c.close("SI system leaves values untouched", UN.value("°C", 100.0), 100.0, 0.0)
 
+# ---- warm starts across a disappearing phase (v5 regression) ------------------------------------------
+from procsim.examples import WET_GAS                                                # noqa: E402
+import time as _time                                                                # noqa: E402
+fpw = FluidPackage.from_keys(list(WET_GAS))
+zw = np.array([WET_GAS[k] for k in fpw.keys])
+zw = zw / zw.sum()
+cold = {T: fpw.pt_flash(zw, T + 273.15, 143.0) for T in (30.0, 36.8)}
+c.eq("wet gas: V+L+W at 30 °C and V+W at 36.8 °C (143 bar)",
+     ([p.kind for p in cold[30.0].phases], [p.kind for p in cold[36.8].phases]), (["V", "L", "W"], ["V", "W"]))
+ok, worst = True, 0.0
+for seedT in (30.0, 36.8):
+    for T in (34.0, 36.7, 37.0, 40.0):
+        ref = fpw.pt_flash(zw, T + 273.15, 143.0)
+        warm = fpw.pt_flash(zw, T + 273.15, 143.0, cold[seedT].Kset if cold[seedT].Kset is not None else cold[seedT].K)
+        d = abs(warm.H - ref.H) + sum(abs(a.beta - b.beta) for a, b in zip(warm.phases, ref.phases))
+        ok = ok and [p.kind for p in warm.phases] == [p.kind for p in ref.phases]
+        worst = max(worst, d)
+c.check("warm-started flashes find the same phases as cold flashes near the dew point", ok, "")
+c.close("warm-started flashes match cold flashes (H + phase fractions)", worst, 0.0, 1e-6)
+c.check("a two-phase (V+W) result never carries a three-row seed with a vanished reference phase",
+        cold[36.8].Kset is None, str(None if cold[36.8].Kset is None else cold[36.8].Kset.shape))
+t0 = _time.time()
+for T in np.linspace(34.0, 44.0, 11):
+    fpw.pt_flash(zw, T + 273.15, 146.0)
+c.check("flashes just above the hydrocarbon dew point stay fast (re-referenced SS)", _time.time() - t0 < 2.0,
+        f"{_time.time() - t0:.2f} s for 11 flashes")
+
+# ---- EOS mixing cache (v5.3): cached a_ij(T) must not leak between compositions --------------------------------
+fc = FluidPackage.from_keys(list(WET_GAS))
+z1 = np.array([WET_GAS[k] for k in fc.keys]); z1 = z1 / z1.sum()
+z2 = np.roll(z1, 3); z2 = z2 / z2.sum()
+a1 = fc.pt_flash(z1, 300.0, 50.0)
+a2 = fc.pt_flash(z2, 300.0, 50.0)                        # same T: served from the cache
+b2 = FluidPackage.from_keys(list(WET_GAS)).pt_flash(z2, 300.0, 50.0)
+c.close("cached mixing matrices reproduce a fresh package (H)", a2.H, b2.H, 1e-9 * max(1.0, abs(b2.H)))
+c.eq("cached mixing matrices reproduce a fresh package (phases)", [p.kind for p in a2.phases], [p.kind for p in b2.phases])
+
 sys.exit(c.report())

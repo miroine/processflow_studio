@@ -26,7 +26,8 @@ _LAYOUT = {"title", "xaxis", "yaxis", "xaxis2", "yaxis2", "xaxis3", "yaxis3", "y
            "hovermode", "hoverlabel", "annotations", "shapes", "barmode", "bargap", "bargroupgap", "uniformtext"}
 _AXIS = {"title", "gridcolor", "zeroline", "linecolor", "ticks", "showline", "type", "autorange", "range",
          "ticksuffix", "tickformat", "showgrid", "mirror", "tickfont", "matches", "dtick", "categoryorder",
-         "automargin", "title_text", "showspikes", "spikemode", "tickcolor", "zerolinecolor"}
+         "automargin", "title_text", "showspikes", "spikemode", "tickcolor", "zerolinecolor", "scaleanchor",
+         "scaleratio", "constrain"}
 _TEXTPOS = {"top center", "outside", "inside", "auto", "bottom center", "middle right", "middle left", "top right",
             "top left", "bottom right", "none"}
 _MODES = {"lines", "markers", "lines+markers", "markers+text", "lines+markers+text", "text", "lines+text"}
@@ -53,9 +54,14 @@ def _check(kind, kw):
                 raise ValueError("Sankey link index out of range")
         if len({len(link.get(k, [])) for k in ("source", "target", "value")}) > 1:
             raise ValueError("Sankey link arrays differ in length")
-    for axis in ("x", "y", "z"):
-        if axis in kw and kw[axis] is not None and not hasattr(kw[axis], "shape"):
-            list(kw[axis])
+    for axis in ("x", "y"):
+        v = kw.get(axis)
+        if v is not None and kind != "Sankey":
+            if hasattr(v, "columns"):            # a DataFrame (e.g. from duplicate column names)
+                raise ValueError(f"{kind}.{axis} got 2-D data (DataFrame) - duplicate column names?")
+            if hasattr(v, "shape") and len(getattr(v, "shape", ())) > 1 and kind in ("Scatter", "Bar"):
+                raise ValueError(f"{kind}.{axis} got 2-D data")
+            list(v)
 
 
 class _Trace:

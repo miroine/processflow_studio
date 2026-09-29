@@ -136,6 +136,8 @@ def dataframe(data, **kw):
     _check_width(kw)
     if not isinstance(data, (pd.DataFrame, pd.Series)):
         raise TypeError(f"dataframe got {type(data)}")
+    if isinstance(data, pd.DataFrame) and data.columns.duplicated().any():
+        raise ValueError(f"Duplicate column names: {list(data.columns[data.columns.duplicated()])}")
     data.to_string()   # exercises formatting
     cc = kw.get("column_config") or {}
     for k in cc:
@@ -279,6 +281,13 @@ def data_editor(data, key=None, **kw):
     ident = _register("data_editor", "", key)
     if not isinstance(data, pd.DataFrame):
         raise TypeError("data_editor expects a DataFrame")
+    if data.columns.duplicated().any():
+        raise ValueError("Duplicate column names in data_editor")
+    if kw.get("num_rows") not in (None, "fixed", "dynamic"):
+        raise ValueError(f"bad num_rows {kw.get('num_rows')!r}")
+    for k in kw.get("column_config") or {}:
+        if k not in data.columns:
+            raise KeyError(f"column_config for missing column {k}")
     for k in kw.get("disabled", []) or []:
         if k not in data.columns:
             raise KeyError(f"disabled column {k} missing")
@@ -289,6 +298,12 @@ class column_config:
     @staticmethod
     def NumberColumn(*a, **kw):
         return {"type": "number", **kw}
+
+    @staticmethod
+    def SelectboxColumn(*a, options=None, **kw):
+        if not options:
+            raise ValueError("SelectboxColumn needs options")
+        return {"type": "select", "options": list(options), **kw}
 
 
 def cache_data(func=None, **kw):
