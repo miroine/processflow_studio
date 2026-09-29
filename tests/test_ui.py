@@ -408,7 +408,26 @@ pending.append(("units_sys", "SI (metric)"))
 run()
 c.check("back to SI: labels in °C", any("°C" in (v.get("label") or "") for v in canvas_args()["results"]["streams"].values()), "")
 
-# ---- 17. blank flowsheet -----------------------------------------------------------------------
+# ---- 17. stale modules after an update (the Streamlit Cloud ImportError) ---------------------------
+import types   # noqa: E402
+stale = types.ModuleType("procsim.streams")          # an old streams module without hydrate_state
+stale.stream_properties = sys.modules["procsim.streams"].stream_properties
+sys.modules["procsim.streams"] = stale
+for name in ("ui.analysis", "ui.state", "ui.panels"):
+    sys.modules.pop(name, None)
+if hasattr(sys, "_pfs_code_fp"):
+    del sys._pfs_code_fp                              # first run of a new app.py in an old process
+st.HOOK["errors"].clear()
+run()
+c.check("stale in-memory modules are purged and re-imported instead of raising ImportError",
+        hasattr(sys.modules["procsim.streams"], "hydrate_state") and not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+c.check("app renders normally after the recovery", canvas_args() is not None, "")
+sys._pfs_code_fp = -1                                 # files changed on disk since the last run
+old_sol = ss.sol
+run()
+c.check("a code change invalidates the cached solution and re-solves", ss.sol is not old_sol and ss.sol is not None, "")
+
+# ---- 18. blank flowsheet -----------------------------------------------------------------------
 st.HOOK["press"].add("New (blank)")
 run()
 c.eq("blank flowsheet", len(ss.model["units"]), 0)

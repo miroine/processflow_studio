@@ -11,18 +11,91 @@ import streamlit as st
 st.set_page_config(page_title="ProcessFlow Studio", page_icon="⚙️", layout="wide",
                    menu_items={"About": "ProcessFlow Studio — made by Merouane Hamdani. For educational purposes only."})
 
-from pfd_canvas import pfd_canvas                     # noqa: E402
-from procsim.examples import EXAMPLES                  # noqa: E402
-from procsim.flowsheet import new_model, normalize     # noqa: E402
-from ui import state as S                              # noqa: E402
-from ui import panels                                  # noqa: E402
-from ui.fluid import fluid_tab, workbook_tab           # noqa: E402
-from ui import theme                                   # noqa: E402
+# ---------------------------------------------------------------- code-refresh guard
+# Streamlit keeps imported modules alive between reruns. After the app's files are replaced (a new
+# upload / git push to Streamlit Community Cloud) a half-updated set of modules can stay in memory and
+# fail with "ImportError: cannot import name ...". Fingerprint the project's source files on every run
+# and drop the project's modules from sys.modules whenever the files change, so they are re-imported
+# from disk. Modules of the same name loaded from anywhere else (shadowing packages) are dropped too.
+import os                                              # noqa: E402
+import sys                                             # noqa: E402
+import traceback                                       # noqa: E402
+
+APP_VERSION = "4.1"
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+_PKGS = ("procsim", "ui", "pfd_canvas")
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+
+def _code_fingerprint():
+    items = []
+    for pkg in _PKGS:
+        for dirpath, _, files in os.walk(os.path.join(_ROOT, pkg)):
+            for f in files:
+                if f.endswith((".py", ".js", ".html")):
+                    path = os.path.join(dirpath, f)
+                    try:
+                        stt = os.stat(path)
+                        items.append((path, stt.st_mtime_ns, stt.st_size))
+                    except OSError:
+                        pass
+    return hash(tuple(sorted(items)))
+
+
+def _purge_project_modules():
+    for name in list(sys.modules):
+        if name.split(".")[0] in _PKGS:
+            del sys.modules[name]
+
+
+_fp_now = _code_fingerprint()
+_code_changed = getattr(sys, "_pfs_code_fp", None) not in (None, _fp_now)
+_shadowed = any(n in sys.modules and not os.path.abspath(getattr(sys.modules[n], "__file__", "") or "").startswith(_ROOT)
+                for n in _PKGS)
+if _code_changed or _shadowed:
+    _purge_project_modules()
+sys._pfs_code_fp = _fp_now
+
+
+def _import_project():
+    global pfd_canvas, EXAMPLES, new_model, normalize, S, panels, fluid_tab, workbook_tab, theme, ui
+    from pfd_canvas import pfd_canvas
+    from procsim.examples import EXAMPLES
+    from procsim.flowsheet import new_model, normalize
+    from ui import state as S
+    from ui import panels
+    from ui.fluid import fluid_tab, workbook_tab
+    from ui import theme
+    import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units   # noqa: E401,F401 - import everything up front
+    import procsim, ui
+    if getattr(procsim, "__version__", None) != APP_VERSION or getattr(ui, "__version__", None) != APP_VERSION:
+        raise ImportError(f"version mismatch: app.py {APP_VERSION}, procsim {getattr(procsim, '__version__', '?')}, "
+                          f"ui {getattr(ui, '__version__', '?')}")
+
+
+try:
+    _import_project()
+except ImportError:
+    _purge_project_modules()               # one clean retry from disk
+    try:
+        _import_project()
+    except ImportError:
+        st.error("**ProcessFlow Studio could not load its own files.** They are probably out of sync after an "
+                 "update. Make sure every file from the latest zip is in the repository (including the hidden "
+                 "`.streamlit` folder), then reboot the app: on Streamlit Community Cloud open **Manage app → ⋮ → "
+                 "Reboot app**; locally, stop and restart `streamlit run app.py`.")
+        st.code(traceback.format_exc())
+        st.stop()
 
 theme.apply_theme()
 
 S.init_state()
 ss = st.session_state
+if _code_changed:
+    # objects built by the previous code version must not be reused
+    ss.sol, ss.sol_hash = None, None
+    ss.widget_ver = ss.get("widget_ver", 0) + 1
 from ui import units as UN                             # noqa: E402
 
 UN.set_system(ss.get("units_sys", UN.SI))
@@ -102,18 +175,15 @@ with tab_wb:
     workbook_tab()
 
 with tab_case:
-    from ui.casestudy import case_study_tab
-    case_study_tab()
+    ui.casestudy.case_study_tab()
 
 with tab_fluid:
     fluid_tab()
 
 with tab_an:
-    from ui.analysis import analysis_tab
-    analysis_tab()
+    ui.analysis.analysis_tab()
 
 with tab_help:
-    from ui.help import HELP
-    st.markdown(HELP)
+    st.markdown(ui.help.HELP)
 
 theme.footer()
