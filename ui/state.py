@@ -1,0 +1,425 @@
+"""Session state, canvas <-> model synchronisation and canvas result payloads."""
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+
+import streamlit as st
+
+from procsim.flowsheet import new_model, normalize, build_fluid, solve, port_edges
+from procsim.unitops import CATALOGUE, default_params, energy_name
+from procsim.streams import stream_properties, hydrate_risk
+from procsim.examples import EXAMPLES, WET_GAS
+
+ENERGY_DIR = {"compressor": "in", "pump": "in", "heater": "in", "expander": "out", "cooler": "out",
+              "aircooler": "out"}
+
+
+# --------------------------------------------------------------- formatting
+
+def fmt(v, digits=None):
+    if v is None:
+        return "—"
+    if isinstance(v, str):
+        return v
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if x != x:
+        return "—"
+    a = abs(x)
+    if digits is not None:
+        return f"{x:,.{digits}f}".replace(",", " ")
+    if a == 0:
+        return "0"
+    if a >= 1e5:
+        return f"{x:,.0f}".replace(",", " ")
+    if a >= 100:
+        return f"{x:,.1f}".replace(",", " ")
+    if a >= 1:
+        return f"{x:.3f}"
+    if a >= 1e-3:
+        return f"{x:.4f}"
+    return f"{x:.3e}"
+
+
+def _sys():
+    from . import units as U
+    return U.system()
+
+
+def _duty(v, power):
+    from . import units as U
+    return f"{fmt(U.value('kW', v, power=power), 0 if (power or not U.field()) else 2)} {U.unit('kW', power=power)}"
+
+
+def qfmt(label, v, digits=None):
+    """'value unit' in the current display system for a labelled SI quantity."""
+    from . import units as U
+    import re
+    k2, v2 = U.kv(label, v)
+    m = re.search(r"\[([^\[\]]+)\]", k2)
+    u = m.group(1) if m else ""
+    if u.startswith("% "):
+        u = "%"
+    return f"{fmt(v2, digits)} {u}".strip()
+
+
+# --------------------------------------------------------------- session
+
+def init_state():
+    ss = st.session_state
+    if "model" not in ss:
+        ss.model = EXAMPLES["Two-stage gas compression with liquid recycle"]()
+        ss.nonce = 1
+        ss.fit = True
+        ss.last_evt = None
+        ss.selected = []
+        ss.sol = None
+        ss.sol_hash = None
+        ss.auto_solve = True
+        ss.svg = None
+        ss.widget_ver = 0
+        ss.solve_error = None
+
+
+def bump(fit=False):
+    """Python changed the structure: make the canvas adopt the model."""
+    st.session_state.nonce += 1
+    st.session_state.fit = fit
+    st.session_state.widget_ver += 1
+
+
+def load_model(m, fit=True):
+    normalize(m)
+    st.session_state.model = m
+    st.session_state.selected = []
+    st.session_state.sol = None
+    st.session_state.sol_hash = None
+    bump(fit)
+
+
+def canvas_structure(model):
+    units = {k: {"type": u["type"], "name": u["name"], "x": u["x"], "y": u["y"], "flip": bool(u.get("flip"))}
+             for k, u in model["units"].items()}
+    streams = {k: {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
+               for k, s in model["streams"].items()}
+    return {"units": units, "streams": streams}
+
+
+SHORT = {"column": "Column", "hx": "Heat exchanger", "separator": "2-phase separator",
+         "separator3": "3-phase separator", "feed": "Feed stream", "product": "Product stream", "splitter": "Tee"}
+
+
+def catalogue_payload():
+    out = {}
+    for t, c in CATALOGUE.items():
+        out[t] = {"label": c["label"], "short": SHORT.get(t, c["label"]), "prefix": c["prefix"], "category": c["category"],
+                  "ports": {"in": c["ports"]["in"], "out": c["ports"]["out"]}}
+    return out
+
+
+def default_feed_comp(model):
+    for u in model["units"].values():
+        if u["type"] == "feed" and u["params"].get("composition"):
+            return dict(u["params"]["composition"])
+    keys = model["fluid"]["components"]
+    comp = {k: v for k, v in WET_GAS.items() if k in keys}
+    if not comp:
+        comp = {keys[0]: 1.0}
+    return comp
+
+
+def merge_canvas_event(ev):
+    """Apply a canvas event to the session model. Returns True if the canvas must resync."""
+    ss = st.session_state
+    model = ss.model
+    js = ev.get("model") or {}
+    ju, jst = js.get("units", {}), js.get("streams", {})
+    for uid in list(model["units"].keys()):
+        if uid not in ju:
+            model["units"].pop(uid)
+    for uid, u in ju.items():
+        if u.get("type") not in CATALOGUE:
+            continue
+        if uid in model["units"]:
+            mu = model["units"][uid]
+            mu["x"], mu["y"], mu["flip"] = u["x"], u["y"], bool(u.get("flip"))
+        else:
+            src = (ev.get("copies") or {}).get(uid)
+            if src in model["units"] and model["units"][src]["type"] == u["type"]:
+                p = copy.deepcopy(model["units"][src]["params"])      # pasted: carry the specs
+                if u["type"] == "adjust":
+                    p["active"] = False                              # a copied adjust would fight the original
+            else:
+                p = default_params(u["type"])
+            if u["type"] == "feed" and not p.get("composition"):
+                p["composition"] = default_feed_comp(model)
+            model["units"][uid] = {"type": u["type"], "name": u["name"], "x": u["x"], "y": u["y"],
+                                   "flip": bool(u.get("flip")), "params": p}
+    # unique unit names (canvas proposes names; Python has the last word)
+    seen = set()
+    for uid, u in model["units"].items():
+        if u["name"] in seen:
+            base, n = u["name"], 2
+            while f"{base} ({n})" in seen:
+                n += 1
+            u["name"] = f"{base} ({n})"
+        seen.add(u["name"])
+    model["streams"] = {sid: {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
+                        for sid, s in jst.items()}
+    # unique stream names
+    used = {u["name"] for u in model["units"].values()}
+    for sid, s in model["streams"].items():
+        su, du = model["units"].get(s["src"][0]), model["units"].get(s["dst"][0])
+        terminal = (su and su["type"] == "feed") or (du and du["type"] == "product")
+        if not terminal:
+            if s["name"] in used:
+                n = 1
+                while str(n) in used:
+                    n += 1
+                s["name"] = str(n)
+            used.add(s["name"])
+    normalize(model)
+    ss.selected = [i for i in ev.get("selected", []) if i in model["units"] or i in model["streams"]]
+    if ev.get("event") == "export_svg" and ev.get("svg"):
+        ss.svg = ev["svg"]
+    return canvas_structure(model) != _js_normal(js)
+
+
+def _js_normal(js):
+    units = {k: {"type": u["type"], "name": u["name"], "x": u["x"], "y": u["y"], "flip": bool(u.get("flip"))}
+             for k, u in js.get("units", {}).items() if u.get("type") in CATALOGUE}
+    streams = {k: {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
+               for k, s in js.get("streams", {}).items()}
+    return {"units": units, "streams": streams}
+
+
+def process_canvas_value(key="pfd"):
+    ss = st.session_state
+    ev = ss.get(key)
+    if not ev or not isinstance(ev, dict):
+        return
+    tag = (ev.get("session"), ev.get("rev"))
+    if tag == ss.last_evt:
+        return
+    ss.last_evt = tag
+    if ev.get("nonce") != ss.nonce:
+        # event produced against an older model version (e.g. just after loading an example)
+        return
+    if merge_canvas_event(ev):
+        bump()
+
+
+# --------------------------------------------------------------- solving
+
+def model_hash(model):
+    m = copy.deepcopy(model)
+    m.pop("economics", None)          # economics are post-processing: editing them never re-solves
+    for u in m["units"].values():
+        for k in ("x", "y", "flip"):
+            u.pop(k, None)
+    return hashlib.sha1(json.dumps(m, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def ensure_solved(force=False):
+    ss = st.session_state
+    h = model_hash(ss.model)
+    if not force and (not ss.auto_solve or h == ss.sol_hash):
+        return
+    if not ss.model["units"]:
+        ss.sol, ss.sol_hash, ss.solve_error = None, h, None
+        return
+    try:
+        with st.spinner("Solving flowsheet…"):
+            fp = build_fluid(ss.model)
+            sol = solve(ss.model, fp)
+        ss.sol, ss.sol_hash, ss.solve_error = sol, h, None
+        # Adjust writes its converged value back into the variable, as in HYSYS
+        changed = False
+        for a, (vu, vp, val) in sol.adjusted.items():
+            if vu in ss.model["units"] and ss.model["units"][vu]["params"].get(vp) != val:
+                ss.model["units"][vu]["params"][vp] = val
+                changed = True
+        if changed:
+            ss.sol_hash = model_hash(ss.model)
+            ss.widget_ver += 1
+    except Exception as e:   # fluid-package problems etc.
+        ss.sol, ss.sol_hash, ss.solve_error = None, h, f"{type(e).__name__}: {e}"
+
+
+def sol_is_current():
+    ss = st.session_state
+    return ss.sol is not None and ss.sol_hash == model_hash(ss.model)
+
+
+# --------------------------------------------------------------- canvas payload
+
+def _unit_label(u, res):
+    t = u["type"]
+    if not res:
+        return ""
+    key = {"compressor": "Power [kW]", "pump": "Power [kW]", "expander": "Power produced [kW]",
+           "heater": "Duty [kW]", "cooler": "Duty removed [kW]", "aircooler": "Duty removed [kW]",
+           "hx": "Duty [kW]"}.get(t)
+    if t == "column" and res.get("Top T [°C]") is not None:
+        tv = res.get("Bottoms TVP @ 37.8 °C [bar(a)]")
+        return (f"{qfmt('Top T [°C]', res['Top T [°C]'], 0)} / {qfmt('Bottom T [°C]', res['Bottom T [°C]'], 0)}"
+                + (f" · TVP {qfmt('TVP [bar(a)]', tv, 2)}" if tv is not None else ""))
+    if t == "pipe" and res.get("Pressure drop [bar]") is not None:
+        return f"ΔP {qfmt('Pressure drop [bar]', res['Pressure drop [bar]'], 2)} · {res.get('Flow regime (dominant)', '')}"
+    if t == "compressor" and res.get("Surge margin [%]") is not None and res.get("Power [kW]") is not None:
+        rec = res.get("Anti-surge recycle [% of throughput]") or 0.0
+        return (f"{qfmt('Power [kW]', res['Power [kW]'], 0)} · SM {res['Surge margin [%]']:.0f} %"
+                + (f" · ASC {rec:.0f} %" if rec > 0.05 else ""))
+    if key and res.get(key) is not None:
+        return qfmt(key, res[key], 0 if "SI" in _sys() else 2)
+    if t == "scrubber" and res.get("Gas load [% of max]") is not None:
+        return (f"{qfmt('Selected diameter [mm]', res['Selected diameter [mm]'], 0 if 'SI' in _sys() else 1)} · "
+                f"load {res['Gas load [% of max]']:.0f} %")
+    if t in ("separator", "separator3") and res.get("Vessel T [°C]") is not None:
+        return f"{qfmt('Vessel T [°C]', res['Vessel T [°C]'], 1)} · {qfmt('Vessel P [bar(a)]', res['Vessel P [bar(a)]'], 1)}"
+    if t == "recycle":
+        return f"{res.get('Iterations', '')} it" if res.get("Converged") == "Yes" else "not converged"
+    return ""
+
+
+def results_payload():
+    ss = st.session_state
+    model, sol = ss.model, ss.sol
+    current = sol_is_current()
+    out = {"streams": {}, "units": {}, "links": []}
+    for sid, s in model["streams"].items():
+        entry = {"solved": False}
+        st_ = sol.streams.get(sid) if (sol and current) else None
+        if st_ is not None:
+            p = stream_properties(st_, sol.fp)
+            entry["solved"] = True
+            if hydrate_risk(st_, sol.fp):
+                entry["warn"] = "hydrate"
+            if st_.empty:
+                entry["label"] = "no flow"
+            else:
+                entry["label"] = (f"{qfmt('Temperature [°C]', p['Temperature [°C]'], 1)} · "
+                                  f"{qfmt('Pressure [bar(a)]', p['Pressure [bar(a)]'], 1)}")
+                entry["tip"] = "\n".join([f"{p['Phase']}  (VF {p['Vapour fraction']:.4f})",
+                                          f"T {qfmt('Temperature [°C]', p['Temperature [°C]'], 2)}",
+                                          f"P {qfmt('Pressure [bar(a)]', p['Pressure [bar(a)]'], 3)}",
+                                          f"Molar flow {fmt(p['Molar flow [kmol/h]'])} kmol/h",
+                                          f"Mass flow {qfmt('Mass flow [kg/h]', p['Mass flow [kg/h]'])}",
+                                          f"Std gas {qfmt('Std gas flow [MSm³/d]', p['Std gas flow [MSm³/d]'], 4)}"]
+                                         + ([f"⚠ Below hydrate T ({qfmt('T [°C]', p['Hydrate T (inhibited) [°C]'], 1)} incl. inhibitor)"]
+                                            if entry.get("warn") else []))
+        out["streams"][sid] = entry
+    for uid, u in model["units"].items():
+        e = {}
+        if sol and current:
+            e["status"] = sol.status.get(uid, "unsolved")
+            res = sol.results.get(uid) or {}
+            e["label"] = _unit_label(u, res)
+            tip = [f"{k}: {fmt(v)}" for k, v in list(res.items())[:8]]
+            if uid in sol.errors:
+                tip.insert(0, "⚠ " + sol.errors[uid])
+            e["tip"] = "\n".join(tip)
+        else:
+            e["status"] = "unsolved" if u["type"] not in ("feed", "product") else "ok"
+        # energy streams
+        t = u["type"]
+        dirn = ENERGY_DIR.get(t)
+        duty_val = None
+        if t in ("separator", "separator3") and abs(float(u["params"].get("duty", 0) or 0)) > 0:
+            dirn = "in" if u["params"]["duty"] > 0 else "out"
+        if t == "pipe" and u["params"].get("heat") == "Overall U to ambient" and float(u["params"].get("U", 0)) > 0:
+            dirn = "out"
+        if dirn:
+            kind = "work" if t in ("compressor", "pump", "expander") else "heat"
+            name = energy_name(u, kind)
+            if sol and current:
+                for en in sol.energy:
+                    if en.name == name:
+                        duty_val = en.duty_kW
+            e["energy"] = [{"name": name, "dir": dirn,
+                            "label": _duty(abs(duty_val), kind == "work") if duty_val is not None else ""}]
+        if t == "column":
+            lst = []
+            for slot, (flag, suffix, d) in enumerate(((u["params"].get("condenser", "None") != "None", "cond", "out"),
+                                                      (u["params"].get("reboiler", "Yes") == "Yes", "reb", "in"))):
+                if not flag:
+                    continue
+                name = f"Q-{u['name']} {suffix}"
+                val = next((en.duty_kW for en in sol.energy if en.name == name), None) if (sol and current) else None
+                lst.append({"name": name, "dir": d, "slot": slot, "short": "Condenser" if suffix == "cond" else "Reboiler",
+                            "label": _duty(abs(val), False) if val is not None else ""})
+            if lst:
+                e["energy"] = lst
+        out["units"][uid] = e
+        if t == "adjust":
+            p = u["params"]
+            if p.get("var_unit") in model["units"]:
+                out["links"].append([uid, p["var_unit"]])
+            if p.get("tgt_kind") == "stream":
+                sid = next((k for k, s in model["streams"].items() if s["name"] == p.get("tgt_obj")), None)
+                if sid:
+                    out["links"].append([uid, sid])
+            else:
+                tu = next((k for k, x in model["units"].items() if x["name"] == p.get("tgt_obj")), None)
+                if tu:
+                    out["links"].append([uid, tu])
+    return out
+
+
+def status_line():
+    ss = st.session_state
+    sol = ss.sol
+    n_u = sum(1 for u in ss.model["units"].values() if u["type"] not in ("feed", "product"))
+    n_s = len(ss.model["streams"])
+    if ss.solve_error:
+        return f"Fluid package error: {ss.solve_error}"
+    if not sol_is_current():
+        return f"{n_u} unit ops · {n_s} streams · not solved (press Solve)"
+    bad = [k for k, v in sol.status.items() if v in ("error", "missing", "unsolved")]
+    flag = "solved" if not bad and sol.converged else f"{len(bad)} object(s) need attention"
+    return f"{n_u} unit ops · {n_s} streams · {flag} in {sol.seconds:.1f} s"
+
+
+def connections(model, uid):
+    """Readable inlet/outlet connections for a unit."""
+    ins = port_edges(model, uid, "in")
+    outs = port_edges(model, uid, "out")
+    rows = []
+    cat = CATALOGUE[model["units"][uid]["type"]]["ports"]
+    for p in cat["in"]:
+        names = [model["streams"][s]["name"] for s in ins.get(p, [])]
+        rows.append({"Port": p.replace("_", " "), "Direction": "Inlet", "Stream(s)": ", ".join(names) or "— not connected —"})
+    for p in cat["out"]:
+        names = [model["streams"][s]["name"] for s in outs.get(p, [])]
+        rows.append({"Port": p.replace("_", " "), "Direction": "Outlet", "Stream(s)": ", ".join(names) or "— not connected —"})
+    return rows
+
+
+def attention_items():
+    """(object name, severity, message) for the 'needs attention' list."""
+    ss = st.session_state
+    sol = ss.sol
+    items = []
+    if not sol_is_current():
+        return items
+    for k, v in sol.status.items():
+        if k in ss.model["units"] and v in ("error", "missing", "unsolved", "warning"):
+            msg = sol.errors.get(k) or (sol.results.get(k) or {}).get("Warning", "")
+            items.append((ss.model["units"][k]["name"], v, msg))
+    for sid, s in ss.model["streams"].items():
+        st_ = sol.streams.get(sid)
+        if st_ is not None and hydrate_risk(st_, sol.fp):
+            p = stream_properties(st_, sol.fp)
+            if st_.flash.phase("W") is not None:
+                advice = "more inhibitor or insulation needed"
+            else:
+                advice = ("water-saturated gas with no free water here - hydrates form as soon as water condenses; "
+                          "dehydrate, inhibit or keep it warm downstream")
+            items.append((s["name"], "warning", f"{qfmt('T [°C]', p['Temperature [°C]'], 1)} is below the hydrate "
+                          f"formation temperature {qfmt('T [°C]', p['Hydrate T (inhibited) [°C]'], 1)} "
+                          f"(Motiee, incl. inhibitor) - {advice}"))
+    return items

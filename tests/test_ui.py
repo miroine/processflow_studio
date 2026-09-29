@@ -1,0 +1,417 @@
+"""Headless UI smoke test: runs app.py against the Streamlit/Plotly stubs and drives it
+through the main workflows (canvas events, property views, parameter edits, examples,
+fluid package, workbook, charts).
+
+Run:  python tests/test_ui.py
+"""
+import os
+import runpy
+import sys
+import time
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+sys.path.insert(0, os.path.join(ROOT, "tests", "stubs"))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "tests"))
+os.chdir(ROOT)
+
+import streamlit as st                     # the stub                                    # noqa: E402
+from check import Checker                  # noqa: E402
+
+c = Checker("ui")
+APP = os.path.join(ROOT, "app.py")
+ss = st.session_state
+pending = []   # (widget ident, new value) applied before the next run, callbacks fired
+
+
+def run(max_reruns=6):
+    for _ in range(max_reruns):
+        for ident, val in pending:
+            ss[ident] = val
+            cb = st.HOOK["callbacks"].get(ident)
+            if cb:
+                cb[0](*cb[1], **cb[2])
+        pending.clear()
+        st.reset_run()
+        try:
+            runpy.run_path(APP, run_name="__main__")
+            return True
+        except st.RerunException:
+            continue
+    return True
+
+
+def canvas_args():
+    calls = [x for x in st.HOOK["component_calls"] if x["name"] == "pfd_canvas"]
+    return calls[-1]["args"] if calls else None
+
+
+_rev = [0]
+
+
+def canvas_event(event, model_struct, selected=(), **extra):
+    _rev[0] += 1
+    ss["pfd"] = dict({"session": "js-test", "rev": _rev[0], "event": event, "nonce": ss.nonce,
+                      "model": model_struct, "selected": list(selected)}, **extra)
+
+
+def uid_by_name(name):
+    return next(k for k, u in ss.model["units"].items() if u["name"] == name)
+
+
+# ---- 1. first load ---------------------------------------------------------------
+t = time.time()
+run()
+a = canvas_args()
+c.check("app runs and renders the canvas", a is not None, "")
+c.check("canvas gets every unit and stream", len(a["model"]["units"]) == len(ss.model["units"]) and
+        len(a["model"]["streams"]) == len(ss.model["streams"]), "")
+c.check("default example solved on load", ss.sol is not None and ss.sol.converged, ss.get("solve_error"))
+c.check("all canvas streams marked solved", all(v["solved"] for v in a["results"]["streams"].values()), "")
+c.check("status line reports solved", "solved" in a["status"], a["status"])
+c.check("energy streams passed for compressors", any(e.get("energy") for e in a["results"]["units"].values()), "")
+c.check("no error messages on first load", not st.HOOK["errors"], str(st.HOOK["errors"]))
+c.check("charts rendered on first load", len(st.HOOK["charts"]) >= 3, str(len(st.HOOK["charts"])))
+print(f"  first run {time.time() - t:.1f} s")
+
+# ---- 2. every property view -----------------------------------------------------------
+for oid in list(ss.model["units"].keys()) + list(ss.model["streams"].keys()):
+    ss.selected = [oid]
+    try:
+        run()
+        ok = True
+        msg = ""
+    except Exception as e:     # noqa: BLE001
+        ok, msg = False, f"{type(e).__name__}: {e}"
+    name = (ss.model["units"].get(oid) or ss.model["streams"].get(oid) or {}).get("name", oid)
+    c.check(f"property view opens: {name}", ok, msg)
+
+# ---- 3. parameter edit through a widget callback -----------------------------------------
+cooler = uid_by_name("E-100")
+ss.selected = [cooler]
+run()
+key = f"w{ss.widget_ver}_{cooler}_T_out"
+c.check("cooler outlet-T widget present", key in ss, key)
+pending.append((key, 20.0))
+run()
+c.close("callback wrote the new spec to the model", ss.model["units"][cooler]["params"]["T_out"], 20.0, 1e-12)
+res = ss.sol.results[cooler]
+c.close("auto-solve re-solved with the new spec", res["Outlet T [°C]"], 20.0, 1e-6)
+
+# ---- 4. canvas events ------------------------------------------------------------------------
+from ui.state import canvas_structure   # noqa: E402
+
+struct = canvas_structure(ss.model)
+struct["units"]["uJS1"] = {"type": "pump", "name": "P-100", "x": 900, "y": 400, "flip": False}
+canvas_event("add", struct, ["uJS1"], added="uJS1")
+nonce0 = ss.nonce
+run()
+c.check("canvas 'add' creates the unit with default params", "uJS1" in ss.model["units"] and
+        ss.model["units"]["uJS1"]["params"].get("eff") == 75.0, "")
+c.eq("no resync needed for a clean add", ss.nonce, nonce0)
+c.check("new unit shows as incomplete", ss.sol.status.get("uJS1") == "missing", ss.sol.status.get("uJS1"))
+c.check("property view of the new pump opens", ss.selected == ["uJS1"], str(ss.selected))
+
+struct = canvas_structure(ss.model)
+v1 = uid_by_name("V-101 Scrubber")
+struct["units"]["uJS2"] = {"type": "product", "name": "Product 1", "x": 1000, "y": 400, "flip": False}
+# connect: scrubber liquid is already used -> Python must drop the duplicate and resync the canvas
+struct["streams"]["sJS1"] = {"name": "99", "src": [v1, "liquid"], "dst": ["uJS1", "in"]}
+struct["streams"]["sJS2"] = {"name": "Product 1", "src": ["uJS1", "out"], "dst": ["uJS2", "in"]}
+canvas_event("connect", struct, ["sJS1"])
+nonce0 = ss.nonce
+run()
+c.check("invalid second connection on a single outlet is dropped", "sJS1" not in ss.model["streams"], "")
+c.check("canvas resync requested after Python corrected the structure", ss.nonce == nonce0 + 1, f"{nonce0}->{ss.nonce}")
+c.check("valid terminal connection kept", "sJS2" in ss.model["streams"], "")
+
+# duplicate unit name from the canvas gets renamed
+struct = canvas_structure(ss.model)
+struct["units"]["uJS3"] = {"type": "valve", "name": "VLV-100", "x": 50, "y": 50, "flip": False}
+canvas_event("add", struct, ["uJS3"])
+run()
+c.check("duplicate name from the canvas is made unique", ss.model["units"]["uJS3"]["name"] != "VLV-100",
+        ss.model["units"]["uJS3"]["name"])
+
+# move only -> no re-solve (hash excludes positions)
+h0 = ss.sol_hash
+struct = canvas_structure(ss.model)
+struct["units"]["uJS3"]["x"] = 70
+canvas_event("move", struct, ["uJS3"])
+run()
+c.eq("moving an icon does not trigger a re-solve", ss.sol_hash, h0)
+c.eq("move stored in the model", ss.model["units"]["uJS3"]["x"], 70)
+
+# stale event (older nonce) ignored
+struct = canvas_structure(ss.model)
+struct["units"].pop("uJS3")
+_rev[0] += 1
+ss["pfd"] = {"session": "js-test", "rev": _rev[0], "event": "delete", "nonce": -5, "model": struct, "selected": []}
+run()
+c.check("event from an older canvas version is ignored", "uJS3" in ss.model["units"], "")
+
+# delete through canvas
+struct = canvas_structure(ss.model)
+for k in ("uJS1", "uJS2", "uJS3"):
+    struct["units"].pop(k)
+struct["streams"] = {k: v for k, v in struct["streams"].items() if k != "sJS2"}
+canvas_event("delete", struct, [])
+run()
+c.check("canvas delete removes units and streams", not any(k in ss.model["units"] for k in ("uJS1", "uJS2", "uJS3"))
+        and "sJS2" not in ss.model["streams"], "")
+
+# export svg event
+canvas_event("export_svg", canvas_structure(ss.model), [], svg="<svg>test</svg>")
+run()
+c.eq("SVG export stored for download", ss.svg, "<svg>test</svg>")
+c.check("SVG download button shown", any(x[0] == "download_button" and "SVG" in x[1] for x in st.HOOK["log"]), "")
+
+# ---- 5. rename through the property view -----------------------------------------------------
+k101 = uid_by_name("K-101")
+ss.selected = [k101]
+run()
+ss[f"w{ss.widget_ver}_{k101}___name"] = "K-101 HP"
+run()
+c.eq("rename from the property view", ss.model["units"][k101]["name"], "K-101 HP")
+
+# ---- 6. examples -----------------------------------------------------------------------------------
+from procsim.examples import EXAMPLES   # noqa: E402
+
+for name in EXAMPLES:
+    st.HOOK["values"]["selectbox:Example:"] = name
+    st.HOOK["press"].add("Load example")
+    run()
+    bad = {ss.model["units"][k]["name"]: v for k, v in ss.sol.status.items() if v != "ok"} if ss.sol else "no sol"
+    c.check(f"example loads and solves cleanly: {name}", ss.sol is not None and not bad, str(bad))
+    c.check(f"canvas asked to fit after loading: {name}", canvas_args()["fit"] is True, "")
+    for oid in list(ss.model["units"].keys()):
+        ss.selected = [oid]
+        try:
+            run()
+            ok, msg = True, ""
+        except Exception as e:     # noqa: BLE001
+            ok, msg = False, f"{type(e).__name__}: {e}"
+        if not ok:
+            c.check(f"{name}: view {ss.model['units'][oid]['name']}", ok, msg)
+    ss.selected = []
+
+# JT example: adjust wrote back its value
+st.HOOK["values"]["selectbox:Example:"] = "JT dew-point control: gas/gas exchanger + LTS + Adjust"
+st.HOOK["press"].add("Load example")
+run()
+jt = uid_by_name("VLV-100 JT")
+c.close("Adjust result written back to the valve spec", ss.model["units"][jt]["params"]["P_out"],
+        ss.sol.adjusted[uid_by_name("ADJ-1")][2], 1e-12)
+c.check("adjust links drawn on the canvas", len(canvas_args()["results"]["links"]) == 2, "")
+
+# ---- 7. auto-solve off, manual solve ------------------------------------------------------------
+st.HOOK["values"]["toggle:Auto-solve:"] = False
+run()
+lts = uid_by_name("V-100 LTS")
+ss.model["units"][lts]["params"]["dP"] = 1.0
+run()
+c.check("with auto-solve off, edits leave the solution stale", "not solved" in canvas_args()["status"],
+        canvas_args()["status"])
+st.HOOK["values"]["toggle:Auto-solve:"] = False
+st.HOOK["press"].add("▶ Solve")
+run()
+c.check("Solve button solves", "solved" in canvas_args()["status"], canvas_args()["status"])
+st.HOOK["values"]["toggle:Auto-solve:"] = True
+run()
+
+# ---- 8. fluid package: hypothetical component --------------------------------------------------
+ss["hy_key"] = "C11+"
+st.HOOK["press"].add("Add")
+run()
+c.check("hypothetical component added to the component list", "C11+" in ss.model["fluid"]["components"], "")
+c.check("flowsheet still solves with the hypo present", ss.sol is not None and ss.sol.converged, ss.solve_error)
+
+# ---- 9. phase envelope from the charts tab ------------------------------------------------------
+st.HOOK["press"].add("envgo_charts")
+t = time.time()
+run()
+c.check("phase envelope computed and plotted", "env_charts" in ss and
+        any(any(type(tr).__name__ == "Contour" for tr in f.data) for f in st.HOOK["charts"]), "")
+print(f"  envelope {time.time() - t:.1f} s")
+
+# ---- 10. paste from the canvas copies specifications ----------------------------------------------
+st.HOOK["values"]["selectbox:Example:"] = "Two-stage gas compression with liquid recycle"
+st.HOOK["press"].add("Load example")
+run()
+k100 = uid_by_name("K-100")
+ss.model["units"][k100]["params"]["eff"] = 81.5
+struct = canvas_structure(ss.model)
+struct["units"]["uCP1"] = {"type": "compressor", "name": "K-102", "x": 500, "y": 500, "flip": False}
+canvas_event("paste", struct, ["uCP1"], copies={"uCP1": k100})
+run()
+c.close("pasted unit carries the source specification", ss.model["units"]["uCP1"]["params"]["eff"], 81.5, 1e-12)
+c.check("pasted params are an independent copy",
+        ss.model["units"]["uCP1"]["params"] is not ss.model["units"][k100]["params"], "")
+
+# ---- 11. subsea example: pipe views, hydrate warning -----------------------------------------------
+st.HOOK["values"]["selectbox:Example:"] = "Subsea tie-back: MEG injection + flowline + riser (Beggs & Brill, hydrate check)"
+st.HOOK["press"].add("Load example")
+run()
+a = canvas_args()
+line = [k for k, x in ss.model["streams"].items() if x["name"] in ("Flowline inlet", "Riser base", "Topside arrival")]
+c.check("with MEG injected, the flowline, riser and arrival are not flagged",
+        not any(a["results"]["streams"][k].get("warn") for k in line), "")
+# analysis tab: KPIs, Sankey, flow-assurance plot with inhibited curve, dosing calculator
+c.check("analysis KPIs rendered", any("Shaft power in" in t for t in st.HOOK["texts"]), "")
+c.check("Sankey mass-flow chart rendered", any(any(type(tr).__name__ == "Sankey" for tr in f.data) for f in st.HOOK["charts"]), "")
+fa = [f for f in st.HOOK["charts"] if "P–T" in str(f.layout.get("title", ""))]
+c.check("flow-assurance chart shows uninhibited and inhibited hydrate curves",
+        bool(fa) and sum(1 for tr in fa[0].data if "Hydrate curve" in str(tr.kw.get("name", ""))) == 2, "")
+c.check("dosing calculator reports a MEG injection rate", any("Lean MEG injection" in t for t in st.HOOK["texts"]), "")
+# switch the MEG off: the line must now be flagged
+meg = uid_by_name("Lean MEG")
+ss.model["units"][meg]["params"]["flow"] = 0.0
+run()
+a = canvas_args()
+c.check("hydrate-risk streams flagged for the canvas", any(v.get("warn") for v in a["results"]["streams"].values()), "")
+c.check("attention list mentions the hydrate risk", any("hydrate" in t for t in st.HOOK["texts"]), "")
+fl = uid_by_name("PIPE-100 Flowline")
+ss.selected = [fl]
+run()
+c.check("pipe property view shows the profile charts",
+        sum(1 for f in st.HOOK["charts"] if "PIPE-100 Flowline" in str(f.layout.get("title", ""))) >= 2, "")
+c.check("pipe label on canvas shows ΔP and regime", "ΔP" in canvas_args()["results"]["units"][fl]["label"], "")
+c.check("pipe heat loss drawn as an outgoing energy stream",
+        canvas_args()["results"]["units"][fl]["energy"][0]["dir"] == "out", "")
+
+# ---- 12. case study -----------------------------------------------------------------------------
+run()
+ss[f"cs_obj_{ss.cs_sig}"] = "PIPE-100 Flowline"
+run()
+ss[f"cs_key_{fl}"] = "U"
+run()
+ss[f"cs_lo_{fl}_U"] = 1.0
+ss[f"cs_hi_{fl}_U"] = 10.0
+ss["cs_n"] = 3
+from ui.casestudy import dependent_options   # noqa: E402
+opts = dependent_options(ss.model, ss.sol)
+want = [o for o in opts if o[1] == "Topside arrival" and o[2] in ("Temperature [°C]", "Hydrate margin [°C]")]
+c.eq("case-study result options include stream properties", len(want), 2)
+st.HOOK["values"][f"cs_deps_{ss.cs_sig}_{ss.sol_hash[:8]}"] = want
+st.HOOK["press"].add("cs_run")
+t = time.time()
+run()
+case = ss.get("case")
+c.check("case study ran 3 cases", case is not None and len(case["df"]) == 3, "")
+if case is not None:
+    col = "Topside arrival · Temperature [°C]"
+    ys = list(case["df"][col])
+    c.check("arrival temperature falls as flowline U rises", ys[0] > ys[1] > ys[2], str(ys))
+    c.check("all cases converged", bool(case["df"]["Converged"].all()), str(case["df"]["Message"].tolist()))
+c.eq("case study leaves the base model unchanged", ss.model["units"][fl]["params"]["U"], 8.0)
+print(f"  case study {time.time() - t:.1f} s")
+
+# ---- 13. printable report --------------------------------------------------------------------------
+from ui.report import build_report   # noqa: E402
+ss.svg = "<svg xmlns='http://www.w3.org/2000/svg'><rect width='10' height='10'/></svg>"
+html = build_report(ss.model, ss.sol, ss.svg, "Tie-back screening")
+c.check("report embeds the PFD SVG", ss.svg in html, "")
+c.check("report lists every stream", all(s["name"] in html for s in ss.model["streams"].values()), "")
+c.check("report flags the hydrate risk", "hydrate" in html.lower(), "")
+c.check("report is a complete HTML document", html.startswith("<!doctype html>") and html.endswith("</html>"), "")
+run()
+c.check("report download button rendered", any(x[0] == "download_button" and "report" in x[1] for x in st.HOOK["log"]), "")
+
+# ---- 14. compressor curve panel: generate a curve, switch to curve mode ---------------------------------
+st.HOOK["values"]["selectbox:Example:"] = "Oil stabilisation: 3-stage separation + recompression"
+st.HOOK["press"].add("Load example")
+run()
+k2 = uid_by_name("K-200 MP comp")
+ss.selected = [k2]
+run()
+st.HOOK["press"].add(f"w{ss.widget_ver}_{k2}___gencurve")
+run()
+cur = ss.model["units"][k2]["params"].get("curve") or {}
+c.eq("typical curve generated with 8 points", len(cur.get("flow", [])), 8)
+c.check("compressor map drawn after generating the curve",
+        any("performance map" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+p_before = ss.sol.results[k2]["Outlet P [bar(a)]"]
+ss[f"w{ss.widget_ver}_{k2}_spec"] = "Performance curve"
+run()
+c.close("switching to curve mode keeps the discharge pressure (curve through the duty point)",
+        ss.sol.results[k2]["Outlet P [bar(a)]"], p_before, 0.05)
+c.check("canvas label shows the surge margin", "SM" in canvas_args()["results"]["units"][k2]["label"],
+        canvas_args()["results"]["units"][k2]["label"])
+scr = uid_by_name("V-210 Scrubber")
+ss.selected = [scr]
+run()
+c.check("scrubber sizing tab shows the gas-load bar", any("Gas load" in t for t in st.HOOK["texts"]), "")
+c.check("scrubber canvas label shows diameter and load", "load" in canvas_args()["results"]["units"][scr]["label"], "")
+
+# ---- 15. stabiliser column example ------------------------------------------------------------------------
+st.HOOK["values"]["selectbox:Example:"] = "Condensate stabiliser column with TVP spec (Adjust)"
+st.HOOK["press"].add("Load example")
+run()
+colu = uid_by_name("T-100 Stabiliser")
+c.close("stabiliser example meets its TVP target", ss.sol.results[colu]["Bottoms TVP @ 37.8 °C [bar(a)]"], 0.8, 0.0021)
+e = canvas_args()["results"]["units"][colu]["energy"]
+c.check("column reboiler drawn as an incoming energy stream in slot 1",
+        len(e) == 1 and e[0]["dir"] == "in" and e[0]["slot"] == 1, str(e))
+ss.selected = [colu]
+run()
+c.check("column profile charts rendered", any("stage profiles" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("theme footer credits the author", any("Merouane Hamdani" in t for t in st.HOOK["texts"]), "")
+c.check("header and disclaimer rendered", any("Educational use only" in t for t in st.HOOK["texts"]) and
+        any("not affiliated with or endorsed by Equinor" in t for t in st.HOOK["texts"]), "")
+
+# ---- 16. field units, economics, anti-surge in the UI ---------------------------------------------
+st.HOOK["values"]["selectbox:Example:"] = "Two-stage gas compression with liquid recycle"
+st.HOOK["press"].add("Load example")
+run()
+pending.append(("units_sys", "Field"))
+run()
+a = canvas_args()
+lab = [v.get("label", "") for v in a["results"]["streams"].values()]
+c.check("field units: canvas stream labels in °F and psia", any("°F" in l and "psia" in l for l in lab), str(lab[:3]))
+c.check("field units: compressor label in hp", any("hp" in (v.get("label") or "") for v in a["results"]["units"].values()), "")
+e100 = uid_by_name("E-100")
+ss.selected = [e100]
+run()
+key = f"w{ss.widget_ver}_{e100}_T_out"
+c.close("field units: the cooler outlet-T input shows °F", ss[key], 35.0 * 1.8 + 32.0, 1e-9)
+c.check("field units: input label carries °F", any(x[1] == "Outlet temperature [°F]" for x in st.HOOK["log"]), "")
+pending.append((key, 86.0))            # 86 °F = 30 °C
+run()
+c.close("editing in °F stores SI in the model", ss.model["units"][e100]["params"]["T_out"], 30.0, 1e-9)
+c.close("…and the solve uses it", ss.sol.results[e100]["Outlet T [°C]"], 30.0, 1e-6)
+from ui.report import build_report   # noqa: E402
+html = build_report(ss.model, ss.sol, None, "Field report")
+c.check("report in field units", "units: Field" in html and "psia" in html and "Economics" in html, "")
+# economics panel: change power source to gas turbine through its widget
+run()
+wk = f"ec_driver_{ss.widget_ver}"
+c.check("economics panel rendered", wk in ss, wk)
+pending.append((wk, "Gas turbine"))
+run()
+c.eq("economics settings stored with the flowsheet", ss.model.get("economics", {}).get("driver"), "Gas turbine")
+c.check("economics KPIs rendered", any("CO₂ intensity" in t for t in st.HOOK["texts"]), "")
+c.check("economics chart rendered", any("CO₂ by energy stream" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+h0 = ss.sol_hash
+run()
+c.eq("editing economics does not trigger a re-solve", ss.sol_hash, h0)
+from ui.casestudy import dependent_options   # noqa: E402
+c.check("economics results selectable in the case study",
+        any(o[0] == "econ" and "intensity" in o[2] for o in dependent_options(ss.model, ss.sol)), "")
+# turndown: anti-surge recycle shows on the canvas label
+feed = next(k for k, u in ss.model["units"].items() if u["type"] == "feed")
+ss.model["units"][feed]["params"]["flow"] = 1.0
+run()
+k100 = uid_by_name("K-100")
+c.check("anti-surge recycle shown on the compressor label", "ASC" in canvas_args()["results"]["units"][k100]["label"],
+        canvas_args()["results"]["units"][k100]["label"])
+pending.append(("units_sys", "SI (metric)"))
+run()
+c.check("back to SI: labels in °C", any("°C" in (v.get("label") or "") for v in canvas_args()["results"]["streams"].values()), "")
+
+# ---- 17. blank flowsheet -----------------------------------------------------------------------
+st.HOOK["press"].add("New (blank)")
+run()
+c.eq("blank flowsheet", len(ss.model["units"]), 0)
+c.check("blank flowsheet status", "0 unit ops" in canvas_args()["status"], canvas_args()["status"])
+
+sys.exit(c.report())
