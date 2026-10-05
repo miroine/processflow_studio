@@ -10,6 +10,13 @@ import sys
 import time
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+# PFS_REAL_PLOTLY=site  -> use the installed (real) Plotly instead of the Plotly stub (CI);
+# PFS_REAL_PLOTLY=<dir>  -> use a real Plotly from that directory.  Every chart is then fully serialised.
+if os.environ.get("PFS_REAL_PLOTLY"):
+    if os.environ["PFS_REAL_PLOTLY"] != "site":
+        sys.path.insert(0, os.environ["PFS_REAL_PLOTLY"])
+    import plotly.graph_objects                # noqa: E402,F401  (cached before the stubs go on the path)
+    import plotly.subplots                     # noqa: E402,F401
 sys.path.insert(0, os.path.join(ROOT, "tests", "stubs"))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
@@ -444,7 +451,7 @@ c.check("SURF example solved, every subsea unit ok",
         ss.sol is not None and all(ss.sol.status.get(k) == "ok" for k in surf_ids),
         str({ss.model["units"][k]["name"]: ss.sol.errors.get(k) for k in surf_ids if ss.sol.status.get(k) != "ok"}))
 c.check("canvas palette offers the SURF group",
-        sum(1 for v in a["catalogue"].values() if v["category"] == "Subsea (SURF)") == 8, "")
+        sum(1 for v in a["catalogue"].values() if v["category"] == "Subsea (SURF)") == 14, "")
 w1, tmp = uid_by_name("W-1"), uid_by_name("TMP-100 Template")
 c.check("well label shows wellhead P and T", a["results"]["units"][w1]["label"].startswith("WH"),
         a["results"]["units"][w1]["label"])
@@ -677,6 +684,38 @@ c.eq("the loaded flowsheet keeps the scenario list", len(ss.model.get("scenarios
 st.HOOK["press"].add("sc_del")
 run()
 c.eq("delete a scenario from the tab", [x["name"] for x in ss.model["scenarios"]], ["Case 2"])
+
+# ---- 16f. v5.4: heated flowline, subsea processing units, new boosters ---------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = "Heated flowline (SURF): DEH oil tie-back with methanol injection and an intensifier"
+st.HOOK["press"].add("Load example")
+run()
+c.check("heated-line view: metrics rendered", any("Annual heating energy" in t for t in st.HOOK["texts"]), "")
+c.check("heated-line chart with the unheated comparison", any("Heated line" in str(f.layout.get("title", "")) or
+                                                               "heated" in str(f.layout.get("title", "")).lower()
+                                                               for f in st.HOOK["charts"]), "")
+fl_u = next(u for u, x in ss.model["units"].items() if x["type"] == "flowline")
+c.check("heated flowline reports electrical power", ss.sol.results[fl_u].get("Electrical heating power [kW]", 0) > 0, "")
+h0 = ss.sol_hash
+pending.append((f"heat_shutdowns_{ss.widget_ver}", 10.0))
+run()
+c.close("heating basis edit saved with the flowsheet", ss.model["heating"]["shutdowns"], 10.0, 1e-12)
+c.eq("heating basis edits do not re-solve", ss.sol_hash, h0)
+html = build_report(ss.model, ss.sol, None, "Heated")
+c.check("report renders for the heated example", "Subsea system" in html or "Heated" in html, "")
+st.HOOK["values"]["selectbox:Example:"] = "Subsea compression station (SURF): cooler, separator, compressor and pump"
+st.HOOK["press"].add("Load example")
+run()
+for nm in [u["name"] for u in ss.model["units"].values() if u["type"] in ("subsea_compressor", "subsea_pump")]:
+    ss.selected = [uid_by_name(nm)]
+    run()
+    st.HOOK["press"].add("Generate a typical curve through the current operating point")
+    run()
+    run()
+    c.check(f"performance curve generated: {nm}", bool(ss.model["units"][uid_by_name(nm)]["params"].get("curve")), "")
+ss.selected = []
+run()
+c.check("v5.4 examples render without UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
 
 # ---- 17. stale modules after an update (the Streamlit Cloud ImportError) ---------------------------
 import types   # noqa: E402

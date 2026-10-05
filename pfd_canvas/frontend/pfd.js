@@ -53,6 +53,13 @@
     riser:        { w: 64, h: 96, ports: { in: [-32, 40, "L"], out: [32, -40, "R"] } },
     subsea_valve: { w: 40, h: 40, ports: { in: [-20, 10, "L"], out: [20, 10, "R"] } },
     subsea_booster: { w: 60, h: 58, ports: { in: [-30, 4, "L"], out: [30, 4, "R"] }, energy: [0, 29, "D"] },
+    subsea_pump:       { w: 56, h: 58, ports: { in: [-28, 6, "L"], out: [28, -4, "R"] }, energy: [0, 29, "D"] },
+    subsea_compressor: { w: 64, h: 58, ports: { in: [-32, 4, "L"], out: [32, 4, "R"] }, energy: [0, 29, "D"] },
+    subsea_separator:  { w: 50, h: 100, ports: { feed: [-25, 0, "L"], vapour: [0, -50, "U"], oil: [25, 26, "R"],
+                                                 water: [0, 50, "D"] } },
+    subsea_cooler:     { w: 70, h: 56, ports: { in: [-35, -16, "L"], out: [35, 16, "R"] } },
+    intensifier:       { w: 64, h: 40, ports: { in: [-32, 6, "L"], out: [32, 6, "R"] }, energy: [-8, -20, "U"] },
+    cimv:              { w: 44, h: 44, ports: { in: [-22, 8, "L"], chem: [0, -22, "U"], out: [22, 8, "R"] } },
   };
 
   function portPos(u, port) {
@@ -385,6 +392,56 @@
       <rect x="25" y="-2" width="5" height="12" rx="1" fill="url(#gV)" ${STK}/>
       <rect x="-3" y="16" width="6" height="10" fill="url(#gMot)" stroke="#2f3a46" stroke-width="1"/>
       <line x1="-30" y1="26" x2="30" y2="26" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    subsea_pump: () => `
+      <rect x="-12" y="-28" width="24" height="10" rx="2" fill="#f2b33d" ${STK}/>
+      <rect x="-3" y="-18" width="6" height="6" fill="url(#gMot)" stroke="#2f3a46" stroke-width="1"/>
+      <circle cx="0" cy="2" r="16" fill="url(#gB)" ${STK}/>
+      <path d="M0,2 L0,-11 M0,2 L11,9 M0,2 L-11,9" stroke="#1d4f86" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="0" cy="2" r="3" fill="#f4f7fa" stroke="#1d4f86" stroke-width="1"/>
+      <rect x="-28" y="2" width="12" height="8" fill="url(#gV)" ${STK}/>
+      <path d="M12,-9 L28,-9 L28,1 L15,1" fill="url(#gV)" ${STK}/>
+      <line x1="-28" y1="26" x2="28" y2="26" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    subsea_compressor: () => `
+      <rect x="-14" y="-28" width="28" height="9" rx="2" fill="#f2b33d" ${STK}/>
+      <rect x="-30" y="-17" width="60" height="34" rx="9" fill="#e9eef3" ${STK}/>
+      <path d="M-22,-11 L22,-5 L22,13 L-22,19 Z" transform="translate(0,-4)" fill="url(#gB)" stroke="#2f3a46" stroke-width="1.2"/>
+      <line x1="-12" y1="-9" x2="-12" y2="9" stroke="#34507a" stroke-width="1"/>
+      <line x1="0" y1="-7" x2="0" y2="7" stroke="#34507a" stroke-width="1"/>
+      <line x1="11" y1="-5" x2="11" y2="5" stroke="#34507a" stroke-width="1"/>
+      <rect x="-3" y="17" width="6" height="9" fill="url(#gMot)" stroke="#2f3a46" stroke-width="1"/>
+      <line x1="-32" y1="26" x2="32" y2="26" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    subsea_separator: () => `
+      <rect x="-24" y="38" width="48" height="6" fill="#f2b33d" ${STK}/>
+      <path d="M-18,-36 A18,10 0 0 1 18,-36 L18,30 A18,10 0 0 1 -18,30 Z" fill="url(#gV)" ${STK}/>
+      <rect x="-17.3" y="-30" width="34.6" height="6" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".8"/>
+      <path d="M-17.3,8 L17.3,8 L17.3,30 A17.3,9.3 0 0 1 -17.3,30 Z" fill="${LIQ}"/>
+      <path d="M-17.3,22 L17.3,22 L17.3,30 A17.3,9.3 0 0 1 -17.3,30 Z" fill="${WAT}"/>
+      <line x1="-17" y1="8" x2="17" y2="8" stroke="#2d6db5" stroke-width="1" stroke-dasharray="3 2"/>
+      <rect x="-3" y="-50" width="6" height="5" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-3" y="44" width="6" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <line x1="-25" y1="50" x2="25" y2="50" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    subsea_cooler: () => `
+      <rect x="-30" y="-24" width="60" height="44" rx="3" fill="#eef5fb" ${STK}/>
+      <path d="M-35,-16 L-22,-16 L-22,10 L-12,10 L-12,-16 L-2,-16 L-2,10 L8,10 L8,-16 L18,-16 L18,16 L35,16" fill="none"
+            stroke="#2f3a46" stroke-width="4.5" stroke-linejoin="round"/>
+      <path d="M-35,-16 L-22,-16 L-22,10 L-12,10 L-12,-16 L-2,-16 L-2,10 L8,10 L8,-16 L18,-16 L18,16 L35,16" fill="none"
+            stroke="#7fb3e0" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="M-26,-30 q4,-3 8,0 t8,0 t8,0 t8,0 t8,0 t8,0" fill="none" stroke="#2d6db5" stroke-width="1.2"/>`,
+    intensifier: () => `
+      <rect x="-26" y="-10" width="26" height="28" rx="2" fill="url(#gB)" ${STK}/>
+      <rect x="0" y="-1" width="26" height="14" rx="2" fill="url(#gV)" ${STK}/>
+      <line x1="-12" y1="-8" x2="-12" y2="16" stroke="#34507a" stroke-width="2"/>
+      <line x1="-12" y1="6" x2="18" y2="6" stroke="#34507a" stroke-width="2"/>
+      <rect x="16" y="1" width="3" height="10" fill="#34507a"/>
+      <rect x="-32" y="2" width="6" height="8" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="26" y="2" width="6" height="8" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <text x="-13" y="-13" text-anchor="middle" font-size="7" font-weight="700" fill="#2f3a46">HYD</text>`,
+    cimv: () => `
+      <path d="M-18,0 L-18,16 L0,8 Z M18,0 L18,16 L0,8 Z" fill="url(#gV)" ${STK}/>
+      <line x1="0" y1="8" x2="0" y2="-10" stroke="#2f3a46" stroke-width="1.4"/>
+      <circle cx="0" cy="-12" r="7" fill="#f2b33d" ${STK}/>
+      <path d="M-4,-12 L4,-12 M0,-12 L3,-15" stroke="#2f3a46" stroke-width="1.2"/>
+      <line x1="0" y1="-19" x2="0" y2="-22" stroke="#2f3a46" stroke-width="1.6"/>`,
     subsea_valve: () => `
       <path d="M-18,1 L-18,19 L0,10 Z M18,1 L18,19 L0,10 Z" fill="url(#gV)" ${STK}/>
       <line x1="0" y1="10" x2="0" y2="-6" stroke="#2f3a46" stroke-width="1.4"/>

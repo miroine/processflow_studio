@@ -13,8 +13,9 @@ from procsim.streams import stream_properties, hydrate_risk
 from procsim.examples import EXAMPLES, WET_GAS
 
 ENERGY_DIR = {"compressor": "in", "pump": "in", "heater": "in", "expander": "out", "cooler": "out",
-              "aircooler": "out", "subsea_booster": "in"}
-WORK_TYPES = ("compressor", "pump", "expander", "subsea_booster")
+              "aircooler": "out", "subsea_booster": "in", "subsea_pump": "in", "subsea_compressor": "in",
+              "intensifier": "in"}
+WORK_TYPES = ("compressor", "pump", "expander", "subsea_booster", "subsea_pump", "subsea_compressor", "intensifier")
 
 
 # --------------------------------------------------------------- formatting
@@ -114,7 +115,9 @@ def canvas_structure(model):
 SHORT = {"column": "Column", "hx": "Heat exchanger", "separator": "2-phase separator",
          "separator3": "3-phase separator", "feed": "Feed stream", "product": "Product stream", "splitter": "Tee",
          "well": "Well", "xmas_tree": "Xmas tree", "template": "Template", "jumper": "Jumper / PLET",
-         "flowline": "Flowline", "riser": "Riser", "subsea_valve": "SSIV / HIPPS", "subsea_booster": "Subsea booster"}
+         "flowline": "Flowline", "riser": "Riser", "subsea_valve": "SSIV / HIPPS", "subsea_booster": "Subsea booster",
+         "subsea_pump": "Subsea pump", "subsea_compressor": "Subsea compressor", "subsea_separator": "Subsea separator",
+         "subsea_cooler": "Subsea cooler", "intensifier": "Intensifier", "cimv": "Chemical injection"}
 
 
 def catalogue_payload():
@@ -221,7 +224,7 @@ def process_canvas_value(key="pfd"):
 
 def model_hash(model):
     m = copy.deepcopy(model)
-    for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios"):   # post-processing settings: editing them never re-solves
+    for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios", "heating"):   # post-processing settings: editing them never re-solves
         m.pop(k, None)
     for u in m["units"].values():
         for k in ("x", "y", "flip"):
@@ -308,7 +311,20 @@ def _unit_label(u, res):
     if t == "xmas_tree" and res.get("Choke ΔP [bar]") is not None:
         crit = " · critical" if str(res.get("Choke flow", "")).startswith("Critical") else ""
         return f"choke ΔP {qfmt('Choke ΔP [bar]', res['Choke ΔP [bar]'], 1)}{crit}"
-    if t == "subsea_booster" and res.get("Shaft power [kW]") is not None:
+    if t == "subsea_separator" and res.get("Vessel ID [mm]") is not None:
+        return f"ID {qfmt('ID [mm]', res['Vessel ID [mm]'], 0)} · {qfmt('Vessel P [bar(a)]', res['Vessel P [bar(a)]'], 0)}"
+    if t == "subsea_cooler" and res.get("Outlet T [°C]") is not None:
+        return f"→ {qfmt('Outlet T [°C]', res['Outlet T [°C]'], 0)} · {qfmt('Duty [kW]', res['Duty rejected to sea [kW]'], 0)}"
+    if t == "intensifier" and res.get("Outlet P [bar(a)]") is not None:
+        return f"→ {qfmt('Outlet P [bar(a)]', res['Outlet P [bar(a)]'], 0)} · 1:{res['Area ratio [-]']:.1f}"
+    if t == "cimv" and res.get("Chemical rate [L/h]") is not None:
+        return f"{res['Chemical rate [L/h]']:,.0f} L/h" + (
+            f" · margin {qfmt('Margin [°C]', res['Hydrate margin downstream [°C]'], 0)}"
+            if res.get("Hydrate margin downstream [°C]") is not None else "")
+    if t == "flowline" and res.get("Heating system"):
+        k_ = "Electrical heating power [kW]" if "Electrical heating power [kW]" in res else "Topside heater duty for heating [kW]"
+        return f"ΔP {qfmt('Pressure drop [bar]', res['Pressure drop [bar]'], 1)} · heat {qfmt('Duty [kW]', res[k_], 0)}"
+    if t in ("subsea_booster", "subsea_pump", "subsea_compressor") and res.get("Shaft power [kW]") is not None:
         return (f"{qfmt('Shaft power [kW]', res['Shaft power [kW]'], 0 if 'SI' in _sys() else 0)} · "
                 f"GVF {res['Inlet GVF [%]']:.0f} %")
     if t == "template" and res.get("Slots used"):

@@ -566,6 +566,9 @@ def turndown_figure(rows, window, P_min):
 _NODE_STYLE = {"host": ("Host facility", "square", BLUE, 18), "template": ("Template / manifold", "square", TEAL, 15),
                "well": ("Well (slot, not to scale)", "circle", ORANGE, 10),
                "subsea_booster": ("Subsea booster", "diamond", MAGENTA, 14),
+               "subsea_pump": ("Subsea pump", "diamond", MAGENTA, 14),
+               "subsea_compressor": ("Subsea compressor", "diamond-wide", MAGENTA, 15),
+               "subsea_separator": ("Subsea separator", "hexagon", GREEN, 15),
                "subsea_valve": ("SSIV / HIPPS", "triangle-up", OCHRE, 12), "riser": ("Riser touch-down", "circle", BLUE, 9)}
 
 
@@ -591,7 +594,7 @@ def layout_figure(lay):
         ns = [n for n in lay["nodes"] if n["type"] == t]
         if not ns:
             continue
-        labelled = t in ("host", "template", "subsea_booster")
+        labelled = t in ("host", "template", "subsea_booster", "subsea_pump", "subsea_compressor", "subsea_separator")
         fig.add_trace(go.Scatter(x=[n["x"] * f_ for n in ns], y=[n["y"] * f_ for n in ns],
                                  mode="markers+text" if labelled else "markers", name=name,
                                  marker=dict(size=size, color=color, symbol=sym, line=dict(color="#FFFFFF", width=2)),
@@ -671,6 +674,35 @@ def scenario_figure(vals, label, current_name):
 def fmt_num(v):
     a = abs(v)
     return f"{v:,.0f}" if a >= 100 else (f"{v:,.1f}" if a >= 10 else f"{v:,.2f}")
+
+
+def heated_line_figure(prof, prof_off, name, T_set=None, T_hyd=None):
+    """Heated flowline: fluid temperature along the line with and without heating, the set temperature and the
+    hydrate temperature (top); heat delivered per metre along the line (bottom)."""
+    uT, uL = U.uT(), U.unit("m")
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.12, row_heights=[0.62, 0.38],
+                        subplot_titles=(f"Fluid temperature [{uT}]", "Heat into the fluid [W/m]"))
+    L = _arr("m", prof["L"])
+    fig.add_trace(go.Scatter(x=L, y=[U.T(t) for t in prof["T"]], mode="lines+markers", name="Heated",
+                             line=dict(color=TEAL, width=2.5), marker=dict(size=7),
+                             hovertemplate=f"%{{x:,.0f}} {uL}: %{{y:.1f}} {uT}<extra>heated</extra>"), row=1, col=1)
+    if prof_off:
+        fig.add_trace(go.Scatter(x=_arr("m", prof_off["L"]), y=[U.T(t) for t in prof_off["T"]], mode="lines+markers",
+                                 name="Without heating", line=dict(color=ORANGE, width=2.5), marker=dict(size=7),
+                                 hovertemplate=f"%{{x:,.0f}} {uL}: %{{y:.1f}} {uT}<extra>without heating</extra>"),
+                      row=1, col=1)
+    for val, lab, col, dash in ((T_set, "Set temperature", GREY, "dash"), (T_hyd, "Hydrate temperature", CRITICAL, "dot")):
+        if val is not None:
+            fig.add_trace(go.Scatter(x=[L[0], L[-1]], y=[U.T(val)] * 2, mode="lines", name=lab,
+                                     line=dict(color=col, width=1.5, dash=dash), hoverinfo="skip"), row=1, col=1)
+    q = prof.get("q_heat") or []
+    if q:
+        mids = [0.5 * (a + b) for a, b in zip(L[:-1], L[1:])]
+        fig.add_trace(go.Bar(x=mids, y=q, name="Heat input", marker=dict(color=OCHRE, cornerradius=4), showlegend=False,
+                             hovertemplate=f"%{{x:,.0f}} {uL}: %{{y:.0f}} W/m<extra></extra>"), row=2, col=1)
+    fig.update_xaxes(title=f"Distance [{uL}]", row=2, col=1)
+    return _style_subplots(fig, f"{name} — heated flowline", "Fixed input heats the whole line; hold control only "
+                           "where the fluid would fall below the set temperature", height=560)
 
 
 # ---- column ----------------------------------------------------------------------------------------------

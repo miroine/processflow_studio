@@ -684,7 +684,10 @@ flu = next(u for u, x in m["units"].items() if x["type"] == "flowline")
 m["units"][flu]["params"].update({"design": "Electrically heated (DEH)", "deh": "On"})
 sol = solve(m)
 t_ = econ(m, sol)["totals"]
-c.close("economics: DEH is charged as electric power", t_["Power demand [kW]"], sol.results[flu]["DEH power [kW]"], 1e-9)
+c.close("economics: DEH is charged as electric power", t_["Power demand [kW]"],
+        sol.results[flu]["Electrical heating power [kW]"], 1e-9)
+c.close("economics: DEH electrical power = heat / 60 % efficiency", sol.results[flu]["Electrical heating power [kW]"],
+        sol.results[flu]["DEH power [kW]"] / 0.6, 1e-9)
 
 # ---- scenarios ------------------------------------------------------------------------------------------------------
 m = subsea_field()
@@ -711,6 +714,180 @@ c.check("restore gives the scenario's model with the scenario list", back["units
         "Wet insulation (multilayer PP)" and len(back["scenarios"]) == 2, "")
 SC.delete(m, "Base")
 c.eq("delete a scenario", [x_["name"] for x_ in m["scenarios"]], ["Wet insulation"])
+
+# ==== v5.4: heated flowlines, subsea processing equipment, new examples ===========================================
+from procsim.examples import heated_oil_tieback, subsea_compression, subsea_separation      # noqa: E402
+
+HOT = {"T_C": 60.0, "P_bar": 80.0, "flow_basis": "kmol/h", "flow": 1500.0, "composition": dict(WELL_FLUID)}
+FLH = {"design": "Electrically heated (DEH)", "length": 20000.0, "ID": 254.0, "n_seg": 10}
+# fixed electrical heating
+m, (fl,), sol = chain([("flowline", dict(FLH, heating=surf.HEATING[1], heat_ctrl=surf.CTRL_FIXED, deh_W_m=80.0))], HOT)
+r = sol.results[fl]
+c.close("fixed heating: heat into the fluid = W/m × length", r["Heat into the fluid [kW]"], 80.0 * 20000.0 / 1000.0, 1e-9)
+c.close("DEH electrical power = heat / 60 % (typical efficiency)", r["Electrical heating power [kW]"], 1600.0 / 0.6, 1e-9)
+balances(m, sol, "flowline with fixed DEH")
+c.close("economics: electrical heating charged as power", econ(m, sol)["totals"]["Power demand [kW]"],
+        r["Electrical heating power [kW]"], 1e-9)
+# hold a minimum temperature
+m, (fl,), sol = chain([("flowline", dict(FLH, heating=surf.HEATING[1], heat_ctrl=surf.CTRL_HOLD, T_hold=30.0,
+                                         q_max_W_m=150.0))], HOT)
+r = sol.results[fl]
+prof = sol.profiles[fl]
+c.close("hold control: outlet held at the set temperature", r["Outlet T [°C]"], 30.0, 1e-6)
+c.check("hold control: no node below the set temperature", min(prof["T"]) >= 30.0 - 1e-6, str(min(prof["T"])))
+c.check("hold control: only part of the line needs heat", 0 < r["Heated length [m]"] < 20000.0, str(r["Heated length [m]"]))
+c.close("hold control: Σ q_heat·dL = controlled heating", sum(prof["q_heat"]) * 2000.0 / 1000.0, r["Controlled heating [kW]"], 1e-9)
+c.check("hold control: peak heat within the installed capacity", r["Peak heating [W/m]"] <= 150.0 + 1e-9, "")
+balances(m, sol, "flowline holding 30 °C")
+off = so.unheated_profile(m, sol, fl)
+c.check("without heating the same line arrives colder than the set temperature", off["T"][-1] < 30.0, str(off["T"][-1]))
+hl = so.heated_lines(m, sol)[0]
+U_, D_ = r["U used [W/m²·K]"], 0.254
+c.close("shut-in hold power = U·π·D·(T_set − T_sea)", hl["Hold power, shut-in [W/m]"], U_ * math.pi * D_ * (30.0 - 4.0), 1e-9)
+C_ = hl["Line heat capacity [kJ/(m·K)]"] * 1000.0
+c.close("heat-up time = −τ ln(1 − loss/q)", hl["Heat-up time from sea temperature [h]"],
+        -C_ / (U_ * math.pi * D_) * math.log(1 - U_ * math.pi * D_ * 26.0 / 150.0) / 3600.0, 1e-9)
+c.check("heat-up is impossible when the installed heating is below the hold power",
+        math.isinf(so.heat_up_time(C_, U_, D_, 10.0, 4.0, 30.0)), "")
+c.close("annual energy (continuous) = flowing power × hours + hold power × shutdown hours",
+        hl["Annual heating energy (continuous) [MWh/y]"],
+        r["Electrical heating power [kW]"] * 8400.0 / 1000.0 + hl["Electrical power to hold during shut-in [kW]"] * 96.0 / 1000.0, 1e-6)
+m, (fl,), sol = chain([("flowline", dict(FLH, heating=surf.HEATING[1], heat_ctrl=surf.CTRL_HOLD, T_hold=30.0,
+                                         q_max_W_m=20.0))], HOT)
+c.check("hold control: too little installed heating is flagged", sol.status[fl] == "warning" and
+        sol.results[fl]["Outlet T [°C]"] < 30.0, sol.results[fl].get("Warning"))
+m, (fl,), sol = chain([("flowline", dict(FLH, heating=surf.HEATING[2], heat_ctrl=surf.CTRL_FIXED, deh_W_m=50.0))], HOT)
+c.close("heat-traced PiP: 90 % efficiency", sol.results[fl]["Electrical heating power [kW]"], 1000.0 / 0.9, 1e-9)
+m, (fl,), sol = chain([("flowline", dict(FLH, heating=surf.HEATING[3], heat_ctrl=surf.CTRL_FIXED, deh_W_m=50.0))], HOT)
+t_ = econ(m, sol)
+c.check("hot-water bundle: topside heater duty, charged as heating", "Electrical heating power [kW]" not in sol.results[fl]
+        and abs(t_["totals"]["Heating demand [kW]"] - 1000.0 / 0.7) < 1e-6, str(t_["totals"]["Heating demand [kW]"]))
+m, (fl,), sol = chain([("flowline", dict(FLH, deh="On", deh_W_m=80.0))], HOT)
+c.close("v5 flowsheets with the DEH on/off switch still work", sol.results[fl]["DEH power [kW]"], 1600.0, 1e-9)
+
+# ---- subsea separator ------------------------------------------------------------------------------------------
+SEPF = {"T_C": 60.0, "P_bar": 40.0, "flow_basis": "kmol/h", "flow": 3000.0, "composition": dict(WELL_FLUID)}
+m = new_model(list(WELL_FLUID))
+f_ = add_unit(m, "feed", params=SEPF)
+sp = add_unit(m, "subsea_separator", params={"sep_type": "Liquid-liquid separator (horizontal)"})
+prods = {}
+for port in ("vapour", "oil", "water"):
+    prods[port] = add_unit(m, "product")
+    connect(m, sp, port, prods[port], "in")
+connect(m, f_, "out", sp, "feed")
+sol = solve(m)
+r = sol.results[sp]
+wat_ = sol.streams[port_edges(m, sp, "out")["water"][0]]
+c.check("liquid-liquid separator: water leaves on the water outlet", not wat_.empty and r["Water to reinjection [m³/d]"] > 0, "")
+balances(m, sol, "subsea separator (3 outlets)")
+D_m = r["Vessel ID [mm]"] / 1000.0
+c.close("separator: horizontal vessel L = 4 D", r["Length (T/T) [m]"], 4.0 * D_m, 1e-9)
+Pm = r["Design pressure [bar(a)]"] / 10.0
+c.close("separator: ASME wall t = P D / (2 S E − 1.2 P) + 3 mm", r["Wall thickness incl. corrosion [mm]"],
+        Pm * D_m / (2 * 138.0 - 1.2 * Pm) * 1000.0 + 3.0, 1e-9)
+c.close("separator: design pressure = 1.1 × operating", r["Design pressure [bar(a)]"], 1.1 * r["Vessel P [bar(a)]"], 1e-9)
+c.close("separator: liquid volume = liquid flow × residence time", r["Liquid hold-up volume [m³]"],
+        r["Liquid flow [m³/h]"] / 60.0 * 5.0, 1e-9)
+m["units"][sp]["params"]["sep_type"] = "Gas-liquid separator (vertical)"
+sol = solve(m)
+c.check("gas-liquid separator: all liquid on one outlet, water outlet empty",
+        sol.streams[port_edges(m, sp, "out")["water"][0]].empty and
+        sol.streams[port_edges(m, sp, "out")["oil"][0]].z[sol.fp.iw] > 0.1, "")
+balances(m, sol, "gas-liquid subsea separator")
+
+# ---- subsea cooler ---------------------------------------------------------------------------------------------
+GC = dict(GAS, T_C=70.0, P_bar=100.0, flow=3.0)
+m, (cl,), sol = chain([("subsea_cooler", {"spec": "Approach to sea temperature", "approach": 15.0, "T_sea": 4.0})], GC)
+r = sol.results[cl]
+c.close("cooler: outlet = sea + approach", r["Outlet T [°C]"], 19.0, 1e-9)
+balances(m, sol, "subsea cooler")
+A_ = r["Required area [m²]"]
+m2, (cl2,), s2 = chain([("subsea_cooler", {"spec": "Cooler area", "area": A_, "T_sea": 4.0})], GC)
+c.close("cooler: the reported area reproduces the outlet temperature", s2.results[cl2]["Outlet T [°C]"], 19.0, 1e-6)
+c.check("cooler: heat to the sea costs nothing", econ(m, sol)["totals"]["Cooling demand [kW]"] == 0, "")
+m, (cl,), sol = chain([("subsea_cooler", {"spec": "Outlet temperature", "T_out": 3.0, "T_sea": 4.0})], GC)
+c.check("cooler: cannot cool below the sea temperature", sol.status[cl] == "error", sol.errors.get(cl))
+m, (cl,), sol = chain([("subsea_cooler", {"spec": "Approach to sea temperature", "approach": 2.0})], GC)
+c.check("cooler: cooling wet gas into the hydrate region is flagged", sol.status[cl] == "warning" and
+        sol.results[cl]["Outlet hydrate margin [°C]"] < 0, sol.results[cl].get("Warning"))
+
+# ---- pressure intensifier and chemical injection ---------------------------------------------------------------
+MEOH = {"T_C": 6.0, "P_bar": 60.0, "flow_basis": "kg/h", "flow": 300.0, "comp_basis": "Mass fractions",
+        "composition": {"MeOH": 1.0}}
+keys = list(WET_GAS) + ["MeOH"]
+m, (pi_,), sol = chain([("intensifier", {"spec": "Area ratio", "ratio": 2.0, "P_hyd": 207.0})], MEOH, keys)
+r = sol.results[pi_]
+c.close("intensifier: outlet = hydraulic P × ratio × 85 %", r["Outlet P [bar(a)]"], 207.0 * 2.0 * 0.85, 1e-9)
+c.close("intensifier: hydraulic fluid = liquid × ratio / 95 %", r["Hydraulic fluid consumption [L/min]"],
+        r["Liquid flow [L/h]"] / 60.0 * 2.0 / 0.95, 1e-9)
+c.check("intensifier: hydraulic power drawn exceeds the power into the fluid",
+        r["Hydraulic power drawn [kW]"] > r["Power into the fluid [kW]"] > 0, "")
+balances(m, sol, "intensifier")
+m, (pi_,), sol = chain([("intensifier", {"spec": "Outlet pressure", "P_out": 300.0, "P_hyd": 207.0})], MEOH, keys)
+c.close("intensifier: area ratio for an outlet pressure", sol.results[pi_]["Area ratio [-]"], 300.0 / (207.0 * 0.85), 1e-9)
+m, (pi_,), sol = chain([("intensifier", {"spec": "Outlet pressure", "P_out": 50.0})], MEOH, keys)
+c.check("intensifier: outlet below the inlet is an error", sol.status[pi_] == "error", sol.errors.get(pi_))
+
+
+def cimv_case(chem_flow, chem_P=150.0):
+    mm = new_model(keys)
+    pf = add_unit(mm, "feed", params=dict(GAS, T_C=8.0, P_bar=100.0, flow=3.0))
+    cf = add_unit(mm, "feed", params=dict(MEOH, flow=chem_flow, P_bar=chem_P))
+    ci = add_unit(mm, "cimv")
+    pr = add_unit(mm, "product")
+    connect(mm, pf, "out", ci, "in")
+    connect(mm, cf, "out", ci, "chem")
+    connect(mm, ci, "out", pr, "in")
+    return mm, ci, solve(mm)
+
+
+m0, ci0, s0 = cimv_case(1e-9)
+m1, ci1, s1 = cimv_case(3000.0)
+c.check("CIMV: methanol raises the hydrate margin", s1.results[ci1]["Hydrate margin downstream [°C]"] >
+        s0.results[ci0]["Hydrate margin downstream [°C]"] + 2.0, "")
+c.check("CIMV: methanol shows up in the water", s1.results[ci1]["Inhibitor in water [wt%]"] > 5.0, "")
+balances(m1, s1, "chemical injection valve")
+m2, ci2, s2 = cimv_case(300.0, chem_P=102.0)
+c.check("CIMV: chemical below production P + valve ΔP is an error", s2.status[ci2] == "error" and "below" in s2.errors[ci2],
+        s2.errors.get(ci2))
+
+# ---- subsea pump / compressor types ---------------------------------------------------------------------------
+c.check("subsea pump offers pumps only", "Wet-gas compressor" not in CATALOGUE["subsea_pump"]["params"][0]["options"]
+        and "Water injection pump" in CATALOGUE["subsea_pump"]["params"][0]["options"], "")
+c.check("subsea compressor offers compressors only", set(CATALOGUE["subsea_compressor"]["params"][0]["options"]) ==
+        {"Wet-gas compressor", "Dry-gas centrifugal compressor"}, "")
+m, (k_,), sol = chain([("subsea_compressor", {"btype": "Dry-gas centrifugal compressor", "dP": 40.0})],
+                      dict(DRY := {"T_C": 30.0, "P_bar": 60.0, "flow_basis": "MSm³/d", "flow": 3.0,
+                                   "composition": {"C1": 0.9, "C2": 0.07, "C3": 0.03}}))
+c.check("dry-gas compressor on dry gas: within its window", sol.status[k_] == "ok", sol.results[k_].get("Warning"))
+
+# ---- new examples ----------------------------------------------------------------------------------------------
+for fn, name in ((heated_oil_tieback, "heated tie-back"), (subsea_compression, "compression station"),
+                 (subsea_separation, "separation station")):
+    m = fn()
+    sol = solve(m)
+    bad = {m["units"][u]["name"]: sol.errors.get(u) for u, s_ in sol.status.items() if s_ not in ("ok", "warning")}
+    c.check(f"{name} example solves", not bad, str(bad))
+    balances(m, sol, name)
+    if fn is heated_oil_tieback:
+        fl = next(u for u, x in m["units"].items() if x["type"] == "flowline")
+        c.close("heated tie-back: the flowline delivers 25 °C", sol.results[fl]["Outlet T [°C]"], 25.0, 1e-6)
+        items_, tot_ = sd.equipment_list(m, sol)
+        c.check("heated tie-back: CAPEX has the heating system and topside power",
+                tot_["by_group"]["Flowline heating"] > 0 and any(i_["Item"] == "Topside power" for i_ in items_), "")
+        c.check("heated tie-back: heated-lines view", so.heated_lines(m, sol)[0]["Can hold the line during shut-in"] == "yes", "")
+    if fn is subsea_compression:
+        k_ = next(u for u, x in m["units"].items() if x["type"] == "subsea_compressor")
+        c.close("compression station: dry gas to the compressor (GVF 100 %)", sol.results[k_]["Inlet GVF [%]"], 100.0, 1e-6)
+        lay = so.field_layout(m, sol)
+        c.eq("compression station layout: 4 well slots (compressor and pump are not slots)",
+             sum(1 for n_ in lay["nodes"] if n_["type"] == "well"), 4)
+        c.check("compression station layout: separator, compressor and pump placed",
+                {"subsea_separator", "subsea_compressor", "subsea_pump"} <= {n_["type"] for n_ in lay["nodes"]}, "")
+    if fn is subsea_separation:
+        inj = next(s_ for s_, x in m["streams"].items() if m["units"][x["dst"][0]]["name"] == "Water to injection well")
+        c.check("separation station: water to injection at 230 bar", abs(sol.streams[inj].P - 230.0) < 1e-6 and
+                sol.streams[inj].z[sol.fp.iw] > 0.95, "")
 
 # ---- import order ------------------------------------------------------------------------------------------
 import subprocess                                                                   # noqa: E402

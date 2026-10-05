@@ -277,7 +277,7 @@ def unit_view(uid):
         tabs.append("Convergence")
     if t in PROFILE_TYPES:
         tabs.append("Profile")
-    if t in ("compressor", "subsea_booster"):
+    if t in ("compressor", "subsea_booster", "subsea_pump", "subsea_compressor"):
         tabs.append("Performance curve")
     if t == "column":
         tabs.append("Profiles")
@@ -319,17 +319,18 @@ def unit_view(uid):
                     well_deliverability_panel(uid, u, sol, res)
                 import pandas as _pd
                 n = len(prof["L"])
-                st.dataframe(U.df_display(_pd.DataFrame({"Distance [m]": prof["L"], "P [bar(a)]": prof["P"],
-                                                         "T [°C]": prof["T"], "Holdup [-]": prof["HL"][:n],
-                                                         "Regime": prof["regime"][:n],
-                                                         "Mixture velocity [m/s]": prof["vm"][:n]})),
-                             hide_index=True, width="stretch")
+                tbl = {"Distance [m]": prof["L"], "P [bar(a)]": prof["P"], "T [°C]": prof["T"],
+                       "Holdup [-]": prof["HL"][:n], "Regime": prof["regime"][:n],
+                       "Mixture velocity [m/s]": prof["vm"][:n]}
+                if any(q > 0 for q in prof.get("q_heat") or []) and len(prof["q_heat"]) == n - 1:
+                    tbl["Heat input to next node [W/m]"] = list(prof["q_heat"]) + [None]
+                st.dataframe(U.df_display(_pd.DataFrame(tbl)), hide_index=True, width="stretch")
             else:
                 st.caption("Solve the flowsheet to see the profile.")
     if t == "compressor":
         with tb[2]:
             compressor_curve_panel(uid, u, sol, res)
-    if t == "subsea_booster":
+    if t in ("subsea_booster", "subsea_pump", "subsea_compressor"):
         with tb[2]:
             booster_curve_panel(uid, u, sol, res)
     if t == "column":

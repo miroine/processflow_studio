@@ -1059,7 +1059,9 @@ def calc_pipe(unit, ins, fp):
     Optional private parameters used by the subsea (SURF) units that build on this model:
     ``T_amb_out`` - ambient temperature at the outlet (linear ambient profile, e.g. a geothermal gradient);
     ``q_in_W_m`` - heat input per metre (direct electrical heating); ``z0``/``L0`` - elevation and
-    distance at the inlet, for multi-section profiles."""
+    distance at the inlet, for multi-section profiles; ``T_hold`` [°C] with ``q_max_W_m`` - controlled heating
+    that keeps the fluid at or above T_hold, limited to q_max per metre (the heat needed is reported per
+    increment in the profile, ``q_heat`` [W/m])."""
     p = unit["params"]
     s = _one(ins, "in")
     if s.empty:
@@ -1078,14 +1080,18 @@ def calc_pipe(unit, ins, fp):
     Tamb_out = float(p.get("T_amb_out", p.get("T_amb", 4.0))) + K0
     q_in = float(p.get("q_in_W_m", 0.0) or 0.0)            # W/m heat input (DEH)
     z0, L0 = float(p.get("z0", 0.0)), float(p.get("L0", 0.0))
+    T_hold = (float(p["T_hold"]) + K0) if p.get("T_hold") is not None else None
+    q_max = float(p.get("q_max_W_m", 0.0) or 0.0)
     method = p.get("method", "Beggs & Brill")
     sigma = float(p.get("sigma", 0.02))
     n_mol = s.F * 1000.0 / 3600.0            # mol/s
     MW = s.MW
     st = s
     prof = {"L": [L0], "P": [s.P], "T": [s.T - K0], "HL": [], "regime": [], "vm": [], "z": [z0],
-            "Hm": [_hyd_margin(s, fp)]}
+            "Hm": [_hyd_margin(s, fp)], "q_heat": []}
     Qtot = 0.0
+    Qheat = 0.0
+    capped = False
     evr = 0.0
 
     def advance(state, grad, Tamb, h):
@@ -1107,6 +1113,7 @@ def calc_pipe(unit, ins, fp):
         # Heun predictor-corrector; where the pressure falls fast (gas expanding near the end of a long
         # line) the increment is sub-stepped so that no step loses more than 5 % of the local pressure
         rem, cur, g = dL, st, g1
+        heat_inc = 0.0
         while rem > dL * 1e-9:
             h = rem
             if g > 0 and g * h / 1e5 > 0.05 * cur.P:
@@ -1122,11 +1129,27 @@ def calc_pipe(unit, ins, fp):
                         raise
                     h = max(h / 4.0, h_min)
             Qtot += q
+            if T_hold is not None and nxt.T < T_hold - 1e-9:
+                # controlled heating: add what it takes to bring the fluid back to T_hold, up to q_max·h
+                frt = fp.pt_flash(nxt.z, T_hold, nxt.P, nxt.flash.Kset)
+                need = (frt.H - nxt.H) * n_mol                  # W
+                cap = q_max * h if q_max > 0 else math.inf
+                add = min(need, cap)
+                if add >= need - 1e-9:
+                    nxt = make_stream("", fp, nxt.F, nxt.z, frt)
+                else:
+                    capped = True
+                    nxt = make_stream("", fp, nxt.F, nxt.z, _ph(fp, nxt.z, nxt.P, nxt.H + add / n_mol, nxt.T,
+                                                                nxt.flash.Kset))
+                Qheat += add
+                Qtot -= add
+                heat_inc += add
             rem -= h
             cur = nxt
             if rem > dL * 1e-9:
                 g, _ = pipe_gradient(fp, cur, D, eps, theta, method, sigma)
         st_new = cur
+        prof["q_heat"].append(heat_inc / dL)
         evr = max(evr, d1["vm"] / (122.0 / math.sqrt(max(d1["rho_ns"], 1e-6))))
         prof["HL"].append(d1["HL"])
         prof["regime"].append(d1["regime"])
@@ -1153,10 +1176,19 @@ def calc_pipe(unit, ins, fp):
     hm = [x for x in prof["Hm"] if x is not None]
     if hm:
         res["Min. hydrate margin along line [°C]"] = min(hm)
+    warns = []
+    if T_hold is not None:
+        res["Controlled heating [kW]"] = Qheat / 1000.0
+        res["Heated length [m]"] = dL * sum(1 for q in prof["q_heat"] if q > 1e-9)
+        res["Peak heating [W/m]"] = max(prof["q_heat"] or [0.0])
+        if capped:
+            warns.append(f"installed heating ({q_max:.0f} W/m) cannot hold {T_hold - K0:.1f} °C along the whole line")
     if evr > 1.0:
-        res["Warning"] = f"Mixture velocity exceeds the API RP 14E erosional velocity (ratio {evr:.2f})"
+        warns.append(f"Mixture velocity exceeds the API RP 14E erosional velocity (ratio {evr:.2f})")
+    if warns:
+        res["Warning"] = "; ".join(warns)
     unit["_profile"] = prof
-    en = [_energy(unit, -Qtot / 1000.0)] if (U > 0 or q_in > 0) else []
+    en = [_energy(unit, -Qtot / 1000.0)] if (U > 0 or q_in > 0 or Qheat > 0) else []
     return {"out": [make_stream("", fp, st.F, st.z, st.flash)]}, res, en
 
 

@@ -621,6 +621,123 @@
     }
    }
   },
+  "subsea_pump": {
+   "label": "Subsea pump",
+   "short": "Subsea pump",
+   "prefix": "P",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "subsea_compressor": {
+   "label": "Subsea compressor",
+   "short": "Subsea compressor",
+   "prefix": "K",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "subsea_separator": {
+   "label": "Subsea separator",
+   "short": "Subsea separator",
+   "prefix": "V",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "feed": {
+      "multi": true
+     }
+    },
+    "out": {
+     "vapour": {
+      "multi": false
+     },
+     "oil": {
+      "multi": false
+     },
+     "water": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "subsea_cooler": {
+   "label": "Subsea cooler",
+   "short": "Subsea cooler",
+   "prefix": "E",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "intensifier": {
+   "label": "Pressure intensifier",
+   "short": "Intensifier",
+   "prefix": "PI",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "cimv": {
+   "label": "Chemical injection valve (CIMV)",
+   "short": "Chemical injection",
+   "prefix": "CI",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     },
+     "chem": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false
+     }
+    }
+   }
+  },
   "subsea_valve": {
    "label": "SSIV / HIPPS valve",
    "short": "SSIV / HIPPS",

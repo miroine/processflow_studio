@@ -29,6 +29,7 @@ CAPEX_DEFAULTS = {
     "umb_MUSD_km": 1.2,          # static umbilical per km
     "cable_MUSD_km": 1.0,        # power cable per km (only with boosters)
     "topside_power_MUSD_MW": 4.0,  # topside VSDs / transformers per MW of subsea power
+    "heating_MUSD_km": 1.5,      # flowline heating system per heated km
     "eng_pct": 12.0,             # engineering, procurement management
     "cont_pct": 25.0,            # contingency
     "ref_ID_mm": 254.0,          # the catalogue's per-km line costs are for this bore
@@ -38,10 +39,12 @@ CAPEX_LABELS = {
     "well_MUSD": ("Drilling & completion per well", "MUSD"), "install_pct": ("Installation", "% of equipment"),
     "umb_MUSD_km": ("Umbilical", "MUSD/km"), "cable_MUSD_km": ("Power cable", "MUSD/km"),
     "topside_power_MUSD_MW": ("Topside power (VSD, transformer)", "MUSD/MW"),
+    "heating_MUSD_km": ("Flowline heating system", "MUSD/km"),
     "eng_pct": ("Engineering & management", "%"), "cont_pct": ("Contingency", "%"),
     "ref_ID_mm": ("Reference bore of line costs", "mm"), "size_exp": ("Line cost size exponent", "-"),
 }
-GROUPS = ("Wells", "Subsea equipment", "Subsea boosting", "Pipelines & risers", "Umbilical & power")
+GROUPS = ("Wells", "Subsea equipment", "Subsea processing", "Subsea boosting", "Pipelines & risers", "Flowline heating",
+          "Umbilical & power")
 
 
 def capex_params(model):
@@ -78,11 +81,19 @@ def booster_power_kW(model, sol):
     if sol is None:
         return sh, el
     for uid, u in model["units"].items():
-        if u["type"] == "subsea_booster":
+        if u["type"] in surf.BOOSTER_TYPES:
             r = sol.results.get(uid) or {}
             sh += float(r.get("Shaft power [kW]") or 0.0)
             el += float(r.get("Electrical power [kW]") or 0.0)
     return sh, el
+
+
+def heating_power_kW(model, sol):
+    """Electrical power drawn by flowline heating (DEH, heat-traced PiP) in the solution."""
+    if sol is None:
+        return 0.0
+    return sum(float((sol.results.get(uid) or {}).get("Electrical heating power [kW]") or 0.0)
+               for uid, u in model["units"].items() if u["type"] == "flowline")
 
 
 def equipment_list(model, sol=None):
@@ -102,7 +113,11 @@ def equipment_list(model, sol=None):
 
     cat_of = {"xmas_tree": ("tree", "tree"), "template": ("template", "template"), "jumper": ("jumper", "kind"),
               "subsea_valve": ("valve", "kind"), "subsea_booster": ("booster", "btype"),
+              "subsea_pump": ("booster", "btype"), "subsea_compressor": ("booster", "btype"),
+              "subsea_separator": ("separator", "sep_type"),
               "flowline": ("flowline", "design"), "riser": ("riser", "rtype")}
+    fixed = {"subsea_cooler": "Passive subsea cooler", "intensifier": "Pressure intensifier",
+             "cimv": "Chemical injection metering valve"}
     for uid, u in sorted(model["units"].items(), key=lambda kv: (surf.SURF_TYPES.index(kv[1]["type"])
                                                                  if kv[1]["type"] in surf.SURF_TYPES else 99,
                                                                  kv[1]["name"])):
@@ -112,11 +127,11 @@ def equipment_list(model, sol=None):
         if t == "well":
             add(u["name"], "Well", "Wells", 1, "well", cp["well_MUSD"], "Drilling & completion allowance", False)
             continue
-        cat, key = cat_of[t]
+        cat, name_ = ("process", fixed[t]) if t in fixed else (cat_of[t][0], u["params"].get(cat_of[t][1]))
         try:
-            row = surf.item(cat, u["params"].get(key))
+            row = surf.item(cat, name_)
         except UnitError:
-            row = {"item": str(u["params"].get(key)), "cost_MUSD": None}
+            row = {"item": str(name_), "cost_MUSD": None}
         c = row.get("cost_MUSD")
         basis = "Catalogue" if c is not None else "No cost in the catalogue"
         if t in ("flowline", "riser"):
@@ -126,8 +141,13 @@ def equipment_list(model, sol=None):
             uc = None if c is None else c * (ID / ref) ** ex
             add(u["name"], row["item"], "Pipelines & risers", L, "km", uc,
                 basis + (f", scaled to {ID:.0f} mm bore" if c is not None else ""))
+            system = surf.heating_system(u["params"])[0] if t == "flowline" else surf.HEAT_NONE
+            if system != surf.HEAT_NONE:
+                add(f"{u['name']} heating", system, "Flowline heating", L, "km", cp["heating_MUSD_km"],
+                    "Allowance per km (cables, power supply, monitoring)")
         else:
-            add(u["name"], row["item"], "Subsea boosting" if t == "subsea_booster" else "Subsea equipment", 1,
+            add(u["name"], row["item"], "Subsea boosting" if t in surf.BOOSTER_TYPES
+                else ("Subsea processing" if t in ("subsea_separator", "subsea_cooler") else "Subsea equipment"), 1,
                 "ea", c, basis)
     units = model["units"].values()
     if any(u["type"] in surf.SURF_TYPES for u in units):
@@ -136,11 +156,14 @@ def equipment_list(model, sol=None):
         add("Main umbilical", "Static umbilical (chemicals, hydraulics, signal)", "Umbilical & power", L, "km",
             cp["umb_MUSD_km"], "Allowance per km")
         _, el = booster_power_kW(model, sol)
-        if any(u["type"] == "subsea_booster" for u in units):
+        el_heat = heating_power_kW(model, sol)
+        if any(u["type"] in surf.BOOSTER_TYPES for u in units):
             add("Power cable", "Subsea power cable to the boosters", "Umbilical & power", L, "km",
                 cp["cable_MUSD_km"], "Allowance per km")
-            add("Topside power", "VSDs and transformers", "Umbilical & power", el / 1000.0, "MW",
-                cp["topside_power_MUSD_MW"], "Allowance per MW of subsea electrical power", False)
+        if el + el_heat > 0:
+            add("Topside power", "VSDs and transformers (boosters, electrical heating)", "Umbilical & power",
+                (el + el_heat) / 1000.0, "MW", cp["topside_power_MUSD_MW"],
+                "Allowance per MW of subsea electrical power", False)
     tot = {g: sum(i["Total [MUSD]"] for i in items if i["Group"] == g) for g in GROUPS}
     equip = sum(i["Equipment [MUSD]"] for i in items if i["Group"] != "Wells")
     install = sum(i["Installation [MUSD]"] for i in items)

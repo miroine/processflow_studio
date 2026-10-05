@@ -47,17 +47,21 @@ tested pipe, valve and flash models; equipment data come from a catalogue (see b
 | Xmas tree + choke | tree type (valve ΔP from the catalogue), choke outlet P, choke ΔP or fully open | isenthalpic; critical-flow check from the gas Cp/Cv (ideal-gas critical ratio, flagged as an estimate for multiphase flow); hydrate margin just downstream of the choke |
 | Template / manifold | template (slots, header ID, length, fittings K from the catalogue) | more wells than slots is an error; mixes at the lowest slot pressure (the spread tells you how much the tree chokes must balance), then header friction + fittings loss |
 | Jumper / spool / PLET / PLEM | component, length, ID, bends (−1 = catalogue), roughness | short Beggs & Brill pipe + K·ρv²/2 for bends and valves |
-| Flowline | design preset (bare steel, wet insulation, pipe-in-pipe, flexible, bundle, buried, DEH-ready), length, ID, elevation, seabed T, DEH on/off | pipe model with the preset's U and roughness (0 = use the catalogue); **direct electrical heating** adds W/m along the line |
+| Flowline | design preset (bare steel, wet insulation, pipe-in-pipe, flexible, bundle, buried, DEH-ready), length, ID, elevation, seabed T, **heating system** (none, direct electrical heating, heat-traced pipe-in-pipe, hot-water bundle) with a **fixed W/m** or **hold a minimum fluid temperature** (with a maximum W/m) | pipe model with the preset's U and roughness (0 = use the catalogue); heating adds heat along the line — in hold mode only where the fluid would fall below the set temperature, capped at the installed W/m (warned when the cap binds). Reports heat into the fluid, heated length, peak W/m and the electrical power (heat ÷ system efficiency) or the topside heater duty for a hot-water bundle |
 | Riser | type (vertical, SCR, lazy-wave, free-hanging flexible, hybrid tower), water depth, ID | geometry built from the water depth and the catalogue length factor: catenaries as a two-section profile, lazy-wave as up → hog bend → sag bend → up. **Riser-base slugging screen** (Bøe 1981): stratified flow at the riser base with a downhill flowline and u_sg0 < ρ_l g α L u_sl / P0 is flagged |
 | SSIV / HIPPS | valve, open/closed, open ΔP, optional HIPPS trip pressure | isenthalpic ΔP; closed or tripped gives no flow downstream (a trip is a warning) |
-| Subsea booster | type (helico-axial multiphase pump, hybrid pump, wet-gas compressor, single-phase pump), boost ΔP, outlet P or **performance curve** + speed; machines in parallel / series; efficiency (0 = catalogue or curve) | isentropic compression of the whole mixture (PS flash) ÷ efficiency; shaft and electrical power (motor efficiency), hydraulic power, inlet gas volume fraction checked against the machine's GVF window, boost against its maximum per machine and power against its rating |
+| Subsea booster / subsea pump / subsea compressor | type (helico-axial multiphase pump, hybrid pump, wet-gas compressor, single-phase pump), boost ΔP, outlet P or **performance curve** + speed; machines in parallel / series; efficiency (0 = catalogue or curve) | isentropic compression of the whole mixture (PS flash) ÷ efficiency; shaft and electrical power (motor efficiency), hydraulic power, inlet gas volume fraction checked against the machine's GVF window, boost against its maximum per machine and power against its rating |
+| Subsea separator | type (vertical gas-liquid, horizontal liquid-liquid, inline pipe separator), ΔP, liquid residence time, design pressure | flash at the outlet pressure; gas-liquid types send all liquid to the oil outlet, the liquid-liquid separator removes the free water (for reinjection). Sizing: Souders-Brown gas diameter, liquid volume for the residence time (horizontal L/D 4, inline L/D 20), ASME wall thickness and weight; thick walls (> 150 mm) are flagged |
+| Subsea cooler | outlet T, approach to the sea temperature, or cooler area; U, sea T, ΔP | passive seawater cooler: duty to the sea (costs no utility), required area from the LMTD, hydrate check at the outlet |
+| Pressure intensifier | area ratio or outlet pressure; hydraulic supply pressure; efficiency | hydraulic piston booster for chemical injection: P_out = P_hyd · ratio · η, work V·ΔP/η, hydraulic-fluid return flow |
+| Chemical injection valve (CIMV) | minimum ΔP across the valve | mixes the chemical into the production stream; error if the chemical arrives below production P + ΔP_min; reports dosage (ppm, wt % inhibitor in water) and hydrate margin after injection |
 
 Every SURF line unit has a **Profile** tab (P, T, holdup, velocity, elevation and hydrate margin along the
 line). The **🌊 Subsea (SURF)** tab summarises the wells (Pwf, drawdown, wellhead conditions, rates, rate/AOF)
 and the subsea equipment, draws a **pressure budget** from the reservoir to the arrival for any well, and holds
 the catalogue.
 
-The SURF tab is split into nine views:
+The SURF tab is split into ten views:
 
 * **System** — wells, subsea equipment, pressure budget and riser geometry.
 * **Equipment & CAPEX** — every subsea item with quantity and cost, rolled up into a class 5 estimate:
@@ -92,13 +96,23 @@ The SURF tab is split into nine views:
   temperature, τ = C′/(U·πD), with C′ the heat stored per metre in the contents (in-situ holdup), the steel wall
   and part of the insulation (basis editable). The no-touch time is how long until the fluid reaches the hydrate
   temperature at the shut-in (settle-out) pressure — the time available before depressurising or inhibiting.
+* **Heated lines** — every heated flowline: set temperature (hydrate T at settle-out or wax appearance T, plus a
+  margin), heat and power while flowing, power to **hold** the shut-in line (U·πD·(T_set − T_sea) per metre)
+  and whether the installed heating can, the **heat-up time** from sea temperature at the installed power, the
+  no-touch time the line would have without heating, and the **annual energy** (continuous heating, or heating
+  only through shutdowns). The chart overlays the heated and unheated temperature profiles and the heat input
+  along the line. Electrical heating is charged as power and a hot-water bundle as topside heating in the
+  economics; CAPEX adds the heating system per heated km.
 * **Catalogue** — view, download, upload or reset.
 
 **Catalogue.** The built-in catalogue holds *generic, illustrative* values only (no vendor or company data).
 Download it as CSV, edit it or write your own with the same columns, and upload it on the SURF tab: the
 catalogue is then stored **in the flowsheet file** (never in the app), and the property views offer your items.
 The load examples *Subsea field (SURF)* (four wells on a template, a pipe-in-pipe flowline and a lazy-wave riser)
-and *Subsea boosting (SURF)* (late life, a wet-gas compressor and a 45 km step-out) show the workflow.
+*Subsea boosting (SURF)* (late life, a wet-gas compressor and a 45 km step-out), *Heated flowline (SURF)* (an oil
+tie-back held at 25 °C by DEH, methanol through an intensifier and a CIMV), *Subsea compression station (SURF)*
+(cooler, gas-liquid separator, dry-gas compressor and liquid pump) and *Subsea separation (SURF)* (water removed
+and reinjected subsea, a multiphase pump for oil and gas) show the workflow.
 
 ### Well deliverability and subsea boosters
 

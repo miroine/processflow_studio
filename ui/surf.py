@@ -570,15 +570,74 @@ def cooldown_panel(model, sol):
                "temperature, or no free water); 0: already inside it while flowing.")
 
 
+def _set_heat(key, wkey):
+    ss = st.session_state
+    ss.model.setdefault("heating", {})[key] = ss[wkey]
+
+
+def heating_panel(model, sol):
+    ss = st.session_state
+    st.caption("Heated flowlines (set **Heating system** on a flowline: direct electrical heating, heat-traced "
+               "pipe-in-pipe or a hot-water bundle; control by a fixed W/m or by holding a minimum fluid temperature). "
+               "Below: the heat and power while flowing, the power to hold the shut-in line above the set temperature, "
+               "the heat-up time after a long shutdown, and the annual energy. Electrical heating is charged as power "
+               "and a hot-water bundle as topside heating in the economics; CAPEX adds the heating system per km.")
+    hp = so.heat_params(model)
+    v = ss.widget_ver
+    with st.expander("Heating basis", expanded=False):
+        c = st.columns(5)
+        for col, key, lab, kw in ((c[0], "margin", "Margin above hydrate / WAT [°C]", {"min_value": 0.0}),
+                                  (c[1], "WAT", "Wax appearance T (0 = none) [°C]", {"min_value": 0.0}),
+                                  (c[2], "shutdowns", "Shutdowns per year", {"min_value": 0.0}),
+                                  (c[3], "shutdown_h", "Shutdown duration [h]", {"min_value": 0.0})):
+            wk = f"heat_{key}_{v}"
+            col.number_input(lab, value=float(hp[key]), key=wk, format="%.4g", on_change=_set_heat, args=(key, wk), **kw)
+        wk = f"heat_mode_{v}"
+        c[4].selectbox("Operating mode", list(so.HEAT_MODES), index=list(so.HEAT_MODES).index(hp["mode"])
+                       if hp["mode"] in so.HEAT_MODES else 0, key=wk, on_change=_set_heat, args=("mode", wk),
+                       help="Continuous: heat while flowing and hold during shutdowns. Shutdown and restart only: "
+                            "the line flows unheated; heat holds it during shutdowns and warms it before restart")
+    lines = so.heated_lines(model, sol)
+    if not lines:
+        st.info("No heated flowline. Set **Heating system** on a subsea flowline, or load the *Heated flowline (SURF)* "
+                "example.")
+        return
+    for r in lines:
+        st.markdown(f"##### {r['Line']} — {r['Heating system']} ({r['Control'].lower()})")
+        pl = r["power_label"]
+        k = st.columns(5)
+        k[0].metric(f"{pl} flowing", qfmt("Duty [kW]", r[f"{pl} flowing [kW]"], 0))
+        k[1].metric(f"{pl} to hold at shut-in", qfmt("Duty [kW]", r[f"{pl} to hold during shut-in [kW]"], 0))
+        hu = r["Heat-up time from sea temperature [h]"]
+        k[2].metric("Heat-up from sea temperature", "not reachable" if hu is None else f"{hu:.1f} h")
+        nt = r["Unheated no-touch time [h]"]
+        k[3].metric("No-touch time without heating", "—" if nt is None else f"{nt:.1f} h")
+        ek = next(x for x in r if x.startswith("Annual heating energy"))
+        k[4].metric("Annual heating energy", f"{r[ek]:,.0f} MWh/y")
+        if r["Can hold the line during shut-in"] != "yes":
+            st.warning(f"The installed heating ({r['Installed heating [W/m]']:.0f} W/m) cannot hold the shut-in line at "
+                       f"{r['Set temperature [°C]']:.1f} °C (needs {r['Hold power, shut-in [W/m]']:.0f} W/m).")
+        key = f"_unheated_{r['uid']}"
+        if ss.get(key, {}).get("hash") != ss.sol_hash:
+            ss[key] = {"hash": ss.sol_hash, "prof": so.unheated_profile(model, sol, r["uid"])}
+        st.plotly_chart(charts.heated_line_figure(sol.profiles[r["uid"]], ss[key]["prof"], r["Line"],
+                                                  r["Set temperature [°C]"], r["Hydrate T at settle-out [°C]"]),
+                        width="stretch", key=f"heat_fig_{r['uid']}")
+        rows = [{"Quantity": k2, "Value": fmt(v2)} for k2, v2 in (U.kv(k_, v_) for k_, v_ in r.items()
+                                                                  if k_ not in ("power_label", "uid", "Line"))]
+        with st.expander("All results", expanded=False):
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+
+
 def surf_tab():
     ss = st.session_state
     model = ss.model
     sol = ss.sol if sol_is_current() else None
     st.markdown("#### Subsea production system (SURF)")
     units = surf_units(model)
-    t_sys, t_lay, t_capex, t_umb, t_tb, t_td, t_slug, t_cool, t_cat = st.tabs(
+    t_sys, t_lay, t_capex, t_umb, t_tb, t_td, t_slug, t_cool, t_heat, t_cat = st.tabs(
         ["System", "Field layout", "Equipment & CAPEX", "Umbilical & power", "Tie-back screening", "Turndown",
-         "Slugging", "Cool-down", "Catalogue"])
+         "Slugging", "Cool-down", "Heated lines", "Catalogue"])
     with t_sys:
         if not units:
             st.info("No subsea equipment in this flowsheet. Drag wells, Xmas trees, templates, jumpers, flowlines, "
@@ -623,6 +682,11 @@ def surf_tab():
             st.info("Solve the flowsheet first.")
         else:
             cooldown_panel(model, sol)
+    with t_heat:
+        if sol is None:
+            st.info("Solve the flowsheet first.")
+        else:
+            heating_panel(model, sol)
     with t_cat:
         catalogue_panel(model)
         with st.expander("Catalogue columns", expanded=False):

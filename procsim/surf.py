@@ -27,14 +27,14 @@ import os
 from .thermo import T_STD, V_STD_GAS, FlashError
 from .streams import EnergyStream, make_stream, zero_stream
 from .unitops import (CATALOGUE, CALC, UnitError, K0, G, _f, _s, _one, _live, _mix, _ph, _check_P,
-                      calc_pipe, pipe_gradient, _phase_split, _hyd_margin, _energy)
+                      calc_pipe, pipe_gradient, _phase_split, _hyd_margin, _energy, _separate, _vapour_volume)
 
 CATEGORY = "Subsea (SURF)"
 DEFAULT_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "surf_catalogue.csv")
-CATEGORIES = ("flowline", "riser", "tree", "template", "jumper", "valve", "booster")
+CATEGORIES = ("flowline", "riser", "tree", "template", "jumper", "valve", "booster", "separator", "process")
 NUMERIC = ("U_W_m2K", "roughness_mm", "dP_bar", "slots", "header_ID_mm", "header_length_m", "K_bend", "K_extra",
            "length_m", "bends", "length_factor", "hog_frac", "sag_frac", "deh_W_m",
-           "eff_pct", "min_gvf", "max_gvf", "max_dP_bar", "rated_kW", "motor_eff", "cost_MUSD")
+           "eff_pct", "min_gvf", "max_gvf", "max_dP_bar", "rated_kW", "motor_eff", "cost_MUSD", "sb_K", "res_min")
 COLUMNS = ("category", "item", "description") + NUMERIC + ("note",)
 P_STD = 1.01325
 
@@ -128,7 +128,9 @@ _ACTIVE = {"rows": _DEFAULT, "key": None, "index": {}}
 # (unit type, parameter key) -> catalogue category, for select parameters fed by the catalogue
 _CAT_PARAMS = {("xmas_tree", "tree"): "tree", ("template", "template"): "template", ("jumper", "kind"): "jumper",
                ("flowline", "design"): "flowline", ("riser", "rtype"): "riser", ("subsea_valve", "kind"): "valve",
-               ("subsea_booster", "btype"): "booster"}
+               ("subsea_booster", "btype"): "booster", ("subsea_pump", "btype"): ("booster", "pump"),
+               ("subsea_compressor", "btype"): ("booster", "compressor"),
+               ("subsea_separator", "sep_type"): "separator"}
 _ORIG_DEFAULT = {}
 
 
@@ -154,6 +156,13 @@ def items(category):
     return [r["item"] for r in _ACTIVE["rows"] if r["category"] == category]
 
 
+def booster_items(kind):
+    """Catalogue boosters that are compressors (gas-volume-fraction window starting at ≥ 90 %) or pumps."""
+    rows_ = [r for r in _ACTIVE["rows"] if r["category"] == "booster"]
+    comp = [r["item"] for r in rows_ if (r.get("min_gvf") or 0.0) >= 0.9]
+    return comp if kind == "compressor" else [r["item"] for r in rows_ if r["item"] not in comp]
+
+
 def activate(custom_rows=None):
     """Make a catalogue active (None = the built-in default) and refresh the select options."""
     rws = custom_rows or _DEFAULT
@@ -167,7 +176,7 @@ def activate(custom_rows=None):
             continue
         for spec in CATALOGUE[utype]["params"]:
             if spec["key"] == pkey:
-                opts = items(cat)
+                opts = items(cat) if isinstance(cat, str) else booster_items(cat[1])
                 spec["options"][:] = opts
                 orig = _ORIG_DEFAULT.setdefault((utype, pkey), spec["default"])
                 spec["default"] = orig if orig in opts else (opts[0] if opts else "")
@@ -197,6 +206,29 @@ def _override(p, key, row, col, default=None):
 # --------------------------------------------------------------------------
 
 IPR_GAS, IPR_PI, IPR_VOGEL = "Gas back-pressure (C, n)", "Productivity index (liquid)", "Vogel (oil)"
+
+
+def _booster_schema(label, prefix, options, default):
+    return {
+        "label": label, "prefix": prefix, "category": CATEGORY,
+        "ports": {"in": {"in": {"multi": False}}, "out": {"out": {"multi": False}}},
+        "params": [
+                _s("btype", "Booster type", options, default,
+                   help="The catalogue sets efficiency, gas-volume-fraction window, maximum boost and rated power"),
+                _s("spec", "Specification", ["Pressure boost", "Outlet pressure", "Performance curve"],
+                   "Pressure boost",
+                   help="Performance curve: the curve at the actual flow per machine and the speed sets the boost"),
+                _f("dP", "Pressure boost (total)", "bar", 30.0, {"spec": "Pressure boost"}, minv=0.1),
+                _f("P_out", "Outlet pressure", "bar(a)", 150.0, {"spec": "Outlet pressure"}),
+                _f("eff", "Efficiency (0 = catalogue or curve)", "%", 0.0, {"spec": ["Pressure boost", "Outlet pressure"]},
+                   minv=0.0, maxv=100.0),
+                _f("n_par", "Machines in parallel", "-", 1, minv=1, maxv=8),
+                _f("n_ser", "Machines in series", "-", 1, minv=1, maxv=4),
+                _f("speed", "Speed", "rpm", 3600.0, {"spec": "Performance curve"}, minv=1.0,
+                   help="Fan laws scale the design-speed curve: flow ~ N, boost ~ N²"),
+                _f("N_design", "Curve (design) speed", "rpm", 3600.0, {"spec": "Performance curve"}, minv=1.0),
+            ],
+    }
 
 
 def _schema():
@@ -274,8 +306,20 @@ def _schema():
                 _f("U", "Overall U (0 = catalogue)", "W/m²·K", 0.0, minv=0.0),
                 _f("rough", "Roughness (0 = catalogue)", "mm", 0.0, minv=0.0),
                 _f("T_amb", "Seabed temperature", "°C", 4.0),
-                _s("deh", "Direct electrical heating (DEH)", ["Off", "On"], "Off"),
-                _f("deh_W_m", "DEH heat input (0 = catalogue)", "W/m", 0.0, {"deh": "On"}, minv=0.0),
+                _s("heating", "Heating system", HEATING, HEAT_NONE,
+                   help="DEH: AC current through the pipe wall; ETH-PiP: heating cables in the pipe-in-pipe annulus; "
+                        "hot water: circulated from a topside heater through a bundle"),
+                _s("heat_ctrl", "Heating control", [CTRL_FIXED, CTRL_HOLD], CTRL_FIXED,
+                   {"heating": HEATING[1:]},
+                   help="Fixed: a constant W/m along the line. Hold: just enough heat to keep the fluid at or above "
+                        "the set temperature, up to the installed W/m"),
+                _f("deh_W_m", "Heat input (0 = catalogue)", "W/m", 0.0, {"heat_ctrl": CTRL_FIXED}, minv=0.0),
+                _f("T_hold", "Minimum fluid temperature", "°C", 25.0, {"heat_ctrl": CTRL_HOLD},
+                   help="Typically hydrate temperature + margin, or above the wax appearance temperature"),
+                _f("q_max_W_m", "Installed heating capacity", "W/m", 150.0, {"heating": HEATING[1:]}, minv=0.0),
+                _f("heat_eff", "Heating system efficiency (0 = typical)", "%", 0.0, {"heating": HEATING[1:]},
+                   minv=0.0, maxv=100.0,
+                   help="Heat into the fluid / power drawn. Typical: DEH 60 %, ETH-PiP 90 %, hot water 70 %"),
                 _f("n_seg", "Calculation increments", "-", 12, minv=1, maxv=200),
             ],
         },
@@ -296,24 +340,60 @@ def _schema():
                    help="Negative = downhill towards the riser base, which favours severe slugging"),
             ],
         },
-        "subsea_booster": {
-            "label": "Subsea booster (pump / compressor)", "prefix": "P", "category": CATEGORY,
+        "subsea_booster": _booster_schema("Subsea booster (pump / compressor)", "P", items("booster"),
+                                          "Helico-axial multiphase pump"),
+        "subsea_pump": dict(_booster_schema("Subsea pump", "P", booster_items("pump"), "Helico-axial multiphase pump")),
+        "subsea_compressor": dict(_booster_schema("Subsea compressor", "K", booster_items("compressor"),
+                                                  "Wet-gas compressor")),
+        "subsea_separator": {
+            "label": "Subsea separator", "prefix": "V", "category": CATEGORY,
+            "ports": {"in": {"feed": {"multi": True}},
+                      "out": {"vapour": {"multi": False}, "oil": {"multi": False}, "water": {"multi": False}}},
+            "params": [
+                _s("sep_type", "Separator type", items("separator"), "Gas-liquid separator (vertical)",
+                   help="Gas-liquid: ahead of a subsea compressor and pump. Liquid-liquid: removes water for "
+                        "reinjection. Outlets: gas (top), oil / liquid (right), water (bottom, optional)"),
+                _f("dP", "Pressure drop", "bar", 0.3, minv=0.0),
+                _f("res_min", "Liquid residence time (0 = catalogue)", "min", 0.0, minv=0.0),
+                _f("P_design", "Design pressure (0 = 1.1 × operating)", "bar(a)", 0.0, minv=0.0),
+            ],
+        },
+        "subsea_cooler": {
+            "label": "Subsea cooler", "prefix": "E", "category": CATEGORY,
             "ports": {"in": {"in": {"multi": False}}, "out": {"out": {"multi": False}}},
             "params": [
-                _s("btype", "Booster type", items("booster"), "Helico-axial multiphase pump",
-                   help="The catalogue sets efficiency, gas-volume-fraction window, maximum boost and rated power"),
-                _s("spec", "Specification", ["Pressure boost", "Outlet pressure", "Performance curve"],
-                   "Pressure boost",
-                   help="Performance curve: the curve at the actual flow per machine and the speed sets the boost"),
-                _f("dP", "Pressure boost (total)", "bar", 30.0, {"spec": "Pressure boost"}, minv=0.1),
-                _f("P_out", "Outlet pressure", "bar(a)", 150.0, {"spec": "Outlet pressure"}),
-                _f("eff", "Efficiency (0 = catalogue or curve)", "%", 0.0, {"spec": ["Pressure boost", "Outlet pressure"]},
-                   minv=0.0, maxv=100.0),
-                _f("n_par", "Machines in parallel", "-", 1, minv=1, maxv=8),
-                _f("n_ser", "Machines in series", "-", 1, minv=1, maxv=4),
-                _f("speed", "Speed", "rpm", 3600.0, {"spec": "Performance curve"}, minv=1.0,
-                   help="Fan laws scale the design-speed curve: flow ~ N, boost ~ N²"),
-                _f("N_design", "Curve (design) speed", "rpm", 3600.0, {"spec": "Performance curve"}, minv=1.0),
+                _s("spec", "Specification", ["Outlet temperature", "Approach to sea temperature", "Cooler area"],
+                   "Approach to sea temperature",
+                   help="A passive cooler rejects heat to the sea by natural convection; the outlet can never be "
+                        "colder than the sea"),
+                _f("T_out", "Outlet temperature", "°C", 25.0, {"spec": "Outlet temperature"}),
+                _f("approach", "Approach to sea temperature", "°C", 10.0, {"spec": "Approach to sea temperature"},
+                   minv=0.1),
+                _f("area", "Cooler area", "m²", 300.0, {"spec": "Cooler area"}, minv=0.1),
+                _f("U", "Overall U (0 = catalogue)", "W/m²·K", 0.0, minv=0.0),
+                _f("T_sea", "Sea temperature", "°C", 4.0),
+                _f("dP", "Pressure drop", "bar", 0.5, minv=0.0),
+            ],
+        },
+        "intensifier": {
+            "label": "Pressure intensifier", "prefix": "PI", "category": CATEGORY,
+            "ports": {"in": {"in": {"multi": False}}, "out": {"out": {"multi": False}}},
+            "params": [
+                _s("spec", "Specification", ["Area ratio", "Outlet pressure"], "Area ratio",
+                   help="Hydraulically driven reciprocating booster: outlet pressure = hydraulic supply × area "
+                        "ratio × mechanical efficiency"),
+                _f("ratio", "Area ratio", "-", 2.0, {"spec": "Area ratio"}, minv=1.0, maxv=50.0),
+                _f("P_out", "Outlet pressure", "bar(a)", 450.0, {"spec": "Outlet pressure"}),
+                _f("P_hyd", "Hydraulic supply pressure", "bar(a)", 345.0, minv=1.0),
+                _f("eff", "Mechanical efficiency (0 = catalogue)", "%", 0.0, minv=0.0, maxv=100.0),
+            ],
+        },
+        "cimv": {
+            "label": "Chemical injection valve (CIMV)", "prefix": "CI", "category": CATEGORY,
+            "ports": {"in": {"in": {"multi": False}, "chem": {"multi": False}}, "out": {"out": {"multi": False}}},
+            "params": [
+                _f("dP_min", "Minimum ΔP across the valve (0 = catalogue)", "bar", 0.0, minv=0.0,
+                   help="The chemical must arrive at least this much above the production pressure"),
             ],
         },
         "subsea_valve": {
@@ -357,7 +437,7 @@ def _merge_profiles(dst, src):
         return dst
     for k, v in src.items():
         dst.setdefault(k, [])
-        dst[k].extend(v[1:])
+        dst[k].extend(v if k == "q_heat" else v[1:])      # q_heat is per increment, not per node
     return dst
 
 
@@ -402,6 +482,11 @@ def bottomhole_pressure(ipr, Pr, q_gas_Sm3d, q_oil, q_liq, p):
 
 
 RATE_FEED, RATE_WHP = "From the feed", "Wellhead pressure"
+HEAT_NONE = "None"
+HEATING = [HEAT_NONE, "Direct electrical heating (DEH)", "Heat-traced pipe-in-pipe (ETH-PiP)",
+           "Hot-water circulation (bundle)"]
+HEAT_EFF = {HEATING[1]: 60.0, HEATING[2]: 90.0, HEATING[3]: 70.0}
+CTRL_FIXED, CTRL_HOLD = "Fixed heat input", "Hold minimum temperature"
 
 
 def _well_state(unit, s, fp, n_seg=None):
@@ -722,6 +807,14 @@ def calc_jumper(unit, ins, fp):
 # Flowline with design preset and DEH
 # --------------------------------------------------------------------------
 
+def heating_system(p):
+    """(system, control) of a flowline, mapping the v5 DEH on/off switch onto the heating options."""
+    system = p.get("heating", HEAT_NONE)
+    if system == HEAT_NONE and p.get("deh") == "On":
+        system = HEATING[1]
+    return system, p.get("heat_ctrl", CTRL_FIXED)
+
+
 def calc_flowline(unit, ins, fp):
     p = unit["params"]
     s = _one(ins, "in")
@@ -730,23 +823,38 @@ def calc_flowline(unit, ins, fp):
     row = item("flowline", p.get("design"), unit["name"])
     U = _override(p, "U", row, "U_W_m2K", 0.0)
     rough = _override(p, "rough", row, "roughness_mm", 0.045)
-    q_in = 0.0
-    if p.get("deh") == "On":
-        q_in = _override(p, "deh_W_m", row, "deh_W_m", 0.0)
-        if q_in <= 0:
-            raise UnitError(f"{unit['name']}: DEH is on but no heat input is set (catalogue or override)")
+    system, ctrl = heating_system(p)
+    q_in, hold = 0.0, {}
+    if system != HEAT_NONE:
+        if ctrl == CTRL_HOLD:
+            hold = {"T_hold": float(p.get("T_hold", 25.0)), "q_max_W_m": float(p.get("q_max_W_m", 150.0) or 0.0)}
+        else:
+            q_in = _override(p, "deh_W_m", row, "deh_W_m", 0.0)
+            if q_in <= 0 and p.get("heating", HEAT_NONE) != HEAT_NONE:   # legacy deh="On" files must set W/m
+                q_in = float(p.get("q_max_W_m", 0.0) or 0.0)
+            if q_in <= 0:
+                raise UnitError(f"{unit['name']}: heating is on but no heat input is set (catalogue or override)")
     L = float(p["length"])
-    pu = _pipe_unit(unit, {"length": L, "ID": p["ID"], "rough": rough, "dz": p.get("dz", 0.0),
-                           "n_seg": p.get("n_seg", 12), "method": p.get("method", "Beggs & Brill"),
-                           "heat": "Overall U to ambient" if U > 0 else "Adiabatic", "U": U,
-                           "T_amb": p.get("T_amb", 4.0), "q_in_W_m": q_in})
+    pu = _pipe_unit(unit, dict({"length": L, "ID": p["ID"], "rough": rough, "dz": p.get("dz", 0.0),
+                                "n_seg": p.get("n_seg", 12), "method": p.get("method", "Beggs & Brill"),
+                                "heat": "Overall U to ambient" if U > 0 else "Adiabatic", "U": U,
+                                "T_amb": p.get("T_amb", 4.0), "q_in_W_m": q_in}, **hold))
     outs, rp, en = calc_pipe(pu, {"in": [s]}, fp)
     unit["_profile"] = pu["_profile"]
     res = {"Design": row["item"], "U used [W/m²·K]": U, "Roughness used [mm]": rough}
-    if q_in > 0:
-        res["DEH power [kW]"] = q_in * L / 1000.0
+    if system != HEAT_NONE:
+        delivered = q_in * L / 1000.0 if ctrl == CTRL_FIXED else rp.get("Controlled heating [kW]", 0.0)
+        eff = float(p.get("heat_eff", 0.0) or 0.0) or HEAT_EFF[system]
+        res.update({"Heating system": system, "Heating control": ctrl,
+                    "Heat into the fluid [kW]": delivered, "Heating system efficiency [%]": eff})
+        if system == HEATING[3]:
+            res["Topside heater duty for heating [kW]"] = delivered / (eff / 100.0)
+        else:
+            res["Electrical heating power [kW]"] = delivered / (eff / 100.0)
+        if system == HEATING[1] and ctrl == CTRL_FIXED:
+            res["DEH power [kW]"] = delivered                     # kept for v5.x flowsheets and tests
     res.update(rp)
-    if q_in > 0:
+    if system != HEAT_NONE:
         res["Net heat loss [kW]"] = res.pop("Heat loss [kW]")
     return outs, _elev_note(res, float(p.get("dz", 0.0))), en
 
@@ -1031,10 +1139,189 @@ def calc_subsea_booster(unit, ins, fp):
 
 
 # --------------------------------------------------------------------------
+# Subsea separator, cooler, pressure intensifier, chemical injection valve
+# --------------------------------------------------------------------------
+
+S_ALLOW_MPA = 138.0          # allowable stress, carbon steel (generic)
+CORR_MM = 3.0
+
+
+def _act_vol(st):
+    """Actual volumetric flow [m³/s] and density [kg/m³] of a stream (0, 0 when empty)."""
+    if st.empty:
+        return 0.0, 0.0
+    q = sum(st.F * ph.beta * ph.Vs for ph in st.flash.phases) * 1000.0 / 3600.0
+    return q, (st.F * st.MW / 3600.0 / q if q > 0 else 0.0)
+
+
+def calc_subsea_separator(unit, ins, fp):
+    """Three-outlet subsea separator (gas, oil/liquid, water) on the separator model, with indicative sizing:
+    Souders-Brown gas area, liquid residence volume, ASME wall thickness for the design pressure, shell weight."""
+    p = unit["params"]
+    row = item("separator", p.get("sep_type"), unit["name"])
+    two = "gas-liquid" in row["item"].lower()       # gas/liquid only: hydrocarbon liquid and water leave together
+    outs, res, en = _separate(unit, ins, fp, not two)
+    if two:
+        liq = outs.pop("liquid")[0]
+        outs["oil"] = [liq]
+        outs["water"] = [zero_stream("", fp, liq.z, liq.T, liq.P)]
+        res.pop("Note", None)
+        if "Liquid flow [kg/h]" in res:
+            res["Oil flow [kg/h]"] = res.pop("Liquid flow [kg/h]")
+    if res.get("Status") == "No flow":
+        return outs, res, en
+    gas, oil, wat = outs["vapour"][0], outs["oil"][0], outs["water"][0]
+    qg, rg = _act_vol(gas)
+    qo, ro = _act_vol(oil)
+    qw, rw = _act_vol(wat)
+    ql = qo + qw
+    rl = (qo * ro + qw * rw) / ql if ql > 0 else 1000.0
+    K = _cat(row, "sb_K", 0.10)
+    tres = float(p.get("res_min", 0.0) or 0.0) or _cat(row, "res_min", 3.0)
+    V_liq = ql * tres * 60.0
+    v_max = K * math.sqrt(max(rl - rg, 1.0) / rg) if rg > 0 else math.inf
+    D_gas = math.sqrt(4.0 * qg / (math.pi * v_max)) if qg > 0 and math.isfinite(v_max) else 0.0
+    P_op = res["Vessel P [bar(a)]"]
+    vertical = "vertical" in row["item"].lower()
+    if vertical:
+        D = max(D_gas, 0.6)
+        h_liq = V_liq / (math.pi * D * D / 4.0)
+        L = h_liq + max(1.5, D)                       # liquid section + disengagement / demister height
+    else:
+        LD = 20.0 if "pipe" in row["item"].lower() else 4.0
+        D = max((8.0 * V_liq / (math.pi * LD)) ** (1.0 / 3.0), D_gas * math.sqrt(2.0), 0.6)   # half full of liquid
+        L = LD * D
+    Pd = float(p.get("P_design", 0.0) or 0.0) or 1.1 * P_op
+    Pmpa = Pd / 10.0
+    t = Pmpa * D / (2.0 * S_ALLOW_MPA - 1.2 * Pmpa) * 1000.0 + CORR_MM          # mm, ASME VIII-1 cylinder
+    weight = 7850.0 * math.pi * (D + t / 1000.0) * t / 1000.0 * (L + D) * 1.3 / 1000.0  # t, +30 % internals/nozzles
+    res.update({"Separator type": row["item"], "Souders-Brown K [m/s]": K, "Gas flow [m³/h]": qg * 3600.0,
+                "Liquid flow [m³/h]": ql * 3600.0, "Liquid residence time [min]": tres,
+                "Liquid hold-up volume [m³]": V_liq, "Vessel ID [mm]": D * 1000.0, "Length (T/T) [m]": L,
+                "Design pressure [bar(a)]": Pd, "Wall thickness incl. corrosion [mm]": t,
+                "Shell weight (indicative) [t]": weight, "Water to reinjection [m³/d]": qw * 86400.0})
+    if t > 150.0:
+        res["Warning"] = (f"wall thickness {t:.0f} mm: beyond typical forging limits — split into parallel "
+                          "vessels or use a pipe separator")
+    return outs, res, en
+
+
+def calc_subsea_cooler(unit, ins, fp):
+    """Passive seawater cooler: outlet T from a spec, an approach to the sea temperature, or the area
+    (T_out = T_sea + (T_in − T_sea)·exp(−U·A/ṁc_p)); duty rejected to the sea; hydrate check at the outlet."""
+    p = unit["params"]
+    s = _one(ins, "in")
+    row = item("process", "Passive subsea cooler", unit["name"])
+    if s.empty:
+        return {"out": [zero_stream("", fp, s.z, s.T, s.P)]}, {"Status": "No flow"}, []
+    P2 = s.P - float(p.get("dP", 0.0))
+    _check_P(P2, unit["name"])
+    U = _override(p, "U", row, "U_W_m2K", 250.0)
+    Ts = float(p.get("T_sea", 4.0))
+    Tin = s.T - K0
+    mcp = s.F * 1000.0 / 3600.0 * max(s.flash.Cp, 1.0)           # W/K
+    spec = p.get("spec", "Approach to sea temperature")
+    if spec == "Outlet temperature":
+        T2 = float(p["T_out"])
+    elif spec == "Approach to sea temperature":
+        T2 = Ts + float(p["approach"])
+    else:
+        T2 = Ts + (Tin - Ts) * math.exp(-U * float(p["area"]) / mcp)
+    if T2 <= Ts:
+        raise UnitError(f"{unit['name']}: outlet {T2:.1f} °C cannot be at or below the sea temperature {Ts:.1f} °C")
+    if T2 > Tin + 1e-9:
+        raise UnitError(f"{unit['name']}: outlet {T2:.1f} °C is above the inlet {Tin:.1f} °C (a cooler cannot heat)")
+    fr = fp.pt_flash(s.z, T2 + K0, P2, s.flash.Kset)
+    out = make_stream("", fp, s.F, s.z, fr)
+    duty = s.F * (fr.H - s.H) / 3600.0
+    area = (-math.log((T2 - Ts) / (Tin - Ts)) * mcp / U) if Tin - Ts > 1e-9 and T2 < Tin else 0.0
+    res = {"Outlet T [°C]": T2, "Outlet P [bar(a)]": P2, "Duty rejected to sea [kW]": -duty,
+           "U used [W/m²·K]": U, "Required area [m²]": area, "Inlet T [°C]": Tin}
+    hm = _hyd_margin(out, fp)
+    if hm is not None:
+        res["Outlet hydrate margin [°C]"] = hm
+        if hm < 0:
+            res["Warning"] = "cooler outlet is inside the hydrate region: inhibit upstream or cool less"
+    return {"out": [out]}, res, [_energy(unit, duty)]
+
+
+def calc_intensifier(unit, ins, fp):
+    """Hydraulically driven pressure intensifier for chemicals or control fluid: outlet P = hydraulic supply ×
+    area ratio × mechanical efficiency; liquid compression work V·ΔP / η into the fluid; hydraulic fluid drawn
+    = liquid flow × area ratio / 95 % volumetric efficiency."""
+    p = unit["params"]
+    s = _one(ins, "in")
+    row = item("process", "Pressure intensifier", unit["name"])
+    if s.empty:
+        return {"out": [zero_stream("", fp, s.z, s.T, s.P)]}, {"Status": "No flow"}, []
+    eta = _override(p, "eff", row, "eff_pct", 85.0) / 100.0
+    Ph = float(p["P_hyd"])
+    if p.get("spec", "Area ratio") == "Area ratio":
+        ratio = float(p["ratio"])
+        P2 = Ph * ratio * eta
+    else:
+        P2 = float(p["P_out"])
+        ratio = P2 / (Ph * eta)
+    if P2 <= s.P:
+        raise UnitError(f"{unit['name']}: intensified pressure {P2:.0f} bar is not above the inlet {s.P:.0f} bar")
+    Vs = _vapour_volume(s.flash)                         # m³/mol
+    H2 = s.H + Vs * (P2 - s.P) * 1e5 / eta
+    fr = _ph(fp, s.z, P2, H2, s.T, s.flash.Kset)
+    W = s.F * (fr.H - s.H) / 3600.0
+    q_liq = s.F * 1000.0 * Vs                           # m³/h
+    q_hyd = q_liq * ratio / 0.95
+    res = {"Outlet P [bar(a)]": P2, "Area ratio [-]": ratio, "Hydraulic supply P [bar(a)]": Ph,
+           "Mechanical efficiency [%]": 100.0 * eta, "Liquid flow [L/h]": q_liq * 1000.0,
+           "Hydraulic fluid consumption [L/min]": q_hyd * 1000.0 / 60.0,
+           "Hydraulic power drawn [kW]": q_hyd / 3600.0 * Ph * 1e5 / 1000.0, "Power into the fluid [kW]": W,
+           "Outlet T [°C]": fr.T - K0}
+    if s.flash.vf > 1e-6:
+        res["Warning"] = f"vapour in the intensifier feed (vapour fraction {s.flash.vf:.4f}): it pumps liquids only"
+    return {"out": [make_stream("", fp, s.F, s.z, fr)]}, res, [_energy(unit, W, "work")]
+
+
+def calc_cimv(unit, ins, fp):
+    """Chemical injection metering valve: the chemical is throttled into the production stream at the production
+    pressure (adiabatic mix); dosage and, for MEG/methanol, the inhibited hydrate margin downstream."""
+    from .streams import stream_properties, hydrate_state
+    p = unit["params"]
+    prod = _one(ins, "in")
+    chem = _one(ins, "chem")
+    row = item("process", "Chemical injection metering valve", unit["name"])
+    dpmin = _override(p, "dP_min", row, "dP_bar", 5.0)
+    if prod.empty:
+        return {"out": [zero_stream("", fp, prod.z, prod.T, prod.P)]}, {"Status": "No production flow"}, []
+    if not chem.empty and chem.P < prod.P + dpmin:
+        raise UnitError(f"{unit['name']}: chemical arrives at {chem.P:.1f} bar, below the production pressure "
+                        f"{prod.P:.1f} bar + {dpmin:.1f} bar across the valve — raise the delivery pressure "
+                        "(pump or intensifier)")
+    F, z, Hf, _, Tg = _mix([prod, chem], fp)
+    fr = _ph(fp, z, prod.P, Hf / F, Tg)
+    out = make_stream("", fp, F, z, fr)
+    pp = stream_properties(prod, fp)
+    res = {"Injection pressure [bar(a)]": prod.P}
+    if not chem.empty:
+        pc = stream_properties(chem, fp)
+        res.update({"Chemical rate [kg/h]": pc["Mass flow [kg/h]"], "Chemical rate [L/h]": pc["Std liq vol flow [m³/h]"] * 1000.0,
+                    "ΔP across the valve [bar]": chem.P - prod.P})
+        if pp["Std liq vol flow [m³/h]"] > 0:
+            res["Dosage [ppm of liquid, vol]"] = 1e6 * pc["Std liq vol flow [m³/h]"] / pp["Std liq vol flow [m³/h]"]
+    t_hyd, t_inh, margin, wt = hydrate_state(out, fp)
+    if margin is not None:
+        res.update({"Inhibitor in water [wt%]": wt, "Inhibited hydrate T [°C]": t_inh, "Hydrate margin downstream [°C]": margin})
+        if margin < 0:
+            res["Warning"] = "still inside the hydrate region after injection: raise the dosage"
+    res["Outlet T [°C]"] = fr.T - K0
+    return {"out": [out]}, res, []
+
+
+# --------------------------------------------------------------------------
 # Registration
 # --------------------------------------------------------------------------
 
-SURF_TYPES = ("well", "xmas_tree", "template", "jumper", "flowline", "riser", "subsea_valve", "subsea_booster")
+BOOSTER_TYPES = ("subsea_booster", "subsea_pump", "subsea_compressor")
+SURF_TYPES = ("well", "xmas_tree", "template", "jumper", "flowline", "riser", "subsea_valve") + BOOSTER_TYPES + (
+    "subsea_separator", "subsea_cooler", "intensifier", "cimv")
 PROFILE_TYPES = ("well", "jumper", "flowline", "riser")
 
 
@@ -1043,7 +1330,10 @@ def register():
     CATALOGUE.update(_schema())
     CALC.update({"well": calc_well, "xmas_tree": calc_xmas_tree, "template": calc_template,
                  "jumper": calc_jumper, "flowline": calc_flowline, "riser": calc_riser,
-                 "subsea_valve": calc_subsea_valve, "subsea_booster": calc_subsea_booster})
+                 "subsea_valve": calc_subsea_valve, "subsea_booster": calc_subsea_booster,
+                 "subsea_pump": calc_subsea_booster, "subsea_compressor": calc_subsea_booster,
+                 "subsea_separator": calc_subsea_separator, "subsea_cooler": calc_subsea_cooler,
+                 "intensifier": calc_intensifier, "cimv": calc_cimv})
 
 
 register()

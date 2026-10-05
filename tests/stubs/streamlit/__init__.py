@@ -145,11 +145,22 @@ def dataframe(data, **kw):
             raise KeyError(f"column_config for missing column {k}")
 
 
+class _RealFig:
+    """A real Plotly figure seen through the stub's interface (layout as a plain dict) for the tests."""
+    def __init__(self, fig):
+        self.data = [type(tr.__class__.__name__, (), {"kw": tr.to_plotly_json()})() for tr in fig.data]
+        self.layout = fig.to_plotly_json()["layout"]
+        self.real = fig
+
+
 def plotly_chart(fig, **kw):
     _check_width(kw)
     import plotly.graph_objects as go
     if not isinstance(fig, go.Figure):
         raise TypeError("plotly_chart expects a Figure")
+    if getattr(go, "__file__", "").find("stubs") < 0:
+        fig.to_json()                      # real Plotly: full serialisation, as Streamlit does
+        fig = _RealFig(fig)
     key = kw.get("key")
     _register("plotly_chart", "", key, str(id(fig)))
     HOOK["charts"].append(fig)

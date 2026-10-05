@@ -601,7 +601,7 @@ def solve(model_in, fp: FluidPackage | None = None) -> Solution:
             continue
         if u["type"] in PROFILE_TYPES and "_profile" in u:
             sol.profiles[uid] = u["_profile"]
-        if u["type"] in ("compressor", "subsea_booster") and "_map" in u:
+        if u["type"] in ("compressor", "subsea_booster", "subsea_pump", "subsea_compressor") and "_map" in u:
             sol.maps[uid] = u["_map"]
         if u["type"] == "column" and "_column" in u:
             sol.columns[uid] = u["_column"]

@@ -247,6 +247,150 @@ def subsea_field_boosted():
     return subsea_field(boosted=True)
 
 
+
+OIL_WC = {"N2": 0.003, "CO2": 0.010, "C1": 0.200, "C2": 0.035, "C3": 0.030, "iC4": 0.007, "nC4": 0.015,
+          "iC5": 0.007, "nC5": 0.009, "nC6": 0.016, "nC7": 0.033, "nC8": 0.045, "H2O": 0.590}
+
+
+def heated_oil_tieback():
+    """Oil tie-back kept warm by direct electrical heating: 2 oil wells → trees → template → chemical injection
+    (methanol for start-up, delivered at low pressure and raised by a subsea pressure intensifier) → 18 km
+    DEH-ready wet-insulated flowline holding 25 °C → SCR → arrival separator."""
+    m = new_model(["N2", "CO2", "C1", "C2", "C3", "iC4", "nC4", "iC5", "nC5", "nC6", "nC7", "nC8", "H2O", "MeOH"])
+    tmp = add_unit(m, "template", 330, 160, "TMP-100 Template", {"template": "4-slot template"})
+    for k, (Pr, q, PI) in enumerate([(240.0, 700.0, 45.0), (235.0, 600.0, 40.0)], start=1):
+        y = 60 + 180 * (k - 1)
+        f = add_unit(m, "feed", -260, y, f"Reservoir P-{k}", {"T_C": 85.0, "P_bar": Pr, "flow_basis": "kmol/h",
+                                                              "flow": q, "composition": dict(WELL_FLUID)})
+        w = add_unit(m, "well", -110, y, f"P-{k}", {"ipr": "Productivity index (liquid)", "PI": PI, "MD": 2700.0,
+                                                    "TVD": 2500.0, "ID": 150.0})
+        xt = add_unit(m, "xmas_tree", 60, y, f"XT-{k}", {"tree": "Vertical Xmas tree (VXT)", "P_out": 75.0})
+        connect(m, f, "out", w, "in")
+        connect(m, w, "out", xt, "in", f"P-{k} wellhead")
+        connect(m, xt, "out", tmp, "in", f"XT-{k} outlet")
+    meoh = add_unit(m, "feed", 360, -40, "Methanol (umbilical)", {"T_C": 6.0, "P_bar": 60.0, "flow_basis": "kg/h",
+                                                                   "flow": 300.0, "comp_basis": "Mass fractions",
+                                                                   "composition": {"MeOH": 1.0}})
+    pi = add_unit(m, "intensifier", 470, -40, "PI-100 Intensifier", {"spec": "Area ratio", "ratio": 2.0, "P_hyd": 207.0})
+    ci = add_unit(m, "cimv", 540, 168, "CI-100 Methanol injection")
+    fl = add_unit(m, "flowline", 740, 160, "FL-100 Heated flowline",
+                  {"design": "Electrically heated (DEH)", "length": 18000.0, "ID": 254.0, "dz": 60.0, "n_seg": 10,
+                   "heating": "Direct electrical heating (DEH)", "heat_ctrl": "Hold minimum temperature",
+                   "T_hold": 25.0, "q_max_W_m": 120.0})
+    rs = add_unit(m, "riser", 930, 80, "RSR-100 Riser", {"rtype": "Steel catenary riser (SCR)", "depth": 300.0,
+                                                         "ID": 254.0, "fl_len": 18000.0, "fl_incl": 0.2, "n_seg": 8})
+    ar = add_unit(m, "separator3", 1110, 20, "V-100 Arrival sep")
+    gas = add_unit(m, "product", 1290, -60, "Gas")
+    oil = add_unit(m, "product", 1300, 110, "Oil")
+    wat = add_unit(m, "product", 1170, 170, "Produced water")
+    connect(m, meoh, "out", pi, "in")
+    connect(m, pi, "out", ci, "chem", "Methanol at injection pressure")
+    connect(m, tmp, "out", ci, "in", "Template outlet")
+    connect(m, ci, "out", fl, "in", "Flowline inlet")
+    connect(m, fl, "out", rs, "in", "Riser base")
+    connect(m, rs, "out", ar, "feed", "Topside arrival")
+    connect(m, ar, "vapour", gas, "in")
+    connect(m, ar, "oil", oil, "in")
+    connect(m, ar, "water", wat, "in")
+    return m
+
+
+def subsea_compression():
+    """Subsea gas compression station (in the spirit of the Åsgard / Gullfaks systems): depleted gas wells →
+    template → subsea cooler → gas-liquid separator → dry-gas compressor; liquids pumped by a subsea pump and
+    recombined → 40 km pipe-in-pipe → lazy-wave riser → arrival."""
+    m = new_model()
+    tmp = add_unit(m, "template", 300, 200, "TMP-100 Template", {"template": "4-slot template"})
+    for k, (Pr, q, C) in enumerate([(205.0, 1.0, 520.0), (200.0, 0.9, 480.0), (210.0, 1.1, 560.0),
+                                     (198.0, 0.9, 500.0)], start=1):
+        y = 20 + 120 * (k - 1)
+        f = add_unit(m, "feed", -260, y, f"Reservoir W-{k}", {"T_C": 105.0, "P_bar": Pr, "flow_basis": "MSm³/d",
+                                                              "flow": q, "composition": dict(WET_GAS)})
+        w = add_unit(m, "well", -110, y, f"W-{k}", {"C": C, "n": 0.8, "MD": 3300.0, "TVD": 3000.0, "ID": 125.0})
+        xt = add_unit(m, "xmas_tree", 60, y, f"XT-{k}", {"tree": "Horizontal Xmas tree (HXT)", "P_out": 62.0})
+        connect(m, f, "out", w, "in")
+        connect(m, w, "out", xt, "in", f"W-{k} wellhead")
+        connect(m, xt, "out", tmp, "in", f"XT-{k} outlet")
+    cl = add_unit(m, "subsea_cooler", 450, 200, "E-100 Subsea cooler", {"spec": "Approach to sea temperature",
+                                                                         "approach": 22.0, "T_sea": 4.0})
+    sep = add_unit(m, "subsea_separator", 600, 190, "V-100 Subsea separator",
+                   {"sep_type": "Gas-liquid separator (vertical)"})
+    k1 = add_unit(m, "subsea_compressor", 760, 90, "K-100 Subsea compressor",
+                  {"btype": "Dry-gas centrifugal compressor", "dP": 55.0, "n_par": 2})
+    pp = add_unit(m, "subsea_pump", 760, 320, "P-100 Subsea pump", {"btype": "Single-phase liquid pump", "dP": 56.0})
+    mx = add_unit(m, "mixer", 900, 200, "MIX-100 Recombination")
+    fl = add_unit(m, "flowline", 1060, 200, "FL-100 Flowline", {"design": "Pipe-in-pipe", "length": 40000.0,
+                                                                   "ID": 356.0, "dz": -100.0, "n_seg": 12})
+    rs = add_unit(m, "riser", 1220, 120, "RSR-100 Riser", {"rtype": "Lazy-wave (flexible)", "depth": 350.0,
+                                                           "ID": 305.0, "fl_len": 40000.0, "n_seg": 9})
+    ar = add_unit(m, "separator3", 1400, 60, "V-200 Arrival sep")
+    gas = add_unit(m, "product", 1580, -30, "Gas to process")
+    cond = add_unit(m, "product", 1600, 160, "Condensate")
+    wat = add_unit(m, "product", 1470, 230, "Produced water")
+    connect(m, tmp, "out", cl, "in", "Template outlet")
+    connect(m, cl, "out", sep, "feed", "Cooled wellstream")
+    connect(m, sep, "vapour", k1, "in", "Gas to compressor")
+    connect(m, sep, "oil", pp, "in", "Liquid to pump")
+    connect(m, k1, "out", mx, "in", "Compressed gas")
+    connect(m, pp, "out", mx, "in", "Pumped liquid")
+    connect(m, mx, "out", fl, "in", "Flowline inlet")
+    connect(m, fl, "out", rs, "in", "Riser base")
+    connect(m, rs, "out", ar, "feed", "Topside arrival")
+    connect(m, ar, "vapour", gas, "in")
+    connect(m, ar, "oil", cond, "in")
+    connect(m, ar, "water", wat, "in")
+    return m
+
+
+def subsea_separation():
+    """Subsea separation and water reinjection (in the spirit of Tordis / Marlim): high water-cut oil wells →
+    template → liquid-liquid separator; water pumped back into the reservoir by a water injection pump; oil and
+    gas boosted by a multiphase pump → 15 km wet-insulated flowline → SCR → arrival."""
+    m = new_model()
+    tmp = add_unit(m, "template", 300, 160, "TMP-100 Template", {"template": "4-slot template"})
+    for k, (Pr, q, PI) in enumerate([(210.0, 1500.0, 120.0), (205.0, 1400.0, 110.0), (215.0, 1600.0, 130.0)], start=1):
+        y = 20 + 140 * (k - 1)
+        f = add_unit(m, "feed", -260, y, f"Reservoir P-{k}", {"T_C": 80.0, "P_bar": Pr, "flow_basis": "kmol/h",
+                                                              "flow": q, "composition": dict(OIL_WC)})
+        w = add_unit(m, "well", -110, y, f"P-{k}", {"ipr": "Productivity index (liquid)", "PI": PI, "MD": 2500.0,
+                                                    "TVD": 2300.0, "ID": 150.0})
+        xt = add_unit(m, "xmas_tree", 60, y, f"XT-{k}", {"tree": "Vertical Xmas tree (VXT)", "P_out": 30.0})
+        connect(m, f, "out", w, "in")
+        connect(m, w, "out", xt, "in", f"P-{k} wellhead")
+        connect(m, xt, "out", tmp, "in", f"XT-{k} outlet")
+    sep = add_unit(m, "subsea_separator", 470, 150, "V-100 Subsea separator",
+                   {"sep_type": "Liquid-liquid separator (horizontal)"})
+    mx = add_unit(m, "mixer", 640, 80, "MIX-100 Oil + gas")
+    mpp = add_unit(m, "subsea_pump", 780, 80, "P-100 Multiphase pump", {"btype": "Helico-axial multiphase pump",
+                                                                        "dP": 45.0})
+    wip = add_unit(m, "subsea_pump", 640, 330, "P-200 Water injection pump", {"btype": "Water injection pump",
+                                                                              "spec": "Outlet pressure", "P_out": 230.0})
+    inj = add_unit(m, "product", 820, 330, "Water to injection well")
+    fl = add_unit(m, "flowline", 950, 80, "FL-100 Flowline", {"design": "Wet insulation (multilayer PP)",
+                                                                 "length": 15000.0, "ID": 305.0, "dz": -50.0,
+                                                                 "n_seg": 10})
+    rs = add_unit(m, "riser", 1110, 20, "RSR-100 Riser", {"rtype": "Steel catenary riser (SCR)", "depth": 250.0,
+                                                          "ID": 254.0, "fl_len": 15000.0, "n_seg": 8})
+    ar = add_unit(m, "separator3", 1290, -30, "V-200 Arrival sep")
+    gas = add_unit(m, "product", 1470, -110, "Gas")
+    oil = add_unit(m, "product", 1480, 60, "Oil")
+    wat = add_unit(m, "product", 1350, 120, "Produced water (topside)")
+    connect(m, tmp, "out", sep, "feed", "Template outlet")
+    connect(m, sep, "vapour", mx, "in", "Separated gas")
+    connect(m, sep, "oil", mx, "in", "Separated oil")
+    connect(m, sep, "water", wip, "in", "Separated water")
+    connect(m, wip, "out", inj, "in")
+    connect(m, mx, "out", mpp, "in", "Oil + gas")
+    connect(m, mpp, "out", fl, "in", "Flowline inlet")
+    connect(m, fl, "out", rs, "in", "Riser base")
+    connect(m, rs, "out", ar, "feed", "Topside arrival")
+    connect(m, ar, "vapour", gas, "in")
+    connect(m, ar, "oil", oil, "in")
+    connect(m, ar, "water", wat, "in")
+    return m
+
+
+
 EXAMPLES = {
     "Two-stage gas compression with liquid recycle": compression_train,
     "Oil stabilisation: 3-stage separation + recompression": oil_stabilisation,
@@ -255,4 +399,7 @@ EXAMPLES = {
     "Condensate stabiliser column with TVP spec (Adjust)": condensate_stabiliser,
     "Subsea field (SURF): 4 wells, template, pipe-in-pipe flowline, lazy-wave riser": subsea_field,
     "Subsea boosting (SURF): late life, wet-gas compressor, 45 km step-out": subsea_field_boosted,
+    "Heated flowline (SURF): DEH oil tie-back with methanol injection and an intensifier": heated_oil_tieback,
+    "Subsea compression station (SURF): cooler, separator, compressor and pump": subsea_compression,
+    "Subsea separation (SURF): water removal and reinjection, multiphase pump": subsea_separation,
 }
