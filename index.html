@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #ffffff; --grid: #eef1f2; --ink: #243746; --muted: #6f6f6f; --panel: #f7f7f7;
+    --line: #dcdcdc; --accent: #007079; --sel: #007079;
+    --mat: #1f3fbf; --mat-uns: #8fb2f0; --energy: #d0342c; --adj: #2e8b57; --warn: #d9730d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; font-family: Equinor, Inter, "Segoe UI", Tahoma, Arial, sans-serif; color: var(--ink);
+    background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none; }
+  #app { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+    background: var(--bg); box-shadow: 0 1px 6px rgba(36,55,70,.08); }
+  #toolbar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 5px 6px;
+    background: #ffffff; border-bottom: 3px solid var(--accent); }
+  #toolbar button { font: inherit; font-size: 12px; font-weight: 500; padding: 4px 10px; border: 1px solid #c7c7c7;
+    border-radius: 6px; background: #ffffff; color: var(--ink); cursor: pointer; min-height: 30px; }
+  #toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+  #toolbar button.on { background: #deedee; border-color: var(--accent); color: #004f55; }
+  #toolbar .sep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; }
+  #toolbar .title { font-weight: 700; font-size: 12px; color: var(--accent); margin-right: 6px; letter-spacing: .06em; }
+  #main { display: flex; flex: 1; min-height: 0; }
+  #palette { width: 132px; flex: 0 0 132px; overflow-y: auto; background: var(--panel); border-right: 1px solid var(--line);
+    padding: 4px; }
+  #palette h4 { margin: 8px 2px 3px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .pal { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 4px; cursor: grab;
+    font-size: 11.5px; border: 1px solid transparent; touch-action: none; }
+  .pal:hover { background: #fff; border-color: var(--line); }
+  .pal.armed { background: #deedee; border-color: var(--accent); }
+  .pal svg { width: 34px; height: 28px; flex: 0 0 34px; }
+  #canvasWrap { position: relative; flex: 1; min-width: 0; }
+  #svg { width: 100%; height: 100%; display: block; touch-action: none; background: var(--bg); cursor: default; }
+  #status { position: absolute; left: 8px; bottom: 6px; font-size: 11px; color: var(--muted);
+    background: rgba(255,255,255,.85); padding: 2px 6px; border-radius: 3px; pointer-events: none; }
+  #hint { position: absolute; right: 8px; bottom: 6px; font-size: 11px; color: var(--muted);
+    background: rgba(255,255,255,.85); padding: 2px 6px; border-radius: 3px; pointer-events: none; max-width: 60%; text-align: right; }
+  .ulabel { font-size: 11px; fill: var(--ink); text-anchor: middle; font-weight: 600; paint-order: stroke;
+    stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
+  .slabel { font-size: 10.5px; fill: var(--mat); font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+  .rlabel { font-size: 9.5px; fill: #3b4756; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+  .elabel { font-size: 10px; fill: var(--energy); font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+  .port { fill: #ffffff; stroke: #2a7de1; stroke-width: 1.4; opacity: 0; cursor: crosshair; }
+  .unit:hover .port, .showports .port { opacity: 1; }
+  .port.multi { stroke-dasharray: 2 1.5; }
+  .port.hot { fill: #2a7de1; opacity: 1; }
+  .stream { fill: none; stroke-width: 2; cursor: pointer; }
+  .streamhit { fill: none; stroke: transparent; stroke-width: 12; cursor: pointer; }
+  .selbox { fill: none; stroke: var(--sel); stroke-width: 1.2; stroke-dasharray: 4 3; }
+  .statusbox { fill: none; stroke-width: 2.2; }
+  @media (max-width: 560px) {
+    #main { flex-direction: column; }
+    #palette { width: 100%; flex: 0 0 auto; display: flex; flex-wrap: nowrap; overflow-x: auto; border-right: none;
+      border-bottom: 1px solid var(--line); }
+    #palette h4 { display: none; }
+    .pal { flex-direction: column; font-size: 9.5px; min-width: 64px; text-align: center; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="toolbar">
+    <span class="title">PFD</span>
+    <button id="bDelete" title="Delete selection (Del)">Delete</button>
+    <button id="bFlip" title="Flip selected icons horizontally (F)">Flip</button>
+    <button id="bDup" title="Duplicate selection with its specifications (Ctrl+D; Ctrl+C / Ctrl+V also work)">Duplicate</button>
+    <button id="bUndo" title="Undo (Ctrl+Z)">Undo</button>
+    <span class="sep"></span>
+    <button id="bZin" title="Zoom in">+</button>
+    <button id="bZout" title="Zoom out">−</button>
+    <button id="bFit" title="Zoom to fit">Fit</button>
+    <span class="sep"></span>
+    <button id="bGrid" class="on" title="Snap to grid">Grid</button>
+    <button id="bRes" class="on" title="Show stream conditions">Conditions</button>
+    <button id="bEnergy" class="on" title="Show energy streams">Energy</button>
+    <span class="sep"></span>
+    <button id="bSvg" title="Download the diagram as SVG">Export SVG</button>
+  </div>
+  <div id="main">
+    <div id="palette"></div>
+    <div id="canvasWrap">
+      <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="status"></div>
+      <div id="hint">Drag equipment from the palette · drag from a port to connect · drop on empty space for a feed/product</div>
+    </div>
+  </div>
+</div>
+<script src="./pfd.js"></script>
+</body>
+</html>

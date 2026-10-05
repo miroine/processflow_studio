@@ -34,15 +34,19 @@ control, recycle (Wegstein), adjust.
 **Subsea (SURF):** wells (gas back-pressure, PI or Vogel inflow + Beggs & Brill tubing lift with a geothermal
 ambient → wellhead P/T, AOF, GOR, water cut), subsea Xmas tree + choke (critical-flow and hydrate check),
 templates / manifolds (slot count, header loss), jumpers, spools, PLET and PLEM (fitting losses), flowlines with
-design presets (wet insulation, pipe-in-pipe, flexible, bundle, buried) and direct electrical heating, risers
+design presets (wet insulation, pipe-in-pipe, flexible, bundle, buried) and flowline heating (direct electrical
+heating, heat-traced pipe-in-pipe, hot-water bundle; fixed W/m or hold-a-minimum-temperature control), risers
 (vertical, SCR, lazy-wave, free-hanging, hybrid tower) with a riser-base severe-slugging screen (Bøe), SSIV and
 HIPPS valves, and subsea boosters (helico-axial / hybrid multiphase pumps, wet-gas compressor, liquid pump, with
-GVF window, boost and power-rating checks). A **Subsea (SURF)** tab summarises wells and equipment, draws a
+GVF window, boost and power-rating checks), dedicated subsea pumps and compressors (dry-gas centrifugal, water
+injection), subsea processing — gas-liquid, liquid-liquid and inline separators with vessel sizing, a passive
+seawater cooler — and chemical-injection hardware (pressure intensifier, CIMV with dosage check). A **Subsea (SURF)** tab summarises wells and equipment, draws a
 reservoir-to-arrival pressure budget, builds an equipment list with a class 5 CAPEX roll-up, sizes the umbilical
 (chemical-injection tubes, topside pump pressures) and the booster power cable, and screens tie-back distance vs
 rate (arrival pressure, hydrate margin, maximum distance). Operability: a field-layout plan view, a turndown
 envelope (operating window, limiting constraints, ramp-up liquid sweep-out) and a transient-lite slug assessment
-(hydrodynamic slug statistics, severe-slug volume and build-up time, design surge volume). The printable report
+(hydrodynamic slug statistics, severe-slug volume and build-up time, design surge volume), and a heated-lines
+view (power flowing and to hold at shut-in, heat-up time, annual energy). The printable report
 gains a subsea section. Wells can solve their own rate for a wellhead pressure (with a deliverability
 curve); boosters take a performance curve and machines in parallel / series; a cool-down view gives the
 no-touch time after shutdown.
@@ -76,11 +80,16 @@ recompression); JT dew-point control with a gas/gas exchanger, recycle and adjus
 25 km flowline, riser, arrival separator) with 90 wt% lean-MEG injection; condensate stabiliser column with an
 Adjust on the reboiler temperature to meet a TVP of 0.80 bar; subsea field with four wells on a 4-slot
 template, a spool, a 25 km pipe-in-pipe flowline, an SSIV and a lazy-wave riser to the arrival separator; its
-late-life variant with a subsea wet-gas compressor and a 45 km step-out.
+late-life variant with a subsea wet-gas compressor and a 45 km step-out; an 18 km DEH oil tie-back held at 25 °C
+with methanol injected through a pressure intensifier and a CIMV; a subsea compression station (cooler,
+gas-liquid separator, dry-gas compressor, liquid pump, 40 km export to a lazy-wave riser); and subsea separation
+with water reinjection and a multiphase pump on the oil and gas.
 
 ## Verification
 
-`python tests/run_all.py` runs six suites (808 checks):
+`python tests/run_all.py` runs every suite (about 975 checks). On GitHub the workflow `.github/workflows/tests.yml`
+runs them on each push with the real Streamlit, Plotly, PyArrow, Chromium and Node on Python 3.12 and 3.14 (open the
+**Actions** tab of the repository to see the result; screenshots are attached to each run).
 
 * **thermo** — PR against NIST WebBook (vapour pressures; methane density, Cp, Joule-Thomson coefficient,
   viscosity), thermodynamic consistency, flash round trips, iso-fugacity, three-phase monotonicity, MEG properties,
@@ -100,15 +109,24 @@ late-life variant with a subsea wet-gas compressor and a 45 km step-out.
   boosters (power = F·ΔH, isentropic at 100 %, GVF window, rating), CAPEX arithmetic, Hagen–Poiseuille tube
   ΔP, tube and cable selection, and tie-back screening reproducing the flowsheet arrival pressure; slug
   correlations against their formulas, the severe-slug gas balance, turndown reproducing the flowsheet and its
-  low-rate hydrate limit, operating-window logic, and layout geometry (distances, bearings, well ring).
+  low-rate hydrate limit, operating-window logic, and layout geometry (distances, bearings, well ring); heated
+  flowlines (fixed-W/m energy balance, hold mode reaching the set temperature and the W/m cap, hold power and
+  heat-up time from their formulas, annual energy), subsea separators (balances, Souders-Brown and wall
+  thickness), cooler area / approach, intensifier pressure and work, CIMV pressure check and dosage, and the
+  three new examples solving with closed balances.
 * **ui** — a headless run of the Streamlit app against stubs that validate widget arguments and Plotly property
   names (and forbid dual-axis charts), driving every property view, the analysis tab, case study and report.
 * **browser** — the PFD canvas in real headless Chromium (Playwright): every example drawn and fitted, palette
   drag-and-drop, port-to-port connect, drop-to-create feeds/products, double-click, move, Delete / Ctrl+Z /
   Ctrl+D / F keys, wheel zoom, SVG export rendering standalone. Screenshots go to `tests/_screens/`.
 * **canvas** — Node unit tests of routing, the Streamlit message protocol and editing logic.
+* **streamlit-real** — the app on the real Streamlit runtime (`streamlit.testing.v1.AppTest`): every example and
+  property view, field units, the SURF buttons, scenarios and a blank flowsheet, with no exception and no error box.
+  Skipped when Streamlit is not installed. When a real Plotly is installed the **ui** suite also runs a second time
+  on it, so every chart is fully serialised and validated by Plotly.
 
-Not verified in the build environment: Streamlit and Plotly themselves (not installable there), so the app's
-pages and Plotly charts have not been rendered; the canvas, the theme CSS and the report were rendered in Chromium.
+Streamlit and Plotly cannot be installed from PyPI in the build environment; there they were built from their GitHub
+sources (Streamlit with a test-only PyArrow stand-in) to run the streamlit-real and real-Plotly checks. The GitHub
+workflow runs the same checks on the released packages.
 
 Results are for screening; check critical numbers against a commercial simulator.
