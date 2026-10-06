@@ -93,6 +93,15 @@ at.run()
 widget("radio", "Display units").set_value("Field")
 at.run()
 ok("SURF example in field units")
+c.check("field-layout drawing renders on real Streamlit",
+        not any("drawing unavailable" in str(w.value) for w in at.warning), str([w.value for w in at.warning])[:300])
+try:
+    widget("text_input", "Drawing title").set_value("Demo field")
+    at.run()
+    ok("drawing title edit")
+    c.eq("drawing title saved with the flowsheet", at.session_state["model"]["layout"].get("title"), "Demo field")
+except KeyError:
+    c.check("drawing title input present", False, "")
 widget("radio", "Display units").set_value("SI (metric)")
 at.run()
 

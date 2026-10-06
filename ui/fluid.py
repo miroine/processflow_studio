@@ -35,6 +35,17 @@ def fluid_tab():
         else:
             fl["components"] = sel
             st.rerun()
+    from procsim.transport import HYDRATE_MODELS, MOTIEE
+    cur = fl.get("hydrate_model", MOTIEE)
+    hm = st.selectbox("Hydrate model", list(HYDRATE_MODELS), index=list(HYDRATE_MODELS).index(cur) if cur in HYDRATE_MODELS
+                      else 0, key=f"fl_hydmodel_{ss.widget_ver}",
+                      help="Motiee: gas-gravity correlation (fast, 3.5–280 bar). van der Waals–Platteeuw: statistical "
+                           "model of sI and sII hydrates with Kihara cell potentials and PR fugacities, composition-"
+                           "specific (CO₂, H₂S, N₂ and propane effects), 2–600 bar. Inhibitors (MEG, methanol) are "
+                           "applied as a temperature depression in both.")
+    if hm != cur:
+        fl["hydrate_model"] = hm
+        st.rerun()
     fp = None
     try:
         fp = build_fluid(ss.model)

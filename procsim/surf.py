@@ -208,6 +208,9 @@ def _override(p, key, row, col, default=None):
 IPR_GAS, IPR_PI, IPR_VOGEL = "Gas back-pressure (C, n)", "Productivity index (liquid)", "Vogel (oil)"
 
 
+ONLINE, BYPASSED = "Online", "Bypassed"
+
+
 def _booster_schema(label, prefix, options, default):
     return {
         "label": label, "prefix": prefix, "category": CATEGORY,
@@ -215,6 +218,9 @@ def _booster_schema(label, prefix, options, default):
         "params": [
                 _s("btype", "Booster type", options, default,
                    help="The catalogue sets efficiency, gas-volume-fraction window, maximum boost and rated power"),
+                _s("online", "Status", [ONLINE, BYPASSED], ONLINE,
+                   help="Bypassed: the flow passes the machine unchanged (installed but not yet running, or spared) - "
+                        "the field-life tab uses this to time the start of boosting"),
                 _s("spec", "Specification", ["Pressure boost", "Outlet pressure", "Performance curve"],
                    "Pressure boost",
                    help="Performance curve: the curve at the actual flow per machine and the speed sets the boost"),
@@ -235,7 +241,8 @@ def _schema():
     return {
         "well": {
             "label": "Well (IPR + tubing)", "prefix": "W", "category": CATEGORY,
-            "ports": {"in": {"in": {"multi": False}}, "out": {"out": {"multi": False}}},
+            "ports": {"in": {"in": {"multi": False}, "lift": {"multi": False, "optional": True}},
+                      "out": {"out": {"multi": False}}},
             "params": [
                 _s("ipr", "Inflow model (IPR)", [IPR_GAS, IPR_PI, IPR_VOGEL], IPR_GAS,
                    help="Connect a feed at reservoir pressure and temperature (its composition, P and T are the "
@@ -250,6 +257,9 @@ def _schema():
                    help="From the feed: the connected feed's flow is the rate. Wellhead pressure: the well solves "
                         "its own rate for the wellhead pressure and writes it back to the feed stream"),
                 _f("WHP", "Wellhead pressure", "bar(a)", 150.0, {"rate_spec": RATE_WHP}, minv=1.0),
+                _f("n_par", "Identical wells", "-", 1, minv=1, maxv=40,
+                   help="Wells with the same inflow and tubing producing in parallel (the rate is split equally): "
+                        "one unit can stand for a cluster of wells; the field-life tab varies it to find the well count"),
                 _f("MD", "Tubing length (measured depth)", "m", 3500.0, minv=1.0),
                 _f("TVD", "True vertical depth, reservoir to wellhead", "m", 3000.0, minv=0.0),
                 _f("ID", "Tubing inner diameter", "mm", 125.0, minv=10.0),
@@ -258,6 +268,9 @@ def _schema():
                 _f("T_wh_amb", "Ambient at the wellhead (seabed)", "°C", 4.0,
                    help="Ambient runs linearly from reservoir T at the bottom to this value (geothermal gradient)"),
                 _f("n_seg", "Calculation increments", "-", 12, minv=2, maxv=100),
+                _f("gl_depth", "Gas-lift valve depth (MD from the wellhead)", "m", 2000.0, minv=1.0,
+                   help="Used when a lift-gas stream is connected to the 'lift' port: the gas (split equally over "
+                        "identical wells) is injected into the tubing at this depth"),
             ],
         },
         "xmas_tree": {
@@ -266,10 +279,15 @@ def _schema():
             "params": [
                 _s("tree", "Tree type", items("tree"), "Horizontal Xmas tree (HXT)"),
                 _f("dP_tree", "Tree valve ΔP (0 = catalogue)", "bar", 0.0, minv=0.0),
-                _s("spec", "Choke specification", ["Outlet pressure", "Choke pressure drop", "Choke fully open"],
-                   "Outlet pressure"),
+                _s("spec", "Choke specification", ["Outlet pressure", "Choke pressure drop", "Choke fully open",
+                                                    CHOKE_CV], "Outlet pressure",
+                   help="Choke opening: the pressure drop follows from the flow through the choke's Cv at that opening "
+                        "(equal-percentage trim)"),
                 _f("P_out", "Choke outlet pressure", "bar(a)", 150.0, {"spec": "Outlet pressure"}),
                 _f("dP", "Choke pressure drop", "bar", 20.0, {"spec": "Choke pressure drop"}, minv=0.0),
+                _f("Cv_max", "Choke Cv fully open", "US gpm/psi½", 250.0, {"spec": CHOKE_CV}, minv=0.01),
+                _f("opening", "Choke opening", "%", 60.0, {"spec": CHOKE_CV}, minv=1.0, maxv=100.0),
+                _f("rangeability", "Trim rangeability (equal %)", "-", 50.0, {"spec": CHOKE_CV}, minv=2.0),
             ],
         },
         "template": {
@@ -396,6 +414,23 @@ def _schema():
                    help="The chemical must arrive at least this much above the production pressure"),
             ],
         },
+        "injection_well": {
+            "label": "Water injection well", "prefix": "IW", "category": CATEGORY,
+            "ports": {"in": {"in": {"multi": False}}, "out": {"out": {"multi": False, "optional": True}}},
+            "params": [
+                _f("II", "Injectivity index (per well)", "Sm³/d/bar", 50.0, minv=1e-6,
+                   help="q_water = II (P_bottomhole − P_reservoir) at standard conditions"),
+                _f("P_res", "Reservoir pressure at the injector", "bar(a)", 250.0, minv=1.0),
+                _f("T_res", "Reservoir temperature", "°C", 90.0),
+                _f("n_par", "Identical wells", "-", 1, minv=1, maxv=40),
+                _f("MD", "Tubing length (measured depth)", "m", 3000.0, minv=1.0),
+                _f("TVD", "True vertical depth, wellhead to reservoir", "m", 2700.0, minv=0.0),
+                _f("ID", "Tubing inner diameter", "mm", 125.0, minv=10.0),
+                _f("rough", "Tubing roughness", "mm", 0.045, minv=0.0),
+                _f("U", "Overall U, tubing to formation", "W/m²·K", 15.0, minv=0.0),
+                _f("n_seg", "Calculation increments", "-", 10, minv=2, maxv=100),
+            ],
+        },
         "subsea_valve": {
             "label": "SSIV / HIPPS valve", "prefix": "XV", "category": CATEGORY,
             "ports": {"in": {"in": {"multi": False}}, "out": {"out": {"multi": False}}},
@@ -482,6 +517,7 @@ def bottomhole_pressure(ipr, Pr, q_gas_Sm3d, q_oil, q_liq, p):
 
 
 RATE_FEED, RATE_WHP = "From the feed", "Wellhead pressure"
+CHOKE_CV = "Choke opening (Cv)"
 HEAT_NONE = "None"
 HEATING = [HEAT_NONE, "Direct electrical heating (DEH)", "Heat-traced pipe-in-pipe (ETH-PiP)",
            "Hot-water circulation (bundle)"]
@@ -489,9 +525,22 @@ HEAT_EFF = {HEATING[1]: 60.0, HEATING[2]: 90.0, HEATING[3]: 70.0}
 CTRL_FIXED, CTRL_HOLD = "Fixed heat input", "Hold minimum temperature"
 
 
-def _well_state(unit, s, fp, n_seg=None):
-    """Inflow + tubing lift for the inlet (reservoir) stream s at its flow. Returns a dict of intermediate results."""
+def n_wells(unit):
+    """Identical wells in parallel represented by a well unit."""
+    return max(1, int(round(float(unit["params"].get("n_par", 1) or 1))))
+
+
+def _well_state(unit, s, fp, n_seg=None, lift=None):
+    """Inflow + tubing lift for the inlet (reservoir) stream s at its flow (shared equally by n_par identical
+    wells), with optional gas lift injected at the valve depth. Returns a dict of intermediate results; rates are
+    per well, the outlet stream carries the total."""
     p = unit["params"]
+    nw = n_wells(unit)
+    Ftot = s.F
+    if lift is not None and lift.empty:
+        lift = None
+    if nw > 1:
+        s = make_stream("", fp, s.F / nw, s.z, s.flash)
     Pr, Tr = s.P, s.T
     gas, oil, wat = standard_rates(s, fp)
     Pwf, aof, aof_lbl = bottomhole_pressure(p.get("ipr", IPR_GAS), Pr, gas * 1e6, oil, oil + wat, p)
@@ -502,27 +551,77 @@ def _well_state(unit, s, fp, n_seg=None):
         raise UnitError(f"TVD {TVD:.0f} m exceeds the measured depth {MD:.0f} m")
     sf = make_stream("", fp, s.F, s.z, fp.pt_flash(s.z, Tr, Pwf, s.flash.Kset))
     U = float(p.get("U", 0.0))
-    tub = _pipe_unit(unit, {"length": MD, "ID": p["ID"], "rough": p["rough"], "dz": TVD,
-                            "n_seg": n_seg or p.get("n_seg", 12), "heat": "Overall U to ambient" if U > 0 else "Adiabatic",
-                            "U": U, "T_amb": Tr - K0, "T_amb_out": p.get("T_wh_amb", 4.0)})
-    outs, rp, en = calc_pipe(tub, {"in": [sf]}, fp)
+    nseg = n_seg or p.get("n_seg", 12)
+    heat = "Overall U to ambient" if U > 0 else "Adiabatic"
+    T_wh = float(p.get("T_wh_amb", 4.0))
+    gl = {}
+    if lift is None:
+        tub = _pipe_unit(unit, {"length": MD, "ID": p["ID"], "rough": p["rough"], "dz": TVD, "n_seg": nseg,
+                                "heat": heat, "U": U, "T_amb": Tr - K0, "T_amb_out": T_wh})
+        outs, rp, en = calc_pipe(tub, {"in": [sf]}, fp)
+        out = outs["out"][0]
+        profile = tub["_profile"]
+    else:
+        D = min(max(float(p.get("gl_depth", 2000.0)), 1.0), MD - 1.0)
+        f_lo = (MD - D) / MD                                   # share of the tubing below the valve
+        T_valve = Tr - K0 + (T_wh - (Tr - K0)) * f_lo
+        n1 = max(2, int(round(nseg * f_lo)))
+        lo = _pipe_unit(unit, {"length": MD - D, "ID": p["ID"], "rough": p["rough"], "dz": TVD * f_lo, "n_seg": n1,
+                               "heat": heat, "U": U, "T_amb": Tr - K0, "T_amb_out": T_valve})
+        o1, r1, e1 = calc_pipe(lo, {"in": [sf]}, fp)
+        st1 = o1["out"][0]
+        Fl = lift.F / nw
+        rho_g = Fl > 0 and lift.F * lift.MW / 3600.0 / max(sum(lift.F * ph.beta * ph.Vs for ph in lift.flash.phases) * 1000.0 / 3600.0, 1e-12)
+        P_inj = lift.P + float(rho_g) * G * TVD * (1.0 - f_lo) / 1e5      # gas column in the annulus
+        if P_inj < st1.P:
+            raise UnitError(f"lift gas reaches the valve at {P_inj:.1f} bar, below the tubing pressure {st1.P:.1f} bar "
+                            "there: raise the lift-gas pressure or set the valve shallower")
+        F2 = st1.F + Fl
+        z2 = (st1.F * st1.z + Fl * lift.z) / F2
+        h_pe = lift.MW / 1000.0 * G * TVD * (1.0 - f_lo)                   # J/mol gained down the annulus
+        H2 = (st1.F * st1.H + Fl * (lift.H + h_pe)) / F2
+        fr = _ph(fp, z2, st1.P, H2, st1.T)
+        mix = make_stream("", fp, F2, z2, fr)
+        up = _pipe_unit(unit, {"length": D, "ID": p["ID"], "rough": p["rough"], "dz": TVD * (1.0 - f_lo),
+                               "n_seg": max(2, nseg - n1), "heat": heat, "U": U, "T_amb": T_valve, "T_amb_out": T_wh,
+                               "z0": TVD * f_lo, "L0": MD - D})
+        o2, r2, e2 = calc_pipe(up, {"in": [mix]}, fp)
+        out = o2["out"][0]
+        profile = _merge_profiles({}, lo["_profile"])
+        _merge_profiles(profile, up["_profile"])
+        rp = dict(r2)
+        rp.update({"Pressure drop [bar]": sf.P - out.P, "Heat loss [kW]": r1["Heat loss [kW]"] + r2["Heat loss [kW]"],
+                   "Erosional velocity ratio (API RP 14E, C=100)": max(r1["Erosional velocity ratio (API RP 14E, C=100)"],
+                                                                     r2["Erosional velocity ratio (API RP 14E, C=100)"]),
+                   "Flow regime (dominant)": r2["Flow regime (dominant)"]})
+        hm = [x for x in profile.get("Hm", []) if x is not None]
+        if hm:
+            rp["Min. hydrate margin along line [°C]"] = min(hm)
+        en = [EnergyStream(e.name, sum(x.duty_kW for x in e1 + e2 if x.name == e.name), e.unit, e.kind) for e in e2]
+        gl = {"Gas-lift valve depth (MD) [m]": D, "Tubing P at the valve [bar(a)]": st1.P,
+              "Lift gas at the valve [bar(a)]": P_inj, "Gas-lift rate [MSm³/d]": lift.F * V_STD_GAS * 24.0 / 1e6,
+              "Gas-lift rate per well [MSm³/d]": Fl * V_STD_GAS * 24.0 / 1e6}
+    if nw > 1:
+        out = make_stream("", fp, out.F * nw, out.z, out.flash)
+        sf = make_stream("", fp, Ftot, sf.z, sf.flash)
+        en = [EnergyStream(e.name, e.duty_kW * nw, e.unit, e.kind) for e in en]
     return {"Pwf": Pwf, "aof": aof, "aof_lbl": aof_lbl, "gas": gas, "oil": oil, "wat": wat, "sf": sf,
-            "out": outs["out"][0], "rp": rp, "en": en, "profile": tub["_profile"], "TVD": TVD}
+            "out": out, "rp": rp, "en": en, "profile": profile, "TVD": TVD, "nw": nw, "gl": gl}
 
 
 def _scaled_stream(s, fp, F):
     return make_stream("", fp, F, s.z, s.flash)
 
 
-def whp_at_rate(unit, s, fp, F, n_seg=None):
+def whp_at_rate(unit, s, fp, F, n_seg=None, lift=None):
     """Wellhead pressure at molar rate F (None if the well cannot deliver F)."""
     try:
-        return _well_state(unit, _scaled_stream(s, fp, F), fp, n_seg)["out"].P
+        return _well_state(unit, _scaled_stream(s, fp, F), fp, n_seg, lift)["out"].P
     except (UnitError, FlashError, ValueError, ZeroDivisionError):
         return None
 
 
-def solve_rate_for_whp(unit, s, fp, target, tol_bar=0.02):
+def solve_rate_for_whp(unit, s, fp, target, tol_bar=0.02, lift=None):
     """Molar rate at which the wellhead pressure equals target.
 
     Bracket from the feed rate (×/÷ 1.5 steps), Illinois false position on coarse tubing increments to 0.3 bar,
@@ -533,7 +632,7 @@ def solve_rate_for_whp(unit, s, fp, target, tol_bar=0.02):
     FAIL = -1e6
 
     def g(F, n=n_c):
-        w = whp_at_rate(unit, s, fp, F, n)
+        w = whp_at_rate(unit, s, fp, F, n, lift)
         return (w - target) if w is not None else FAIL       # cannot deliver F: "too much flow"
 
     F0 = max(s.F, 1e-6)
@@ -605,24 +704,30 @@ def calc_well(unit, ins, fp):
     if s.empty:
         return {"out": [zero_stream("", fp, s.z, s.T, s.P)]}, {"Status": "No flow"}, []
     spec = p.get("rate_spec", RATE_FEED)
+    lift = (ins.get("lift") or [None])[0]
     try:
         if spec == RATE_WHP:
-            F = solve_rate_for_whp(unit, s, fp, float(p["WHP"]))
+            F = solve_rate_for_whp(unit, s, fp, float(p["WHP"]), lift=lift)
             s = _scaled_stream(s, fp, F)
             unit["_inlet_F"] = F                  # the flowsheet writes the rate back to the feed stream
-        w = _well_state(unit, s, fp)
+        w = _well_state(unit, s, fp, lift=lift)
     except UnitError as e:
         raise UnitError(f"{unit['name']}: {e}")
     unit["_profile"] = w["profile"]
     out, rp = w["out"], w["rp"]
     Pr, Tr = s.P, s.T
     Q_res = w["sf"].heat_flow_kW - s.heat_flow_kW          # isothermal inflow: heat from the reservoir rock
-    gas, oil, wat, Pwf = w["gas"], w["oil"], w["wat"], w["Pwf"]
+    nw = w["nw"]
+    gas, oil, wat, Pwf = w["gas"] * nw, w["oil"] * nw, w["wat"] * nw, w["Pwf"]
     res = {"Rate specification": "solved for the wellhead pressure" if spec == RATE_WHP else "feed flow",
            "Reservoir P [bar(a)]": Pr, "Reservoir T [°C]": Tr - K0, "Bottomhole flowing P [bar(a)]": Pwf,
            "Drawdown [bar]": Pr - Pwf, w["aof_lbl"]: w["aof"],
            "Gas rate [MSm³/d]": gas, "Oil/condensate rate [Sm³/d]": oil, "Water rate [Sm³/d]": wat,
            "Molar rate [kmol/h]": s.F}
+    res.update(w["gl"])
+    if nw > 1:
+        res.update({"Identical wells": nw, "Gas rate per well [MSm³/d]": w["gas"],
+                    "Oil/condensate rate per well [Sm³/d]": w["oil"], "Water rate per well [Sm³/d]": w["wat"]})
     if oil > 1e-9:
         res["GOR [Sm³/Sm³]"] = gas * 1e6 / oil
     if oil + wat > 1e-9:
@@ -631,7 +736,7 @@ def calc_well(unit, ins, fp):
                 "Flow regime (dominant)": rp["Flow regime (dominant)"],
                 "Wellhead mixture velocity [m/s]": rp["Outlet mixture velocity [m/s]"],
                 "Erosional velocity ratio (API RP 14E, C=100)": rp["Erosional velocity ratio (API RP 14E, C=100)"],
-                "Heat loss to formation [kW]": rp["Heat loss [kW]"]})
+                "Heat loss to formation [kW]": rp["Heat loss [kW]"] * nw})
     if "Min. hydrate margin along line [°C]" in rp:
         res["Min. hydrate margin along line [°C]"] = rp["Min. hydrate margin along line [°C]"]
     if "Warning" in rp:
@@ -649,6 +754,7 @@ def deliverability_curve(unit, s, fp):
     except (UnitError, FlashError):
         return []
     lbl = w0["aof_lbl"]
+    nw = w0["nw"]
     q0 = w0["gas"] if lbl.startswith("AOF gas") else (w0["oil"] if lbl.startswith("AOF oil") else w0["oil"] + w0["wat"])
     if q0 <= 0 or s.F <= 0:
         return []
@@ -659,11 +765,11 @@ def deliverability_curve(unit, s, fp):
             break
         whp = whp_at_rate(unit, s, fp, F, 6)
         if whp is None:
-            pts.append({"Molar rate [kmol/h]": F, "Gas rate [MSm³/d]": F * w0["gas"] / s.F,
-                        "Liquid rate [Sm³/d]": F * (w0["oil"] + w0["wat"]) / s.F, "Wellhead P [bar(a)]": None})
+            pts.append({"Molar rate [kmol/h]": F, "Gas rate [MSm³/d]": nw * F * w0["gas"] / s.F,
+                        "Liquid rate [Sm³/d]": nw * F * (w0["oil"] + w0["wat"]) / s.F, "Wellhead P [bar(a)]": None})
             break                                  # beyond the deliverable rate
-        pts.append({"Molar rate [kmol/h]": F, "Gas rate [MSm³/d]": F * w0["gas"] / s.F,
-                    "Liquid rate [Sm³/d]": F * (w0["oil"] + w0["wat"]) / s.F, "Wellhead P [bar(a)]": whp})
+        pts.append({"Molar rate [kmol/h]": F, "Gas rate [MSm³/d]": nw * F * w0["gas"] / s.F,
+                    "Liquid rate [Sm³/d]": nw * F * (w0["oil"] + w0["wat"]) / s.F, "Wellhead P [bar(a)]": whp})
     return pts
 
 
@@ -675,6 +781,44 @@ def critical_ratio(k):
     """Critical (sonic) pressure ratio P2/P1 for an ideal gas with heat-capacity ratio k."""
     k = max(k, 1.01)
     return (2.0 / (k + 1.0)) ** (k / (k - 1.0))
+
+
+def choke_cv(p):
+    """Cv at the opening for an equal-percentage trim: Cv = Cv_max · R^(opening − 1)."""
+    R = max(float(p.get("rangeability", 50.0)), 1.0001)
+    return float(p["Cv_max"]) * R ** (float(p.get("opening", 100.0)) / 100.0 - 1.0)
+
+
+def choke_dp(s, P1, cv, xT=0.70):
+    """(choke ΔP [bar], choked) for stream s entering at P1: homogeneous mixture, ISA-style sizing
+    Q = Kv · Y · sqrt(ΔP / SG) with Kv = Cv / 1.156, expansion factor Y = 1 − x / (3 F_k x_T) weighted by the gas
+    volume fraction, and choked flow at x = F_k x_T (screening for multiphase chokes)."""
+    q = sum(s.F * ph.beta * ph.Vs for ph in s.flash.phases) * 1000.0           # m³/h at inlet
+    rho = s.F * s.MW / q if q > 0 else 1000.0
+    sg = rho / 1000.0
+    kv = cv / 1.156
+    v = s.flash.phase("V")
+    gvf = (s.F * v.beta * v.Vs * 1000.0 / q) if (v is not None and q > 0) else 0.0
+    k = (v.Cp / v.Cv) if (v is not None and v.Cv > 0) else 1.3
+    Fk = k / 1.4
+    x_ch = Fk * xT
+    dp = (q / kv) ** 2 * sg
+    choked = False
+    for _ in range(60):
+        x = min(dp / P1, x_ch)
+        Y = 1.0 - gvf * x / (3.0 * Fk * xT)
+        new = (q / (kv * max(Y, 0.3))) ** 2 * sg
+        if gvf > 0 and new / P1 >= x_ch:
+            new, choked = x_ch * P1 * (1.0 + 1e-9), True
+            # beyond choking the flow cannot pass: report the critical drop (the upstream would rise)
+        if abs(new - dp) < 1e-8 * max(1.0, dp):
+            dp = new
+            break
+        dp = 0.5 * (dp + new)
+    if dp >= P1 * 0.98:
+        raise UnitError(f"the choke Cv {cv:.1f} is too small for the flow (ΔP {dp:.0f} bar ≥ inlet {P1:.0f} bar): "
+                        "open the choke or raise Cv")
+    return dp, choked
 
 
 def calc_xmas_tree(unit, ins, fp):
@@ -694,6 +838,12 @@ def calc_xmas_tree(unit, ins, fp):
                             f"valves {Pa:.2f} bar (wellhead {s.P:.2f} bar − tree ΔP {dpt:.2f} bar)")
     elif spec == "Choke pressure drop":
         P2 = Pa - float(p["dP"])
+    elif spec == CHOKE_CV:
+        cv = choke_cv(p)
+        dp_c, choked = choke_dp(s, Pa, cv)
+        P2 = Pa - dp_c
+        cv_info = {"Choke Cv at this opening [US gpm/psi½]": cv, "Choke flow regime": "choked (critical)" if choked
+                   else "sub-critical"}
     else:
         P2 = Pa
     _check_P(P2, unit["name"])
@@ -702,6 +852,8 @@ def calc_xmas_tree(unit, ins, fp):
     res = {"Wellhead P [bar(a)]": s.P, "Wellhead T [°C]": s.T - K0, "Tree valve ΔP [bar]": dpt,
            "Choke ΔP [bar]": Pa - P2, "Outlet P [bar(a)]": P2, "Outlet T [°C]": fr.T - K0,
            "ΔT across tree and choke [°C]": fr.T - s.T, "Choke pressure ratio P2/P1 [-]": P2 / Pa}
+    if spec == CHOKE_CV:
+        res.update(cv_info)
     v = s.flash.phase("V")
     if v is not None and v.Cv > 0 and Pa - P2 > 1e-9:
         rc = critical_ratio(v.Cp / v.Cv)
@@ -834,14 +986,21 @@ def calc_flowline(unit, ins, fp):
                 q_in = float(p.get("q_max_W_m", 0.0) or 0.0)
             if q_in <= 0:
                 raise UnitError(f"{unit['name']}: heating is on but no heat input is set (catalogue or override)")
-    L = float(p["length"])
-    pu = _pipe_unit(unit, dict({"length": L, "ID": p["ID"], "rough": rough, "dz": p.get("dz", 0.0),
-                                "n_seg": p.get("n_seg", 12), "method": p.get("method", "Beggs & Brill"),
-                                "heat": "Overall U to ambient" if U > 0 else "Adiabatic", "U": U,
-                                "T_amb": p.get("T_amb", 4.0), "q_in_W_m": q_in}, **hold))
-    outs, rp, en = calc_pipe(pu, {"in": [s]}, fp)
-    unit["_profile"] = pu["_profile"]
+    secs = route_sections(p)
+    base = {"ID": p["ID"], "rough": rough, "method": p.get("method", "Beggs & Brill"),
+            "heat": "Overall U to ambient" if U > 0 else "Adiabatic", "U": U, "T_amb": p.get("T_amb", 4.0),
+            "q_in_W_m": q_in}
+    if not secs:
+        L = float(p["length"])
+        dz_tot = float(p.get("dz", 0.0))
+        pu = _pipe_unit(unit, dict(base, length=L, dz=dz_tot, n_seg=p.get("n_seg", 12), **hold))
+        outs, rp, en = calc_pipe(pu, {"in": [s]}, fp)
+        unit["_profile"] = pu["_profile"]
+        route_res = {}
+    else:
+        outs, rp, en, L, dz_tot, route_res = _march_route(unit, s, fp, secs, base, hold, int(p.get("n_seg", 12)))
     res = {"Design": row["item"], "U used [W/m²·K]": U, "Roughness used [mm]": rough}
+    res.update(route_res)
     if system != HEAT_NONE:
         delivered = q_in * L / 1000.0 if ctrl == CTRL_FIXED else rp.get("Controlled heating [kW]", 0.0)
         eff = float(p.get("heat_eff", 0.0) or 0.0) or HEAT_EFF[system]
@@ -856,7 +1015,97 @@ def calc_flowline(unit, ins, fp):
     res.update(rp)
     if system != HEAT_NONE:
         res["Net heat loss [kW]"] = res.pop("Heat loss [kW]")
-    return outs, _elev_note(res, float(p.get("dz", 0.0))), en
+    return outs, _elev_note(res, dz_tot), en
+
+
+def flowline_length(p):
+    """Flowline length [m]: the route length when a route is given, else the length parameter."""
+    secs = route_sections(p)
+    return sum(ln for ln, _ in secs) if secs else float(p.get("length", 0.0))
+
+
+def route_sections(p):
+    """[(length m, dz m)] from a flowline route of [distance km, water depth m] points (dz up = positive);
+    empty when no route (fewer than 2 points)."""
+    pts = []
+    for r in p.get("route") or []:
+        try:
+            x, d = float(r[0]), float(r[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        pts.append((x * 1000.0, d))
+    pts.sort()
+    if len(pts) < 2:
+        return []
+    out = []
+    for (x1, d1), (x2, d2) in zip(pts[:-1], pts[1:]):
+        dx = x2 - x1
+        if dx <= 0:
+            continue
+        dz = -(d2 - d1)
+        out.append((math.hypot(dx, dz), dz))
+    return out
+
+
+def route_low_points(p):
+    """Water depths of the local low points of a route (where liquid collects), deepest first."""
+    pts = sorted((float(r[0]), float(r[1])) for r in (p.get("route") or []) if len(r) >= 2)
+    lows = [d for (i, (_, d)) in enumerate(pts) if 0 < i < len(pts) - 1 and d > pts[i - 1][1] and d >= pts[i + 1][1]]
+    return sorted(lows, reverse=True)
+
+
+def _march_route(unit, s, fp, secs, base, hold, n_tot):
+    """March a flowline section by section along its route; returns calc_pipe-like aggregates."""
+    Ltot = sum(ln for ln, _ in secs)
+    prof, st = {}, s
+    z0 = L0 = 0.0
+    Q = Qh = heated = peak = evr = inv = 0.0
+    warns = []
+    rp = {}
+    for ln, dz in secs:
+        ns = max(2, int(round(n_tot * ln / Ltot)))
+        pu = _pipe_unit(unit, dict(base, length=ln, dz=dz, n_seg=ns, z0=z0, L0=L0, **hold))
+        outs, rp, _ = calc_pipe(pu, {"in": [st]}, fp)
+        _merge_profiles(prof, pu["_profile"])
+        st = outs["out"][0]
+        z0 += dz
+        L0 += ln
+        Q += rp["Heat loss [kW]"]
+        Qh += rp.get("Controlled heating [kW]", 0.0) or 0.0
+        heated += rp.get("Heated length [m]", 0.0) or 0.0
+        peak = max(peak, rp.get("Peak heating [W/m]", 0.0) or 0.0)
+        inv += rp.get("Liquid inventory [m³]", 0.0) or 0.0
+        evr = max(evr, rp["Erosional velocity ratio (API RP 14E, C=100)"])
+        if "Warning" in rp and "erosional" not in rp["Warning"]:
+            warns.append(rp["Warning"])
+    unit["_profile"] = prof
+    regs = prof["regime"]
+    agg = dict(rp)
+    agg.update({"Pressure drop [bar]": s.P - st.P, "Outlet P [bar(a)]": st.P, "Outlet T [°C]": st.T - K0,
+                "Inlet T [°C]": s.T - K0, "Flow regime (dominant)": max(set(regs), key=regs.count),
+                "Inlet mixture velocity [m/s]": prof["vm"][0], "Outlet mixture velocity [m/s]": prof["vm"][-1],
+                "Average liquid holdup [-]": sum(prof["HL"]) / len(prof["HL"]), "Liquid inventory [m³]": inv,
+                "Erosional velocity ratio (API RP 14E, C=100)": evr, "Heat loss [kW]": Q})
+    agg.pop("Inclination [°]", None)
+    agg.pop("Warning", None)
+    if Qh > 0 or "Controlled heating [kW]" in rp:
+        agg.update({"Controlled heating [kW]": Qh, "Heated length [m]": heated, "Peak heating [W/m]": peak})
+    hm = [x for x in prof.get("Hm", []) if x is not None]
+    if hm:
+        agg["Min. hydrate margin along line [°C]"] = min(hm)
+    if evr > 1.0:
+        warns.append(f"Mixture velocity exceeds the API RP 14E erosional velocity (ratio {evr:.2f})")
+    if warns:
+        agg["Warning"] = "; ".join(dict.fromkeys(warns))
+    p = unit["params"]
+    lows = route_low_points(p)
+    depths = [float(r[1]) for r in p.get("route") or []]
+    route_res = {"Route points": len(depths), "Route length [m]": Ltot,
+                 "Horizontal length [m]": (max(float(r[0]) for r in p["route"]) - min(float(r[0]) for r in p["route"])) * 1000.0,
+                 "Deepest point [m]": max(depths), "Low points along the route": len(lows)}
+    en = [EnergyStream(unit.get("energy_name") or f"Q-{unit['name']}", -Q, unit["name"], "heat")] \
+        if (base["U"] > 0 or Qh > 0) else []
+    return {"out": [st]}, agg, en, Ltot, z0, route_res
 
 
 # --------------------------------------------------------------------------
@@ -1055,6 +1304,11 @@ def calc_subsea_booster(unit, ins, fp):
     row = item("booster", p.get("btype"), unit["name"])
     if s.empty:
         return {"out": [zero_stream("", fp, s.z, s.T, s.P)]}, {"Status": "No flow"}, []
+    if p.get("online", ONLINE) == BYPASSED:
+        return ({"out": [s.copy("")]}, {"Status": "Bypassed (not running)", "Booster type": row["item"],
+                                        "Inlet GVF [%]": 100.0 * gas_volume_fraction(s), "Pressure boost [bar]": 0.0,
+                                        "Outlet P [bar(a)]": s.P, "Shaft power [kW]": 0.0, "Electrical power [kW]": 0.0},
+                [_energy(unit, 0.0, "work")])
     n_par = max(1, int(round(float(p.get("n_par", 1) or 1))))
     n_ser = max(1, int(round(float(p.get("n_ser", 1) or 1))))
     q_act = sum(s.F * ph.beta * 1000.0 * ph.Vs for ph in s.flash.phases)       # m3/h
@@ -1316,13 +1570,58 @@ def calc_cimv(unit, ins, fp):
 
 
 # --------------------------------------------------------------------------
+# Water injection well
+# --------------------------------------------------------------------------
+
+def calc_injection_well(unit, ins, fp):
+    """Water flows down the tubing from the wellhead (hydrostatic gain, friction, heat to the formation) and is
+    injected where the bottomhole pressure exceeds the reservoir pressure: q = II (P_bh − P_res)."""
+    p = unit["params"]
+    s = _one(ins, "in")
+    if s.empty:
+        return {"out": [zero_stream("", fp, s.z, s.T, s.P)]}, {"Status": "No flow"}, []
+    nw = n_wells(unit)
+    MD, TVD = float(p["MD"]), float(p["TVD"])
+    if TVD > MD:
+        raise UnitError(f"{unit['name']}: TVD {TVD:.0f} m exceeds the measured depth {MD:.0f} m")
+    sw = make_stream("", fp, s.F / nw, s.z, s.flash)
+    U = float(p.get("U", 0.0))
+    tub = _pipe_unit(unit, {"length": MD, "ID": p["ID"], "rough": p["rough"], "dz": -TVD,
+                            "n_seg": p.get("n_seg", 10), "heat": "Overall U to ambient" if U > 0 else "Adiabatic",
+                            "U": U, "T_amb": s.T - K0, "T_amb_out": float(p.get("T_res", 90.0))})
+    try:
+        outs, rp, en = calc_pipe(tub, {"in": [sw]}, fp)
+    except UnitError as e:
+        raise UnitError(f"{unit['name']}: {e}")
+    unit["_profile"] = tub["_profile"]
+    bh = outs["out"][0]
+    _, oil, wat = standard_rates(sw, fp)
+    q = wat + oil                                         # liquid injected per well, Sm³/d
+    P_res, II = float(p["P_res"]), float(p["II"])
+    P_req = P_res + q / II
+    margin = bh.P - P_req
+    res = {"Identical wells": nw, "Injection rate per well [Sm³/d]": q, "Injection rate [Sm³/d]": q * nw,
+           "Wellhead P [bar(a)]": s.P, "Bottomhole P [bar(a)]": bh.P, "Required bottomhole P [bar(a)]": P_req,
+           "Injection margin [bar]": margin,
+           "Rate this wellhead pressure can inject per well [Sm³/d]": max(II * (bh.P - P_res), 0.0),
+           "Hydrostatic + friction gain [bar]": bh.P - s.P, "Bottomhole T [°C]": bh.T - K0,
+           "Heat to formation [kW]": rp["Heat loss [kW]"] * nw}
+    if margin < 0:
+        res["Warning"] = (f"the wellhead pressure is {-margin:.1f} bar too low to inject {q:.0f} Sm³/d per well "
+                          f"(raise the pump discharge to {s.P - margin:.1f} bar or add wells)")
+    out = make_stream("", fp, s.F, bh.z, bh.flash)
+    en = [EnergyStream(e.name, e.duty_kW * nw, e.unit, e.kind) for e in en]
+    return {"out": [out]}, _elev_note(res, -TVD), en
+
+
+# --------------------------------------------------------------------------
 # Registration
 # --------------------------------------------------------------------------
 
 BOOSTER_TYPES = ("subsea_booster", "subsea_pump", "subsea_compressor")
 SURF_TYPES = ("well", "xmas_tree", "template", "jumper", "flowline", "riser", "subsea_valve") + BOOSTER_TYPES + (
-    "subsea_separator", "subsea_cooler", "intensifier", "cimv")
-PROFILE_TYPES = ("well", "jumper", "flowline", "riser")
+    "subsea_separator", "subsea_cooler", "intensifier", "cimv", "injection_well")
+PROFILE_TYPES = ("well", "jumper", "flowline", "riser", "injection_well")
 
 
 def register():
@@ -1333,7 +1632,7 @@ def register():
                  "subsea_valve": calc_subsea_valve, "subsea_booster": calc_subsea_booster,
                  "subsea_pump": calc_subsea_booster, "subsea_compressor": calc_subsea_booster,
                  "subsea_separator": calc_subsea_separator, "subsea_cooler": calc_subsea_cooler,
-                 "intensifier": calc_intensifier, "cimv": calc_cimv})
+                 "intensifier": calc_intensifier, "cimv": calc_cimv, "injection_well": calc_injection_well})
 
 
 register()

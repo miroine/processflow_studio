@@ -463,6 +463,10 @@
      },
      "bottoms": {
       "multi": false
+     },
+     "water": {
+      "multi": false,
+      "optional": true
      }
     }
    }
@@ -504,6 +508,10 @@
     "in": {
      "in": {
       "multi": false
+     },
+     "lift": {
+      "multi": false,
+      "optional": true
      }
     },
     "out": {
@@ -738,6 +746,25 @@
     }
    }
   },
+  "injection_well": {
+   "label": "Water injection well",
+   "short": "Injection well",
+   "prefix": "IW",
+   "category": "Subsea (SURF)",
+   "ports": {
+    "in": {
+     "in": {
+      "multi": false
+     }
+    },
+    "out": {
+     "out": {
+      "multi": false,
+      "optional": true
+     }
+    }
+   }
+  },
   "subsea_valve": {
    "label": "SSIV / HIPPS valve",
    "short": "SSIV / HIPPS",
@@ -751,6 +778,27 @@
     },
     "out": {
      "out": {
+      "multi": false
+     }
+    }
+   }
+  },
+  "teg_contactor": {
+   "label": "TEG dehydration contactor",
+   "short": "TEG contactor",
+   "prefix": "T",
+   "category": "Separation",
+   "ports": {
+    "in": {
+     "feed": {
+      "multi": true
+     }
+    },
+    "out": {
+     "dry": {
+      "multi": false
+     },
+     "water": {
       "multi": false
      }
     }

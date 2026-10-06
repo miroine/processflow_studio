@@ -57,6 +57,8 @@ def _style(fig, title, sub=None, height=None, **kw):
 def _style_subplots(fig, title, sub=None, height=520):
     lay = {k: v for k, v in LAYOUT.items() if k not in ("xaxis", "yaxis")}
     lay["height"] = height
+    if sub:                                   # room for the subtitle above the subplot titles
+        lay["margin"] = dict(LAYOUT["margin"], t=92)
     fig.update_layout(title=_title(title, sub), **lay)
     fig.update_xaxes(**_AXIS)
     fig.update_yaxes(**_AXIS)
@@ -97,9 +99,24 @@ def _envelope_traces(fig, T_C, P, grid, quality=True):
                              hoverinfo="skip", showlegend=True))
 
 
-def envelope_figure(T_C, P, grid, points=(), title="Phase envelope"):
+def envelope_figure(T_C, P, grid, points=(), title="Phase envelope", trace=None):
     fig = go.Figure()
     _envelope_traces(fig, T_C, P, grid)
+    if trace:
+        for key, col, lab in (("bubble", BLUE, "Bubble points (traced)"), ("dew", ORANGE, "Dew points (traced)")):
+            pts = trace.get(key) or []
+            if pts:
+                fig.add_trace(go.Scatter(x=[U.T(t - 273.15) for t, _ in pts], y=[U.P(p) for _, p in pts],
+                                         mode="markers", name=lab, marker=dict(size=6, color=col),
+                                         hovertemplate=f"%{{x:.1f}} {U.uT()} · %{{y:.1f}} {U.uP()}<extra></extra>"))
+        for key, sym, lab in (("cricondenbar", "triangle-up", "Cricondenbar"), ("cricondentherm", "triangle-right",
+                                                                                  "Cricondentherm")):
+            v = trace.get(key)
+            if v:
+                fig.add_trace(go.Scatter(x=[U.T(v[0] - 273.15)], y=[U.P(v[1])], mode="markers+text", text=[lab],
+                                         textposition="top right", name=lab,
+                                         marker=dict(size=13, symbol=sym, color=INK, line=dict(color="#FFFFFF", width=1.5)),
+                                         hovertemplate=f"{lab}: %{{x:.1f}} {U.uT()} · %{{y:.1f}} {U.uP()}<extra></extra>"))
     if points:
         fig.add_trace(go.Scatter(x=[U.T(p[1]) for p in points], y=[U.P(p[2]) for p in points], mode="markers+text",
                                  text=[p[0] for p in points], textposition="top center",
@@ -850,3 +867,142 @@ def economics_figure(rows, currency):
                       row=1, col=2)
     return _style_subplots(fig, "Energy cost and CO₂ by energy stream", "Colour = utility category",
                            height=max(360, 90 + 30 * len(rows)))
+
+
+# ---- field life ----------------------------------------------------------------------------------------
+
+def fieldlife_figure(fl):
+    """Production profile: primary and secondary rates (top), water cut or WGR (middle), reservoir and delivery
+    pressure with the minimum (bottom); events as dotted verticals."""
+    rows = [r for r in fl["annual"] if r["Year"] >= 1]
+    gas = fl["kind"] == "Gas"
+    yrs = [r["Year"] for r in rows]
+    uG, uO, uP = U.unit("MSm³/d"), U.unit("Sm³/d", "Std liq"), U.uP()
+    prim_lab = f"Gas [{uG}]" if gas else f"Oil [{uO}]"
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.42, 0.24, 0.34],
+                        subplot_titles=(f"{'Gas' if gas else 'Oil'} rate, annual average [{uG if gas else uO}]",
+                                        "Water-gas ratio [Sm³/MSm³]" if gas else "Water cut [%]",
+                                        f"Pressure [{uP}]"))
+    prim = [U.value("MSm³/d", r["Gas [MSm³/d]"]) if gas else U.value("Sm³/d", r["Oil/condensate [Sm³/d]"], "Std liq")
+            for r in rows]
+    fig.add_trace(go.Bar(x=yrs, y=prim, name=prim_lab, marker=dict(color=TEAL, cornerradius=3),
+                         hovertemplate="Year %{x}: %{y:,.3g}<extra></extra>"), row=1, col=1)
+    up = float(fl.get("uptime", 100.0)) / 100.0
+    q_pl = (U.value("MSm³/d", fl["q_plat"]) if gas else U.value("Sm³/d", fl["q_plat"], "Std liq")) * up
+    fig.add_trace(go.Scatter(x=[0.5, max(yrs) + 0.5], y=[q_pl, q_pl], mode="lines",
+                             name=f"Plateau rate × {100 * up:.0f} % production efficiency",
+                             line=dict(color=GREY, width=1.5, dash="dash"), hoverinfo="skip"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=yrs, y=[r["Water cut / WGR"] for r in rows], mode="lines+markers",
+                             name="Water cut" if not gas else "WGR", line=dict(color=BLUE, width=2.5),
+                             marker=dict(size=6), hovertemplate="Year %{x}: %{y:,.3g}<extra></extra>"), row=2, col=1)
+    fig.add_trace(go.Scatter(x=yrs, y=[U.P(r["Reservoir P [bar(a)]"]) for r in rows], mode="lines+markers",
+                             name="Reservoir pressure", line=dict(color=ORANGE, width=2.5), marker=dict(size=6),
+                             hovertemplate="Year %{x}: %{y:,.1f}<extra>reservoir</extra>"), row=3, col=1)
+    dp = [(r["Year"], r["Delivery P [bar(a)]"]) for r in rows if r.get("Delivery P [bar(a)]") is not None]
+    if dp:
+        fig.add_trace(go.Scatter(x=[a for a, _ in dp], y=[U.P(b) for _, b in dp], mode="lines+markers",
+                                 name="Delivery pressure", line=dict(color=TEAL, width=2.5), marker=dict(size=6),
+                                 hovertemplate="Year %{x}: %{y:,.1f}<extra>delivery</extra>"), row=3, col=1)
+    fig.add_trace(go.Scatter(x=[0.5, max(yrs) + 0.5], y=[U.P(fl["P_min"])] * 2, mode="lines",
+                             name="Minimum delivery pressure", line=dict(color=GREY, width=1.5, dash="dot"),
+                             hoverinfo="skip"), row=3, col=1)
+    for t, text in fl.get("events", []):
+        fig.add_vline(x=t + 0.5, line=dict(color=INK2, width=1, dash="dot"), row="all", col=1)
+    fig.update_xaxes(title="Production year", dtick=1 if len(yrs) <= 20 else 2, row=3, col=1)
+    sub = (f"Plateau {fl['summary']['Plateau length [years]']:.1f} years · recovery factor "
+           f"{fl['summary']['Recovery factor [%]']:.1f} % · dotted lines mark the events listed below")
+    return _style_subplots(fig, "Production profile", sub, height=720)
+
+
+def cashflow_figure(fl):
+    """Annual cash flow (bars) and cumulative cash (line), MUSD."""
+    rows = fl["annual"]
+    yrs = [r["Year"] for r in rows]
+    cf = [r["Cash flow [MUSD]"] for r in rows]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=yrs, y=cf, name="Annual cash flow", marker=dict(color=[TEAL if v >= 0 else ORANGE for v in cf],
+                                                                            cornerradius=3),
+                         hovertemplate="Year %{x}: %{y:,.0f} MUSD<extra></extra>"))
+    fig.add_trace(go.Scatter(x=yrs, y=[r["Cumulative cash [MUSD]"] for r in rows], mode="lines+markers",
+                             name="Cumulative (undiscounted)", line=dict(color=INK, width=2), marker=dict(size=5),
+                             hovertemplate="Year %{x}: %{y:,.0f} MUSD<extra>cumulative</extra>"))
+    sm = fl["summary"]
+    sub = f"NPV {sm['NPV [MUSD]']:,.0f} MUSD" + (f" · IRR {sm['IRR [%]']:.0f} %" if sm.get("IRR [%]") is not None else "") \
+        + (f" · payback in year {sm['Payback year']}" if sm.get("Payback year") else "")
+    return _style(fig, "Cash flow", sub, height=380, xaxis=dict(_AXIS, title="Year (0 = first production)", dtick=2),
+                  yaxis=dict(_AXIS, title="MUSD"))
+
+
+def wells_sweep_figure(rows, best=None):
+    """NPV and recovery factor against the number of wells, one line per boosting option."""
+    fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.12,
+                        subplot_titles=("NPV [MUSD]", "Recovery factor [%]"))
+    modes = list(dict.fromkeys(r["Boosting"] for r in rows))
+    for k, mode in enumerate(modes):
+        rr = sorted([r for r in rows if r["Boosting"] == mode], key=lambda r: r["Wells"])
+        col = SERIES[k % len(SERIES)]
+        for c_, key in ((1, "NPV [MUSD]"), (2, "Recovery factor [%]")):
+            fig.add_trace(go.Scatter(x=[r["Wells"] for r in rr], y=[r[key] for r in rr], mode="lines+markers",
+                                     name=mode, legendgroup=mode, showlegend=c_ == 1, line=dict(color=col, width=2.5),
+                                     marker=dict(size=8), hovertemplate="%{x} wells: %{y:,.1f}<extra>" + mode + "</extra>"),
+                          row=1, col=c_)
+    if best:
+        b = next((r for r in rows if r["Wells"] == best[0] and r["Boosting"] == best[1]), None)
+        if b:
+            fig.add_trace(go.Scatter(x=[b["Wells"]], y=[b["NPV [MUSD]"]], mode="markers", name="Highest NPV",
+                                     marker=dict(size=18, color="rgba(0,0,0,0)", line=dict(color=INK, width=2.5)),
+                                     hoverinfo="skip"), row=1, col=1)
+    fig.update_xaxes(title="Producing wells", dtick=1)
+    return _style_subplots(fig, "Well count", "Each point is a full field-life run", height=420)
+
+
+# ---- wax and sand ------------------------------------------------------------------------------------------
+
+def wax_figure(rows, name, WAT):
+    """Bulk and wall temperature along a line with the WAT (top) and the wax deposit growth (bottom)."""
+    uT, uL = U.uT(), U.unit("m")
+    L = _arr("m", [r["Distance [m]"] for r in rows])
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.12, row_heights=[0.6, 0.4],
+                        subplot_titles=(f"Temperature [{uT}]", "Wax deposit growth [mm/y]"))
+    fig.add_trace(go.Scatter(x=L, y=[U.T(r["Bulk T [°C]"]) for r in rows], mode="lines", name="Fluid (bulk)",
+                             line=dict(color=TEAL, width=2.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=L, y=[U.T(r["Wall T [°C]"]) for r in rows], mode="lines", name="Pipe wall (inner)",
+                             line=dict(color=BLUE, width=2, dash="dash")), row=1, col=1)
+    if WAT is not None:
+        fig.add_trace(go.Scatter(x=[L[0], L[-1]], y=[U.T(WAT)] * 2, mode="lines", name="Wax appearance T",
+                                 line=dict(color=CRITICAL, width=1.5, dash="dot"), hoverinfo="skip"), row=1, col=1)
+    fig.add_trace(go.Bar(x=L, y=[r["Deposit growth [mm/y]"] for r in rows], name="Deposit growth", showlegend=False,
+                         marker=dict(color=OCHRE, cornerradius=3),
+                         hovertemplate=f"%{{x:,.0f}} {uL}: %{{y:.2f}} mm/y<extra></extra>"), row=2, col=1)
+    fig.update_xaxes(title=f"Distance [{uL}]", row=2, col=1)
+    return _style_subplots(fig, f"{name} — wax deposition", "Deposit grows where the wall is colder than the WAT",
+                           height=520)
+
+
+def erosion_figure(rows, sand_kg_d):
+    """Bend erosion rate per line at its highest mixture velocity."""
+    names = [r["Line"] for r in rows]
+    ys = [r["Erosion rate [mm/y]"] for r in rows]
+    fig = go.Figure(go.Bar(x=names, y=ys, marker=dict(color=TEAL, cornerradius=4), showlegend=False,
+                           text=[f"{v:.3g}" for v in ys], textposition="outside", cliponaxis=False,
+                           hovertemplate="%{x}: %{y:.3g} mm/y<extra></extra>"))
+    return _style(fig, "Sand erosion of bends", f"DNV-RP-O501 at {sand_kg_d:g} kg/d of sand, highest velocity per line",
+                  xaxis=dict(_AXIS, title=""), yaxis=dict(_AXIS, title="Erosion rate [mm/y]"), height=380)
+
+
+def route_figure(route, name):
+    """Flowline route: water depth along the route (depth increasing downwards), low points marked."""
+    pts = sorted((float(a), float(b)) for a, b in route)
+    uL = U.unit("m")
+    x = [a for a, _ in pts]
+    y = [U.value("m", b) for _, b in pts]
+    lows = [i for i in range(1, len(pts) - 1) if pts[i][1] > pts[i - 1][1] and pts[i][1] >= pts[i + 1][1]]
+    fig = go.Figure(go.Scatter(x=x, y=y, mode="lines+markers", name="Seabed route", line=dict(color=TEAL, width=2.5),
+                               marker=dict(size=7), hovertemplate=f"%{{x:.2f}} km: %{{y:,.0f}} {uL}<extra></extra>"))
+    if lows:
+        fig.add_trace(go.Scatter(x=[x[i] for i in lows], y=[y[i] for i in lows], mode="markers", name="Low point",
+                                 marker=dict(size=14, color="rgba(0,0,0,0)", line=dict(color=ORANGE, width=2.5)),
+                                 hoverinfo="skip"))
+    return _style(fig, f"{name} — route", "Low points collect liquid (slugging, hydrates, corrosion)",
+                  xaxis=dict(_AXIS, title="Distance along the route [km]"),
+                  yaxis=dict(_AXIS, title=f"Water depth [{uL}]", autorange="reversed"), height=360)

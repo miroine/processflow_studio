@@ -87,6 +87,34 @@ def init_state():
         ss.solve_error = None
 
 
+EDIT_HISTORY = 25
+_NOT_UNDONE = ("scenarios", "fieldlife_result")          # kept as they are when an edit is undone
+
+
+def push_edit(label):
+    """Remember the model before a specification edit (for 'Undo edit')."""
+    ss = st.session_state
+    m = {k: v for k, v in ss.model.items() if k not in _NOT_UNDONE}
+    hist = ss.setdefault("edit_hist", [])
+    hist.append((label, copy.deepcopy(m)))
+    del hist[:-EDIT_HISTORY]
+
+
+def undo_edit():
+    """Restore the model as it was before the last specification edit. Returns the edit's label or None."""
+    ss = st.session_state
+    hist = ss.get("edit_hist") or []
+    if not hist:
+        return None
+    label, m = hist.pop()
+    for k in _NOT_UNDONE:
+        if k in ss.model:
+            m[k] = ss.model[k]
+    ss.model = m
+    ss.widget_ver += 1
+    return label
+
+
 def bump(fit=False):
     """Python changed the structure: make the canvas adopt the model."""
     st.session_state.nonce += 1
@@ -101,6 +129,8 @@ def load_model(m, fit=True):
     st.session_state.selected = []
     st.session_state.sol = None
     st.session_state.sol_hash = None
+    st.session_state.edit_hist = []
+    st.session_state.fm_svg = None
     bump(fit)
 
 
@@ -114,7 +144,7 @@ def canvas_structure(model):
 
 SHORT = {"column": "Column", "hx": "Heat exchanger", "separator": "2-phase separator",
          "separator3": "3-phase separator", "feed": "Feed stream", "product": "Product stream", "splitter": "Tee",
-         "well": "Well", "xmas_tree": "Xmas tree", "template": "Template", "jumper": "Jumper / PLET",
+         "teg_contactor": "TEG contactor", "well": "Well", "injection_well": "Injection well", "xmas_tree": "Xmas tree", "template": "Template", "jumper": "Jumper / PLET",
          "flowline": "Flowline", "riser": "Riser", "subsea_valve": "SSIV / HIPPS", "subsea_booster": "Subsea booster",
          "subsea_pump": "Subsea pump", "subsea_compressor": "Subsea compressor", "subsea_separator": "Subsea separator",
          "subsea_cooler": "Subsea cooler", "intensifier": "Intensifier", "cimv": "Chemical injection"}
@@ -224,7 +254,8 @@ def process_canvas_value(key="pfd"):
 
 def model_hash(model):
     m = copy.deepcopy(model)
-    for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios", "heating"):   # post-processing settings: editing them never re-solves
+    for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios", "heating", "fieldlife",
+              "fieldlife_result", "waxsand", "power"):   # post-processing settings and results: editing them never re-solves
         m.pop(k, None)
     for u in m["units"].values():
         for k in ("x", "y", "flip"):
@@ -308,6 +339,11 @@ def _unit_label(u, res):
         return (f"WH {qfmt('Wellhead P [bar(a)]', res['Wellhead P [bar(a)]'], 0)} · "
                 f"{qfmt('Wellhead T [°C]', res['Wellhead T [°C]'], 0)} · "
                 f"{qfmt('Gas [MSm³/d]', res.get('Gas rate [MSm³/d]', 0.0), 2)}")
+    if t == "teg_contactor" and res.get("Water dew point of dried gas [°C]") is not None:
+        return f"dew point {qfmt('Dew point [°C]', res['Water dew point of dried gas [°C]'], 1)}"
+    if t == "injection_well" and res.get("Injection rate [Sm³/d]") is not None:
+        return (f"{qfmt('Rate [Sm³/d]', res['Injection rate [Sm³/d]'], 0)} · margin "
+                f"{qfmt('Margin [bar]', res['Injection margin [bar]'], 0)}")
     if t == "xmas_tree" and res.get("Choke ΔP [bar]") is not None:
         crit = " · critical" if str(res.get("Choke flow", "")).startswith("Critical") else ""
         return f"choke ΔP {qfmt('Choke ΔP [bar]', res['Choke ΔP [bar]'], 1)}{crit}"

@@ -120,8 +120,10 @@ def upstream_flowline(model, riser_uid, max_units=12):
 
 
 def _theta(u):
-    L = float(u["params"].get("length", 1.0))
-    return math.asin(max(-1.0, min(1.0, float(u["params"].get("dz", 0.0)) / L))) if L > 0 else 0.0
+    L = surf.flowline_length(u["params"]) or 1.0
+    secs = surf.route_sections(u["params"])
+    dz = sum(d for _, d in secs) if secs else float(u["params"].get("dz", 0.0))
+    return math.asin(max(-1.0, min(1.0, dz / L))) if L > 0 else 0.0
 
 
 def _rough_m(u):
@@ -156,7 +158,7 @@ def slug_assessment(model, sol, margin=1.2):
             top = sol.streams[top_sid[0]]
             sev = severe_slug(sol.fp, base, top, float(model["units"][rs]["params"]["ID"]) / 1000.0,
                               float(rr["Riser length [m]"]), float(rr["Water depth [m]"]), D,
-                              float(u["params"]["length"]), float(sol.results[fl_uid]["Average liquid holdup [-]"]))
+                              surf.flowline_length(u["params"]), float(sol.results[fl_uid]["Average liquid holdup [-]"]))
             risk = str(rr.get("Riser-base slugging risk", "Low"))
             sev["Risk"] = risk
             sev["Bøe number [-]"] = rr.get("Bøe number (< 1: severe slugging possible) [-]")
@@ -257,7 +259,7 @@ def operating_window(rows):
 
 # ------------------------------------------------------------------------------------------ field layout
 
-LINE_LEN = {"flowline": lambda u: float(u["params"].get("length", 0.0)) / 1000.0}
+LINE_LEN = {"flowline": lambda u: surf.flowline_length(u["params"]) / 1000.0}
 
 
 def _jumper_km(u):
@@ -271,7 +273,7 @@ def _jumper_km(u):
 
 def _len_km(u):
     if u["type"] == "flowline":
-        return float(u["params"].get("length", 0.0)) / 1000.0
+        return surf.flowline_length(u["params"]) / 1000.0
     if u["type"] == "jumper":
         return _jumper_km(u)
     return 0.0
@@ -414,7 +416,10 @@ STEEL_RHO_CP = 7850.0 * 480.0                  # J/m3K
 INSUL_MM = {"Bare carbon steel": 0.0, "Wet insulation (multilayer PP)": 60.0, "Pipe-in-pipe": 40.0,
             "Flexible pipe (insulated)": 30.0, "Towed bundle": 50.0, "Trenched and buried": 0.0,
             "Electrically heated (DEH)": 60.0}
-COOL_DEFAULTS = {"wall_mm": 20.0, "insul_mm": -1.0, "insul_MJ_m3K": 1.7, "insul_frac": 0.5, "shutin": "Settle-out"}
+U_FLOWING, U_NATURAL = "Flowing U (conservative)", "Natural convection after shut-in"
+U_MODES = (U_FLOWING, U_NATURAL)
+COOL_DEFAULTS = {"wall_mm": 20.0, "insul_mm": -1.0, "insul_MJ_m3K": 1.7, "insul_frac": 0.5, "shutin": "Settle-out",
+                 "U_mode": U_FLOWING}
 
 
 def cool_params(model):
@@ -447,13 +452,12 @@ def _vol_heat_capacity(fp, st, D, theta):
 
 def _hydrate_T(fp, st, P):
     """Inhibited hydrate temperature [°C] of a stream's gas at pressure P (None when not applicable)."""
-    from .transport import hydrate_T_motiee, gas_gravity_dry, hydrate_depression
+    from .transport import hydrate_T, hydrate_depression
     if st.empty or fp.iw < 0 or st.z[fp.iw] <= 1e-9:
         return None
     v = st.flash.phase("V")
     x = v.x if v is not None else st.z
-    sg = gas_gravity_dry(fp, x)
-    t = hydrate_T_motiee(sg, P) if sg else None
+    t = hydrate_T(fp, x, P)
     if t is None:
         return None
     aq = st.flash.phase("W")
@@ -532,8 +536,16 @@ def cooldown(model, sol):
         U = float(p.get("U", 0.0) or 0.0) or (row.get("U_W_m2K") or 5.0)
         ins_mm = (basis["insul_mm"] if basis["insul_mm"] >= 0
                   else (0.0 if t == "pipe" else INSUL_MM.get(p.get(key), 30.0)))
-        res = cooldown_line(sol.fp, u["name"], sol.profiles[uid], st_in, st_out, float(p["ID"]) / 1000.0, U,
-                            float(p.get("T_amb", 4.0)), basis, ins_mm)
+        D = float(p["ID"]) / 1000.0
+        prof = sol.profiles[uid]
+        U_flow = U
+        if basis.get("U_mode") == U_NATURAL:
+            from .flowassure import forced_film, shutin_U
+            vm = (prof.get("vm") or [1.0])[0]
+            HLs = prof.get("HL") or [0.0]
+            U = shutin_U(U_flow, forced_film(sol.fp, st_in, D, vm), sum(HLs) / len(HLs))
+        res = cooldown_line(sol.fp, u["name"], prof, st_in, st_out, D, U, float(p.get("T_amb", 4.0)), basis, ins_mm)
+        res["U flowing [W/m²·K]"] = U_flow
         res["Type"] = {"flowline": "Flowline", "riser": "Riser", "pipe": "Pipe"}[t]
         res["Insulation counted [mm]"] = ins_mm
         out.append(res)
@@ -595,7 +607,7 @@ def heated_lines(model, sol):
         outs = [s for lst in port_edges(model, uid, "out").values() for s in lst]
         st_in, st_out = sol.streams[ins[0]], sol.streams[outs[0]]
         prof = sol.profiles[uid]
-        D, L = float(p["ID"]) / 1000.0, float(p["length"])
+        D, L = float(p["ID"]) / 1000.0, surf.flowline_length(p)
         U, T_amb = float(r["U used [W/m²·K]"]), float(p.get("T_amb", 4.0))
         eff = float(r["Heating system efficiency [%]"]) / 100.0
         P_settle = sum(prof["P"]) / len(prof["P"])

@@ -451,7 +451,7 @@ c.check("SURF example solved, every subsea unit ok",
         ss.sol is not None and all(ss.sol.status.get(k) == "ok" for k in surf_ids),
         str({ss.model["units"][k]["name"]: ss.sol.errors.get(k) for k in surf_ids if ss.sol.status.get(k) != "ok"}))
 c.check("canvas palette offers the SURF group",
-        sum(1 for v in a["catalogue"].values() if v["category"] == "Subsea (SURF)") == 14, "")
+        sum(1 for v in a["catalogue"].values() if v["category"] == "Subsea (SURF)") == 15, "")
 w1, tmp = uid_by_name("W-1"), uid_by_name("TMP-100 Template")
 c.check("well label shows wellhead P and T", a["results"]["units"][w1]["label"].startswith("WH"),
         a["results"]["units"][w1]["label"])
@@ -519,7 +519,7 @@ c.check("booster label shows power and GVF", "GVF" in a["results"]["units"][bu][
 c.eq("booster work drawn as an incoming energy stream", a["results"]["units"][bu]["energy"][0]["dir"], "in")
 c.check("CAPEX tab: total and chart rendered", any("Total CAPEX" in t for t in st.HOOK["texts"]) and
         any("CAPEX estimate" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
-c.check("umbilical tab: booster power cable sized", any("Booster power cable" in t for t in st.HOOK["texts"]), "")
+c.check("umbilical tab: booster power cable sized", any("Subsea power cable" in t for t in st.HOOK["texts"]), "")
 ss.selected = [bu]
 st.HOOK["errors"].clear()
 run()
@@ -580,6 +580,48 @@ pending.append((f"lay_b_{rsu}_{ss.widget_ver}", 90.0))
 run()
 c.close("bearing edit saved with the flowsheet", ss.model["layout"]["bearing"][rsu], 90.0, 1e-12)
 c.eq("bearing edits do not re-solve", ss.sol_hash, h0)
+# field-layout drawing (v6.4): JS/SVG component, edits saved in model["layout"] without a re-solve
+fm = [x for x in st.HOOK["component_calls"] if x["name"] == "fieldmap_canvas"]
+c.check("field-layout drawing component rendered", len(fm) >= 1, "")
+dr = fm[-1]["args"]["drawing"] if fm else {"items": [], "lines": [], "services": {}}
+kinds = {i["kind"] for i in dr["items"]}
+c.check("drawing has the host, a template with 4 slots and the DUTA", {"host", "template", "duta"} <= kinds and
+        any(i["kind"] == "template" and len(i["slots"]) == 4 for i in dr["items"]), str(kinds))
+c.check("drawing has production, chemical and power lines", {"production", "chemical", "power"} <= set(dr["services"]), "")
+c.check("production line labelled with its length", any(ln["service"] == "production" and ln["label"].startswith("~")
+                                                       and ln["label"].endswith(" km") for ln in dr["lines"]), "")
+tid = next(i["id"] for i in dr["items"] if i["kind"] == "template")
+ss["fieldmap"] = {"session": "t", "rev": 1, "event": "move", "id": tid, "x": -3.0, "y": 4.0, "nonce": 0}
+run()
+c.eq("drag on the drawing saves the position", ss.model["layout"]["pos"][tid], [-3.0, 4.0])
+c.eq("drawing edits do not re-solve", ss.sol_hash, h0)
+dr = [x for x in st.HOOK["component_calls"] if x["name"] == "fieldmap_canvas"][-1]["args"]["drawing"]
+c.check("moved template drawn at its new position", any(i["id"] == tid and (i["x"], i["y"]) == (-3.0, 4.0)
+                                                         for i in dr["items"]), "")
+run()
+c.eq("an event is applied once", ss.model["layout"]["pos"][tid], [-3.0, 4.0])
+ss["fieldmap"] = {"session": "t", "rev": 2, "event": "rotate", "id": tid, "rot": 375.0}
+run()
+c.close("rotation saved (mod 360)", ss.model["layout"]["rot"][tid], 15.0, 1e-12)
+ss["fieldmap"] = {"session": "t", "rev": 3, "event": "bend", "pair": f"host|{tid}", "bend": 2.0}
+run()
+c.close("route bend saved and clamped", ss.model["layout"]["bend"][f"host|{tid}"], 0.8, 1e-12)
+dr = [x for x in st.HOOK["component_calls"] if x["name"] == "fieldmap_canvas"][-1]["args"]["drawing"]
+c.close("bend sent back to the drawing", dr["bends"][f"host|{tid}"], 0.8, 1e-12)
+ss["fieldmap"] = {"session": "t", "rev": 4, "event": "export_svg", "svg": "<svg xmlns='http://www.w3.org/2000/svg'/>"}
+run()
+c.check("SVG export offered for download", any(k == "download_button" and lab == "Download drawing (SVG)"
+                                               for k, lab, _ in st.HOOK["log"]), "")
+ss["fieldmap"] = {"session": "t", "rev": 5, "event": "reset"}
+run()
+c.check("reset clears positions, rotations and bends", not any(k in ss.model["layout"] for k in ("pos", "rot", "bend"))
+        and "bearing" in ss.model["layout"], str(ss.model["layout"].keys()))
+pending.append((f"fm_title_{ss.widget_ver}", "Demo field"))
+run()
+c.eq("drawing title saved", ss.model["layout"]["title"], "Demo field")
+c.eq("drawing title sent to the component",
+     [x for x in st.HOOK["component_calls"] if x["name"] == "fieldmap_canvas"][-1]["args"]["title"], "Demo field")
+c.eq("drawing edits never re-solve", ss.sol_hash, h0)
 c.check("slugging view: surge volume and table rendered", any("Arrival surge volume" in t for t in st.HOOK["texts"]), "")
 ss["td_rates"] = "0.3, 1"
 run()
@@ -600,6 +642,9 @@ run()
 c.check("Phase 3 views render in field units", not st.HOOK["errors"] and
         any("North [mi]" in str(f.layout.get("yaxis", {}).get("title", "")) for f in st.HOOK["charts"]),
         str(st.HOOK["errors"])[:200])
+dr = [x for x in st.HOOK["component_calls"] if x["name"] == "fieldmap_canvas"][-1]["args"]["drawing"]
+c.check("drawing distances in miles in field units", dr["units"]["len"] == "mi" and
+        any(ln["label"].endswith(" mi") for ln in dr["lines"] if ln["service"] == "production"), "")
 pending.append(("units_sys", "SI (metric)"))
 run()
 
@@ -716,6 +761,140 @@ for nm in [u["name"] for u in ss.model["units"].values() if u["type"] in ("subse
 ss.selected = []
 run()
 c.check("v5.4 examples render without UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+
+# ---- 16g. v6: field life tab (run, stale notice, report, well-count comparison, apply) ------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = "Heated flowline (SURF): DEH oil tie-back with methanol injection and an intensifier"
+st.HOOK["press"].add("Load example")
+run()
+c.check("field-life tab invites a run", any("A run takes a minute" in t for t in st.HOOK["texts"]), "")
+st.HOOK["press"].add("fl_run")
+run()
+fl = ss.model.get("fieldlife_result")
+c.check("field-life run stored with the flowsheet", fl is not None and fl["summary"]["Recovery factor [%]"] > 0, "")
+c.check("production profile and cash flow charts rendered",
+        any("Production profile" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]) and
+        any("Cash flow" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("drainage strategy text shown", any("Drainage strategy" in t for t in st.HOOK["texts"]), "")
+h0 = ss.sol_hash
+html = build_report(ss.model, ss.sol, None, "Field life")
+c.check("report has the field-life section", "Field life (screening)" in html and "Production profile" in html, "")
+pending.append((f"fl_disc_{ss.widget_ver}", 10.0))
+run()
+c.eq("field-life settings do not re-solve the flowsheet", ss.sol_hash, h0)
+c.close("discount-rate edit saved with the flowsheet", ss.model["fieldlife"]["disc"], 10.0, 1e-12)
+c.check("a settings change marks the stored result as stale",
+        any("run again to update" in t for t in st.HOOK["texts"]), "")
+c.check("stale results are left out of the report",
+        "Field life (screening)" not in build_report(ss.model, ss.sol, None, "Field life"), "")
+ss["fl_counts"] = "2, 3"
+st.HOOK["press"].add("fl_sweep")
+run()
+fl = ss.model.get("fieldlife_result")
+c.check("well-count comparison: two cases and a best case", fl is not None and len(fl.get("sweep", [])) == 2 and
+        fl.get("best") is not None, str(fl.get("sweep") if fl else None))
+c.check("well-count chart rendered", any("Well count" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+best_n = fl["best"][0]
+st.HOOK["press"].add("fl_apply")
+run()
+c.eq("apply the best well count to the flowsheet",
+     sum(u["params"].get("n_par", 1) for u in ss.model["units"].values() if u["type"] == "well"), best_n)
+c.check("the flowsheet re-solves after applying", ss.sol is not None and S_.sol_is_current(), "")
+pending.append(("units_sys", "Field"))
+run()
+c.check("field-life tab renders in field units", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+pending.append(("units_sys", "SI (metric)"))
+run()
+c.check("v6 field-life tab without UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+
+# ---- 16h. v6: hydrate model selector -----------------------------------------------------------------------------
+from procsim.transport import VDWP as _VDWP   # noqa: E402
+st.HOOK["values"]["selectbox:Example:"] = "Subsea tie-back: MEG injection + flowline + riser (Beggs & Brill, hydrate check)"
+st.HOOK["press"].add("Load example")
+run()
+h_m = ss.sol_hash
+pending.append((f"fl_hydmodel_{ss.widget_ver}", _VDWP))
+run()
+run()
+c.eq("hydrate model selector saved in the fluid package", ss.model["fluid"].get("hydrate_model"), _VDWP)
+c.check("changing the hydrate model re-solves", ss.sol_hash != h_m and S_.sol_is_current(), "")
+c.check("flow-assurance chart labels the vdW-P curve",
+        any("vdW-P" in str(tr.kw.get("name", "")) for f in st.HOOK["charts"] for tr in f.data if hasattr(tr, "kw")), "")
+
+# ---- 16i. v6.1: wax & sand view, shut-in U, depressurisation ------------------------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = "Heated flowline (SURF): DEH oil tie-back with methanol injection and an intensifier"
+st.HOOK["press"].add("Load example")
+run()
+h0 = ss.sol_hash
+c.check("depressurisation table rendered", any("Depressurisation below the hydrate pressure" in t for t in st.HOOK["texts"]), "")
+c.check("sand erosion chart rendered", any("Sand erosion of bends" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+pending.append((f"ws_WAT_{ss.widget_ver}", 60.0))
+run()
+c.close("WAT entry saved with the flowsheet", ss.model["waxsand"]["WAT"], 60.0, 1e-12)
+c.eq("wax settings do not re-solve", ss.sol_hash, h0)
+c.check("wax deposition chart rendered", any("wax deposition" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+pending.append((f"cool_U_mode_{ss.widget_ver}", "Natural convection after shut-in"))
+run()
+c.eq("shut-in U option saved", ss.model["cooldown"]["U_mode"], "Natural convection after shut-in")
+c.check("v6.1 views render without UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+
+# ---- 16j. v6.2: gas lift / injection example, route tab, choke Cv, power supply ---------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = "Gas lift and water injection (SURF): lifted oil wells, hilly route, seawater injectors"
+st.HOOK["press"].add("Load example")
+run()
+c.check("gas-lift example solved", ss.sol is not None and all(v in ("ok", "warning") for v in ss.sol.status.values()), "")
+flu = uid_by_name("FL-100 Flowline")
+ss.selected = [flu]
+run()
+c.check("route tab: seabed chart rendered", any("route" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+ss.selected = [uid_by_name("IW-1 Water injectors")]
+run()
+c.check("injection well property view opens", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+lab = canvas_args()["results"]["units"][uid_by_name("IW-1 Water injectors")]["label"]
+c.check("injection well label shows rate and margin", "margin" in lab, lab)
+c.check("power supply options table shown", any("Power supply" in t for t in st.HOOK["texts"]), "")
+xt = uid_by_name("XT-1")
+ss.model["units"][xt]["params"].update({"spec": "Choke opening (Cv)", "Cv_max": 150.0, "opening": 80.0})
+ss.selected = [xt]
+run()
+c.check("choke Cv spec solves in the app", ss.sol.status.get(xt) in ("ok", "warning") and
+        ss.sol.results[xt].get("Choke Cv at this opening [US gpm/psi½]") is not None, str(ss.sol.errors.get(xt)))
+ss.selected = []
+run()
+c.check("v6.2 without UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+
+# ---- 16k. v6.3: undo edit, TEG example, traced envelope ---------------------------------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = "Gas dehydration: TEG contactor with a water dew-point specification"
+st.HOOK["press"].add("Load example")
+run()
+teg = uid_by_name("T-100 TEG contactor")
+c.check("TEG example solved", ss.sol.status.get(teg) in ("ok", "warning"), str(ss.sol.errors.get(teg)))
+c.eq("loading a flowsheet clears the edit history", ss.get("edit_hist"), [])
+ss.selected = [teg]
+run()
+key = f"w{ss.widget_ver}_{teg}_teg_wt"
+c.check("TEG purity widget present", key in ss, key)
+pending.append((key, 99.0))
+run()
+c.close("purity edit applied", ss.model["units"][teg]["params"]["teg_wt"], 99.0, 1e-12)
+c.eq("edit recorded for undo", len(ss.get("edit_hist") or []), 1)
+st.HOOK["press"].add("undo_edit")
+run()
+c.close("undo restores the previous purity", ss.model["units"][teg]["params"]["teg_wt"], 99.7, 1e-12)
+c.eq("undo consumed the history", len(ss.get("edit_hist") or []), 0)
+c.check("undo re-solves (or reuses the cached solution)", S_.sol_is_current(), "")
+dry = next(sid for sid, x in ss.model["streams"].items() if x["src"][0] == teg and x["src"][1] == "dry")
+ss.selected = [dry]
+run()
+st.HOOK["press"].add(f"envgo_{dry}")
+run()
+c.check("traced envelope: cricondenbar shown", any("Cricondenbar" in t for t in st.HOOK["texts"]), "")
+ss.selected = []
+run()
+c.check("v6.3 without UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
 
 # ---- 17. stale modules after an update (the Streamlit Cloud ImportError) ---------------------------
 import types   # noqa: E402

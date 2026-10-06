@@ -2,12 +2,15 @@
 equipment catalogue (view, download, replace with your own CSV)."""
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import streamlit as st
 
 from procsim import surf
 from procsim import subsea_design as sd
 from procsim import subsea_ops as so
+from procsim import flowassure as FA
 from procsim.flowsheet import port_edges
 
 from .state import sol_is_current, bump, SHORT, fmt, qfmt
@@ -269,18 +272,54 @@ def umbilical_panel(model, sol):
     st.caption("Also in the umbilical: " + res["hydraulics"] + ".")
     cab = res["cable"]
     if cab:
-        st.markdown("##### Booster power cable")
+        st.markdown("##### Subsea power cable (boosters and electrical heating)")
         c = st.columns(5)
         c[0].metric("Voltage", f"{cab['Voltage [kV]']:g} kV")
         c[1].metric("Conductor", f"3 × {cab['Conductor [mm²]']} mm²")
         c[2].metric("Current", f"{cab['Current [A]']:,.0f} A of {cab['Ampacity [A]']} A")
         c[3].metric("Voltage drop", f"{cab['Voltage drop [%]']:.1f} %")
         c[4].metric("Charging current", f"{cab['Charging current [A]']:,.0f} A")
-        st.caption(f"Cable losses {cab['Cable losses [kW]']:,.0f} kW at full load.")
+        st.caption(f"Load {cab['Load: boosters [kW]']:,.0f} kW boosters + {cab['Load: electrical heating [kW]']:,.0f} kW "
+                   f"electrical heating; cable losses {cab['Cable losses [kW]']:,.0f} kW at full load"
+                   + (f"; subsea transformer {cab['Subsea step-down transformer [MVA]']:.1f} MVA "
+                      f"({cab['Transformer losses [kW]']:,.0f} kW losses)." if cab.get("Subsea step-down transformer [MVA]")
+                      else "."))
     elif res["booster_kW"] <= 0:
-        st.caption("No subsea boosters in the flowsheet: no power cable needed.")
+        st.caption("No subsea electrical load (boosters or electrical heating): no power cable needed.")
     for n in res["notes"]:
         st.warning(n)
+    power_supply_panel(model, sol)
+
+
+def _set_pow(key, wkey):
+    ss = st.session_state
+    ss.model.setdefault("power", {})[key] = ss[wkey]
+
+
+def power_supply_panel(model, sol):
+    ss = st.session_state
+    st.markdown("##### Power supply: power from shore or local gas turbines")
+    pp = sd.power_params(model)
+    v = ss.widget_ver
+    with st.expander("Power supply basis", expanded=False):
+        c = st.columns(len(sd.POWER_LABELS))
+        for col, (key, (lab, unit)) in zip(c, sd.POWER_LABELS.items()):
+            wk = f"pow_{key}_{v}"
+            col.number_input(f"{lab} [{unit}]", value=float(pp[key]), key=wk, format="%.4g", min_value=0.0,
+                             on_change=_set_pow, args=(key, wk))
+        st.caption("Fuel, electricity and CO₂ prices and the turbine efficiency come from the Analysis tab's economics "
+                   "settings. Gas turbines carry ~30 % installed spare capacity. Illustrative allowances only.")
+    if sol is None:
+        st.caption("Solve the flowsheet to compare the power supply options.")
+        return
+    ps = sd.power_supply_options(model, sol)
+    if ps is None:
+        st.caption("No power demand in the flowsheet.")
+        return
+    st.dataframe(pd.DataFrame(ps["rows"]).round(2), hide_index=True, width="stretch")
+    ab = ps["Abatement cost of power from shore [USD/t CO₂]"]
+    st.caption(f"Total power demand {ps['Power demand [MW]']:.1f} MW. Cheaper over the period: **{ps['Cheaper over the period']}**"
+               + (f"; power from shore abates CO₂ at {ab:,.0f} USD/t (before CO₂ tax)." if ab is not None else "."))
 
 
 # ------------------------------------------------------------------ tie-back screening
@@ -491,32 +530,156 @@ def _set_bearing(uid, wkey):
     ss.model.setdefault("layout", {}).setdefault("bearing", {})[uid] = float(ss[wkey])
 
 
+def _fieldmap_event(model):
+    """Apply the last drawing edit once (moves, rotations and route bends are saved with the flowsheet and never
+    re-solve). Returns True when the model changed."""
+    ss = st.session_state
+    ev = ss.get("fieldmap")
+    if not isinstance(ev, dict):
+        return False
+    tag = (ev.get("session"), ev.get("rev"))
+    if tag == ss.get("fm_last"):
+        return False
+    ss.fm_last = tag
+    lay = model.setdefault("layout", {})
+    e = ev.get("event")
+    try:
+        if e == "move":
+            lay.setdefault("pos", {})[str(ev["id"])] = [float(ev["x"]), float(ev["y"])]
+        elif e == "rotate":
+            lay.setdefault("rot", {})[str(ev["id"])] = float(ev["rot"]) % 360.0
+        elif e == "bend":
+            lay.setdefault("bend", {})[str(ev["pair"])] = max(-0.8, min(0.8, float(ev["bend"])))
+        elif e == "reset":
+            for k in ("pos", "rot", "bend"):
+                lay.pop(k, None)
+        elif e == "export_svg" and ev.get("svg"):
+            ss.fm_svg = ev["svg"]
+            return False
+        else:
+            return False
+    except (KeyError, TypeError, ValueError):
+        return False
+    return True
+
+
 def layout_panel(model, sol):
     ss = st.session_state
     risers = [u for u in model["units"] if model["units"][u]["type"] == "riser"]
     if not risers:
         st.info("The layout starts from a riser at the host: add a riser to see the field layout.")
         return
-    st.caption("Built from the flowsheet: the host at the origin, each riser's touch-down at its horizontal footprint, "
-               "flowlines and jumpers to scale along a bearing, well slots on a ring around their template (not to "
-               "scale), satellites on their own bearing. Set the bearings to match your field; they are saved with "
-               "the flowsheet and never trigger a re-solve.")
-    bear = (model.get("layout") or {}).get("bearing") or {}
-    cols = st.columns(min(len(risers), 4))
-    for k, r in enumerate(sorted(risers, key=lambda u: model["units"][u]["name"])):
-        wk = f"lay_b_{r}_{ss.widget_ver}"
-        cols[k % len(cols)].number_input(f"Bearing of {model['units'][r]['name']} line [° from north]",
-                                         value=float(bear.get(r, so.default_bearing(k))), min_value=0.0, max_value=360.0,
-                                         key=wk, on_change=_set_bearing, args=(r, wk), format="%.4g")
-    lay = so.field_layout(model, sol)
-    st.plotly_chart(charts.layout_figure(lay), width="stretch", key="lay_fig")
-    rows = [{"Object": n["name"], "Type": SHORT.get(n["type"], n["type"]).replace("host", "Host"),
-             "East [km]": n["x"], "North [km]": n["y"], "Distance from host [km]": (n["x"] ** 2 + n["y"] ** 2) ** 0.5}
-            for n in lay["nodes"]]
-    with st.expander("Coordinates", expanded=False):
+    _fieldmap_event(model)
+    wk = f"fm_title_{ss.widget_ver}"
+    st.text_input("Drawing title", value=_field_title(model), key=wk, on_change=_set_title, args=(wk,),
+                  help="Shown in the title block of the drawing and its SVG export")
+    st.caption("A field-layout drawing built from the flowsheet: the host, templates with their well slots "
+               "(green producer, red ring = gas lift, blue injector, dashed = spare), subsea stations and the DUTA, "
+               "joined by colour-coded production, gas-lift, water-injection, chemical and power / DC-FO lines with "
+               "their lengths. **Drag** a structure to move it, **drag a line** to bend its route, **R** rotates "
+               "the selected structure, the legend switches services on and off. Edits are saved with the "
+               "flowsheet and never trigger a re-solve.")
+    lu = ("mi", 1 / 1.609344) if U.field() else ("km", 1.0)
+    try:
+        from procsim.fieldmap import field_drawing
+        from fieldmap_canvas import fieldmap_canvas
+        drawing = field_drawing(model, sol, qf=lambda lab, v: qfmt(lab, v, 3), length_unit=lu)
+        nonce = f"{ss.get('nonce')}|{len(drawing['items'])}|{U.system()}"
+        fieldmap_canvas(drawing, nonce, height=660, title=_field_title(model), key="fieldmap")
+    except Exception as e:                                                # noqa: BLE001
+        st.warning(f"Field-layout drawing unavailable ({e}); the plan view below still works.")
+    c1, c2 = st.columns([1, 3])
+    if c1.button("Reset drawing positions", key="fm_reset",
+                 help="Put every structure back where the flowsheet places it and straighten the routes"):
+        for k in ("pos", "rot", "bend"):
+            (model.get("layout") or {}).pop(k, None)
+    if ss.get("fm_svg"):
+        c2.download_button("Download drawing (SVG)", data=ss.fm_svg, file_name="field_layout.svg",
+                           mime="image/svg+xml", key="fm_svg_dl")
+    else:
+        c2.caption("Use **Export SVG** on the drawing toolbar to download it.")
+    with st.expander("Plan view to scale and line bearings", expanded=False):
+        st.caption("The drawing starts from this plan view: the host at the origin, each riser's touch-down at its "
+                   "horizontal footprint, flowlines and jumpers to scale along a bearing. Set the bearings to match "
+                   "your field; structures you have not moved on the drawing follow them.")
+        bear = (model.get("layout") or {}).get("bearing") or {}
+        cols = st.columns(min(len(risers), 4))
+        for k, r in enumerate(sorted(risers, key=lambda u: model["units"][u]["name"])):
+            wk = f"lay_b_{r}_{ss.widget_ver}"
+            cols[k % len(cols)].number_input(f"Bearing of {model['units'][r]['name']} line [° from north]",
+                                             value=float(bear.get(r, so.default_bearing(k))), min_value=0.0,
+                                             max_value=360.0, key=wk, on_change=_set_bearing, args=(r, wk),
+                                             format="%.4g")
+        lay = so.field_layout(model, sol)
+        st.plotly_chart(charts.layout_figure(lay), width="stretch", key="lay_fig")
+        rows = [{"Object": n["name"], "Type": SHORT.get(n["type"], n["type"]).replace("host", "Host"),
+                 "East [km]": n["x"], "North [km]": n["y"], "Distance from host [km]": (n["x"] ** 2 + n["y"] ** 2) ** 0.5}
+                for n in lay["nodes"]]
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
                      column_config={c_: st.column_config.NumberColumn(format="%.2f")
                                     for c_ in ("East [km]", "North [km]", "Distance from host [km]")})
+
+
+def _field_title(model):
+    return ((model.get("layout") or {}).get("title") or "").strip() or "Field layout"
+
+
+def _set_title(wkey):
+    ss = st.session_state
+    ss.model.setdefault("layout", {})["title"] = str(ss[wkey])[:80]
+
+
+def _set_ws(key, wkey):
+    ss = st.session_state
+    ss.model.setdefault("waxsand", {})[key] = ss[wkey]
+
+
+def waxsand_panel(model, sol):
+    ss = st.session_state
+    st.caption("Wax: the wax appearance temperature (entered from the lab, or estimated with a multi-solid ideal "
+               "model on Won's n-paraffin properties) and the deposit growth by molecular diffusion where the pipe "
+               "wall is colder than the WAT (an upper bound: no shear removal). Sand: erosion of a bend at each line's highest mixture velocity "
+               "(DNV-RP-O501, conservative particle-size factor). Screening only.")
+    wp = FA.wax_params(model)
+    v = ss.widget_ver
+    with st.expander("Wax and sand basis", expanded=False):
+        c = st.columns(5)
+        for col, key, lab, kw in ((c[0], "WAT", "WAT [°C] (−999 = estimate)", {}),
+                                  (c[1], "wax_wt", "Wax content of the oil [wt%]", {"min_value": 0.0}),
+                                  (c[2], "sol_span", "Solubility span below WAT [K]", {"min_value": 1.0}),
+                                  (c[3], "porosity", "Deposit oil fraction [-]", {"min_value": 0.0, "max_value": 0.95}),
+                                  (c[4], "pig_mm", "Pig at deposit thickness [mm]", {"min_value": 0.1})):
+            wk = f"ws_{key}_{v}"
+            col.number_input(lab, value=float(wp[key]), key=wk, format="%.4g", on_change=_set_ws, args=(key, wk), **kw)
+        c = st.columns(5)
+        for col, key, lab, kw in ((c[0], "paraffin_frac", "n-paraffin share of heavy fractions [-]",
+                                   {"min_value": 0.0, "max_value": 1.0}),
+                                  (c[1], "sand_kg_d", "Sand production [kg/d]", {"min_value": 0.0}),
+                                  (c[2], "bend_R", "Bend radius [× D]", {"min_value": 1.0}),
+                                  (c[3], "allow_mm", "Erosion allowance [mm]", {"min_value": 0.1})):
+            wk = f"ws_{key}_{v}"
+            col.number_input(lab, value=float(wp[key]), key=wk, format="%.4g", on_change=_set_ws, args=(key, wk), **kw)
+    st.markdown("##### Wax")
+    wt = FA.wax_table(model, sol, wp)
+    if not wt:
+        st.info("No line carries a hydrocarbon liquid.")
+    else:
+        df = pd.DataFrame([{k: (None if isinstance(x, float) and math.isinf(x) else x) for k, x in r.items()
+                            if k not in ("rows", "uid")} for r in wt])
+        st.dataframe(U.df_display(df), hide_index=True, width="stretch")
+        worst = max(wt, key=lambda r: r["Max. deposit growth [mm/y]"])
+        if worst["Max. deposit growth [mm/y]"] > 0:
+            st.plotly_chart(charts.wax_figure(worst["rows"], worst["Line"], worst["WAT [°C]"]), width="stretch",
+                            key="wax_fig")
+        else:
+            st.caption("No wall colder than the WAT: no wax deposition at this operating point.")
+    st.markdown("##### Sand erosion of bends")
+    et = FA.erosion_table(model, sol, wp)
+    if et:
+        df = pd.DataFrame([{k: (None if isinstance(x, float) and math.isinf(x) else x) for k, x in r.items() if k != "uid"}
+                           for r in et])
+        st.dataframe(U.df_display(df), hide_index=True, width="stretch")
+        st.plotly_chart(charts.erosion_figure(et, float(wp["sand_kg_d"])), width="stretch", key="ero_fig")
 
 
 def _set_cool(key, wkey):
@@ -530,8 +693,8 @@ def cooldown_panel(model, sol):
                "profile cools exponentially with a time constant set by the heat stored in the contents (in-situ "
                "holdup), the steel wall and part of the insulation, over U·πD. The no-touch time is how long until "
                "the coldest-responding point reaches the hydrate temperature at the shut-in pressure — the time "
-               "available before depressurisation or inhibitor injection. The flowing U is used, which is "
-               "conservative (the internal film is weaker at rest). Screening only.")
+               "available before depressurisation or inhibitor injection. The flowing U is conservative; the "
+               "natural-convection option replaces the forced inner film by natural convection at rest. Screening only.")
     cp = so.cool_params(model)
     v = ss.widget_ver
     with st.expander("Cool-down basis", expanded=False):
@@ -548,6 +711,16 @@ def cooldown_panel(model, sol):
         c[4].selectbox("Shut-in pressure", opts, index=opts.index(cp["shutin"]) if cp["shutin"] in opts else 0, key=wk,
                        on_change=_set_cool, args=("shutin", wk),
                        help="Settle-out: the line's mean operating pressure everywhere; local: the operating pressure")
+        c = st.columns(5)
+        wk = f"cool_U_mode_{v}"
+        c[0].selectbox("U after shut-in", list(so.U_MODES), index=list(so.U_MODES).index(cp["U_mode"])
+                       if cp["U_mode"] in so.U_MODES else 0, key=wk, on_change=_set_cool, args=("U_mode", wk),
+                       help="Natural convection: 1/U = 1/U_flowing − 1/h_forced + 1/h_natural, with h_forced from "
+                            "Dittus-Boelter on the flowing mixture and h_natural 10 (gas) – 60 (liquid) W/m²K")
+        wp = FA.wax_params(model)
+        wk = f"ws_vent_mm_{v}"
+        c[1].number_input("Blowdown vent [mm]", value=float(wp["vent_mm"]), min_value=5.0, key=wk, format="%.4g",
+                          on_change=_set_ws, args=("vent_mm", wk))
     lines = so.cooldown(model, sol)
     if not lines:
         st.info("No solved flowline, riser or heat-losing pipe to cool down.")
@@ -568,6 +741,19 @@ def cooldown_panel(model, sol):
     st.dataframe(U.df_display(df), hide_index=True, width="stretch")
     st.caption("No-touch time — blank: the line never cools into the hydrate region (hydrate T below the sea "
                "temperature, or no free water); 0: already inside it while flowing.")
+    st.markdown("##### Depressurisation below the hydrate pressure")
+    st.caption("Hydrate pressure at the seabed temperature (selected hydrate model, inhibitor depression applied), "
+               "isothermal blowdown of the gas inventory through the vent (critical flow, P = P₀·e^(−t/τ)), and the "
+               "pressure the liquid left in the line keeps at its low point (vent 2 bar + liquid head).")
+    dp = FA.depressurisation(model, sol)
+    if dp:
+        st.dataframe(U.df_display(pd.DataFrame(dp)), hide_index=True, width="stretch")
+        bad = [r["Line"] for r in dp if r["Can depressurise below the hydrate P"] != "yes"]
+        if bad:
+            st.warning(f"The liquid head keeps {', '.join(bad)} above the hydrate pressure: depressurisation alone "
+                       "will not protect it - inhibit, heat or drain the low point.")
+    else:
+        st.caption("No gas line carrying water.")
 
 
 def _set_heat(key, wkey):
@@ -635,9 +821,9 @@ def surf_tab():
     sol = ss.sol if sol_is_current() else None
     st.markdown("#### Subsea production system (SURF)")
     units = surf_units(model)
-    t_sys, t_lay, t_capex, t_umb, t_tb, t_td, t_slug, t_cool, t_heat, t_cat = st.tabs(
+    t_sys, t_lay, t_capex, t_umb, t_tb, t_td, t_slug, t_cool, t_heat, t_wax, t_cat = st.tabs(
         ["System", "Field layout", "Equipment & CAPEX", "Umbilical & power", "Tie-back screening", "Turndown",
-         "Slugging", "Cool-down", "Heated lines", "Catalogue"])
+         "Slugging", "Cool-down", "Heated lines", "Wax & sand", "Catalogue"])
     with t_sys:
         if not units:
             st.info("No subsea equipment in this flowsheet. Drag wells, Xmas trees, templates, jumpers, flowlines, "
@@ -687,6 +873,11 @@ def surf_tab():
             st.info("Solve the flowsheet first.")
         else:
             heating_panel(model, sol)
+    with t_wax:
+        if sol is None:
+            st.info("Solve the flowsheet first.")
+        else:
+            waxsand_panel(model, sol)
     with t_cat:
         catalogue_panel(model)
         with st.expander("Catalogue columns", expanded=False):

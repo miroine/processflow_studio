@@ -43,14 +43,15 @@ tested pipe, valve and flash models; equipment data come from a catalogue (see b
 
 | Unit | Specification | Model |
 |---|---|---|
-| Well | rate from the feed **or solved for a wellhead pressure**; inflow model: gas back-pressure *q = C(Pr² − Pwf²)ⁿ*, liquid productivity index *q = PI(Pr − Pwf)* or Vogel; tubing MD, TVD, ID, roughness, U to formation, ambient at the wellhead | connect a **feed at reservoir P and T**; its flow is the well rate. Rates at standard conditions (15 °C, 1.01325 bar flash) give Pwf from the IPR (isothermal inflow, the reservoir heat shows as an energy stream), then the tubing is marched with Beggs & Brill against a linear geothermal ambient → wellhead P and T, AOF, GOR, water cut. Use an **Adjust** on the feed flow to find the rate for a wellhead or choke pressure |
-| Xmas tree + choke | tree type (valve ΔP from the catalogue), choke outlet P, choke ΔP or fully open | isenthalpic; critical-flow check from the gas Cp/Cv (ideal-gas critical ratio, flagged as an estimate for multiphase flow); hydrate margin just downstream of the choke |
+| Well | rate from the feed **or solved for a wellhead pressure**; inflow model: gas back-pressure *q = C(Pr² − Pwf²)ⁿ*, liquid productivity index *q = PI(Pr − Pwf)* or Vogel; tubing MD, TVD, ID, roughness, U to formation, ambient at the wellhead | connect a **feed at reservoir P and T**; its flow is the well rate. Rates at standard conditions (15 °C, 1.01325 bar flash) give Pwf from the IPR (isothermal inflow, the reservoir heat shows as an energy stream), then the tubing is marched with Beggs & Brill against a linear geothermal ambient → wellhead P and T, AOF, GOR, water cut. Use an **Adjust** on the feed flow to find the rate for a wellhead or choke pressure. *Identical wells*: one unit stands for several parallel wells (rate split equally). **Gas lift**: connect a lift-gas stream to the *lift* port; it is injected at the valve depth (checked against the tubing pressure there, with the gas column in the annulus) and the tubing above carries the lightened mixture |
+| Xmas tree + choke | tree type (valve ΔP from the catalogue), choke outlet P, choke ΔP, fully open, or **choke opening** (Cv_max, opening, equal-percentage rangeability: ΔP from the flow, homogeneous mixture with a gas expansion factor and choking) | isenthalpic; critical-flow check from the gas Cp/Cv (ideal-gas critical ratio, flagged as an estimate for multiphase flow); hydrate margin just downstream of the choke |
 | Template / manifold | template (slots, header ID, length, fittings K from the catalogue) | more wells than slots is an error; mixes at the lowest slot pressure (the spread tells you how much the tree chokes must balance), then header friction + fittings loss |
 | Jumper / spool / PLET / PLEM | component, length, ID, bends (−1 = catalogue), roughness | short Beggs & Brill pipe + K·ρv²/2 for bends and valves |
 | Flowline | design preset (bare steel, wet insulation, pipe-in-pipe, flexible, bundle, buried, DEH-ready), length, ID, elevation, seabed T, **heating system** (none, direct electrical heating, heat-traced pipe-in-pipe, hot-water bundle) with a **fixed W/m** or **hold a minimum fluid temperature** (with a maximum W/m) | pipe model with the preset's U and roughness (0 = use the catalogue); heating adds heat along the line — in hold mode only where the fluid would fall below the set temperature, capped at the installed W/m (warned when the cap binds). Reports heat into the fluid, heated length, peak W/m and the electrical power (heat ÷ system efficiency) or the topside heater duty for a hot-water bundle |
 | Riser | type (vertical, SCR, lazy-wave, free-hanging flexible, hybrid tower), water depth, ID | geometry built from the water depth and the catalogue length factor: catenaries as a two-section profile, lazy-wave as up → hog bend → sag bend → up. **Riser-base slugging screen** (Bøe 1981): stratified flow at the riser base with a downhill flowline and u_sg0 < ρ_l g α L u_sl / P0 is flagged |
 | SSIV / HIPPS | valve, open/closed, open ΔP, optional HIPPS trip pressure | isenthalpic ΔP; closed or tripped gives no flow downstream (a trip is a warning) |
 | Subsea booster / subsea pump / subsea compressor | type (helico-axial multiphase pump, hybrid pump, wet-gas compressor, single-phase pump), boost ΔP, outlet P or **performance curve** + speed; machines in parallel / series; efficiency (0 = catalogue or curve) | isentropic compression of the whole mixture (PS flash) ÷ efficiency; shaft and electrical power (motor efficiency), hydraulic power, inlet gas volume fraction checked against the machine's GVF window, boost against its maximum per machine and power against its rating |
+| Water injection well | injectivity index, reservoir P and T, identical wells, tubing | water flows down the tubing from the wellhead (hydrostatic gain, friction, heat to the formation); required bottomhole P = P_res + q/II and the injection margin; a warning when the wellhead pressure is too low. Its outlet carries the injected water (connect a product) |
 | Subsea separator | type (vertical gas-liquid, horizontal liquid-liquid, inline pipe separator), ΔP, liquid residence time, design pressure | flash at the outlet pressure; gas-liquid types send all liquid to the oil outlet, the liquid-liquid separator removes the free water (for reinjection). Sizing: Souders-Brown gas diameter, liquid volume for the residence time (horizontal L/D 4, inline L/D 20), ASME wall thickness and weight; thick walls (> 150 mm) are flagged |
 | Subsea cooler | outlet T, approach to the sea temperature, or cooler area; U, sea T, ΔP | passive seawater cooler: duty to the sea (costs no utility), required area from the LMTD, hydrate check at the outlet |
 | Pressure intensifier | area ratio or outlet pressure; hydraulic supply pressure; efficiency | hydraulic piston booster for chemical injection: P_out = P_hyd · ratio · η, work V·ΔP/η, hydraulic-fluid return flow |
@@ -61,7 +62,7 @@ line). The **🌊 Subsea (SURF)** tab summarises the wells (Pwf, drawdown, wellh
 and the subsea equipment, draws a **pressure budget** from the reservoir to the arrival for any well, and holds
 the catalogue.
 
-The SURF tab is split into ten views:
+The SURF tab is split into eleven views:
 
 * **System** — wells, subsea equipment, pressure budget and riser geometry.
 * **Equipment & CAPEX** — every subsea item with quantity and cost, rolled up into a class 5 estimate:
@@ -96,6 +97,11 @@ The SURF tab is split into ten views:
   temperature, τ = C′/(U·πD), with C′ the heat stored per metre in the contents (in-situ holdup), the steel wall
   and part of the insulation (basis editable). The no-touch time is how long until the fluid reaches the hydrate
   temperature at the shut-in (settle-out) pressure — the time available before depressurising or inhibiting.
+  *U after shut-in*: the flowing U (conservative) or natural convection (1/U = 1/U_flowing − 1/h_forced + 1/h_natural,
+  h_forced from Dittus-Boelter, h_natural 10–60 W/m²K). **Depressurisation**: the hydrate pressure at the seabed
+  temperature (selected hydrate model, inhibitor depression applied), the isothermal blowdown time of the gas
+  inventory through a vent to below it (per line and for the whole system), and the low-point pressure the liquid
+  left in the line keeps — when that is above the hydrate pressure, depressurisation alone cannot protect the line.
 * **Heated lines** — every heated flowline: set temperature (hydrate T at settle-out or wax appearance T, plus a
   margin), heat and power while flowing, power to **hold** the shut-in line (U·πD·(T_set − T_sea) per metre)
   and whether the installed heating can, the **heat-up time** from sea temperature at the installed power, the
@@ -103,7 +109,21 @@ The SURF tab is split into ten views:
   only through shutdowns). The chart overlays the heated and unheated temperature profiles and the heat input
   along the line. Electrical heating is charged as power and a hot-water bundle as topside heating in the
   economics; CAPEX adds the heating system per heated km.
+* **Wax & sand** — the wax appearance temperature (lab value, or estimated with a multi-solid ideal model on Won's
+  n-paraffin melting points and heats of fusion, counting a share of each heavy cut as n-paraffin) and the wax
+  deposit growth along each line by molecular diffusion where the wall is colder than the WAT (Wilke-Chang
+  diffusivity, linear solubility below the WAT, deposit porosity; heating delivered at the wall is subtracted; no shear
+  removal or deposit insulation, so an upper bound) with the pigging interval; sand erosion of a bend
+  at each line's highest mixture velocity with DNV-RP-O501 (smooth bend, particle-size factor 1), the years to use
+  the erosion allowance and the velocity that erodes 0.1 mm/y.
 * **Catalogue** — view, download, upload or reset.
+
+**Seabed route.** A flowline's *Route* tab takes distance [km] / water depth [m] points (or a CSV): the line is
+marched section by section along the seabed, its length becomes the route length, and the low points where liquid
+collects are counted. **Power.** The subsea cable carries the boosters and the electrical heating; above 6.6 kV a
+subsea step-down transformer is added (CAPEX allowance). *Power supply* compares power from shore with local gas
+turbines for the flowsheet's power demand: CAPEX, energy and CO₂ cost, the discounted cost over a period and the CO₂
+abatement cost of power from shore.
 
 **Catalogue.** The built-in catalogue holds *generic, illustrative* values only (no vendor or company data).
 Download it as CSV, edit it or write your own with the same columns, and upload it on the SURF tab: the
@@ -126,6 +146,74 @@ and reinjected subsea, a multiphase pump for oil and gas) show the workflow.
   outlet-pressure spec reports the speed to meet it; the *Performance curve* spec lets curve and speed set the
   boost. Machines in parallel split the flow, machines in series share the boost; power, rating and the maximum
   boost are checked per machine.
+
+### Field life: production profile, recovery factor, wells and boosting
+
+**📅 Field life** marches the solved flowsheet through the life of the field and answers the concept questions:
+how long the plateau lasts, what recovery factor the development reaches, how many wells to drill, and when (or
+whether) to install subsea boosting.
+
+* **Reservoir** — one compositional tank on the Peng-Robinson EOS for all the wells: the pressure solves
+  *n·v(p, z) + (W_e + W_inj − W_p)·B_w = HCPV_i·(1 − c_e (p_i − p))*, with c_e = (c_f + c_w S_wc)/(1 − S_wc). A pot
+  aquifer adds *W_e = W_aq (c_w + c_f)(p_i − p)*; oil fields can inject water at a voidage-replacement ratio. Below the
+  dew or bubble point the tank produces the mobility-weighted mix of its vapour and liquid (Corey relative
+  permeabilities with critical saturations), so condensate drops out and the CGR falls, or free gas raises the GOR.
+  In place: GIIP (separator gas) or STOIIP; the default is an automatic estimate — enter your own.
+* **Water** — the water cut (oil) or water-gas ratio (gas) rises from its current value after breakthrough at a
+  recovery factor you set, to a maximum over a recovery interval.
+* **Deliverability** — the flowsheet itself, solved with every Xmas-tree choke fully open, wells on their feed
+  rate and the well feeds at the tank pressure (each well keeps its share of the initial pressure). The deliverable
+  rate is the largest scale on the hydrocarbon rate of all well feeds at which every unit solves, the delivery stream
+  arrives above the **minimum delivery pressure** and boosters stay within their rating. These points are solved only
+  where the run needs them (a grid of reservoir-pressure ratio × water cut) and interpolated.
+* **Constraints** — plateau (facility) rate, minimum delivery pressure, water and liquid handling capacity, booster
+  rating; the binding one is reported every year.
+* **Wells** — well units carry *Identical wells* (parallel wells with the same inflow and tubing); a well count is
+  spread over the well units. A drilling rate ramps the wells in (deliverability scaled with the wells online).
+* **Boosting** — as in the flowsheet, never (bypassed), from a given year, or automatically in the step where the
+  plateau would otherwise fall off. Booster units have a *Status: Online / Bypassed* switch for the same purpose.
+* **Economics** — revenue at the gas and oil prices, CAPEX from the SURF equipment list (wells and trees scale with
+  the well count; extra templates when the wells exceed the slots; boosting paid the year before it starts when
+  timed), fixed OPEX as % of CAPEX plus the energy and CO₂ cost of each year from the Analysis economics (and the
+  water-injection pumping power), NPV (mid-year discounting to first production), IRR, payback, unit cost. Production
+  stops at the **economic limit** (operating cash flow negative), where the recovery factor is reported.
+
+**Well count and boosting** runs the field life for several well counts (and boosting options) — in parallel on
+machines with several cores — and recommends the case with the highest NPV; **Apply** writes that well count into
+the flowsheet with the feed rates set to the plateau. Results are stored with the flowsheet and printed in the
+report. Screening only: one tank, lift tables with the initial reservoir fluid (GOR / CGR changes alter the volumes,
+not the hydraulics), quarterly steps, illustrative prices.
+
+### Process additions (v6.3)
+
+* **TEG dehydration contactor** (*Separation* palette): inlet scrubber + N theoretical stages of lean triethylene
+  glycol. Equilibrium water over the lean glycol from its purity (water activity, γ = 1.0 — within ~3 K of the GPSA
+  equilibrium dew-point chart), Kremser absorption with the circulation rate (L TEG per kg water), the water dew point
+  of the dried gas from the EOS, rich-glycol purity and the regenerator reboiler duty (charged as heating). An
+  optional dew-point specification warns when missed. Example: *Gas dehydration: TEG contactor*.
+* **Traced phase envelope**: the stream *Phase envelope* tab adds traced bubble and dew points (bisection on the
+  phase count) with the **cricondenbar** (refined by bisection on pressure) and **cricondentherm**.
+* **Column free water**: *Free water* = decant from the feeds (feed knock-out) or also from the condenser (reflux-drum
+  water boot) to the column's optional *water* outlet; the stage model stays VLE-only.
+* **↶ Undo edit** (sidebar) reverses the last change made in a property view (the canvas keeps Ctrl+Z).
+* **Validation against your own cases**: `tests/validate_against.py` compares any results with a private CSV of
+  reference values (see `docs/VALIDATION.md`), so company or field data never enter the repository.
+
+### Hydrate model (v6)
+
+The **Fluid package** tab selects the hydrate model for the whole flowsheet: the Motiee (1991) gas-gravity
+correlation (default) or **van der Waals–Platteeuw**: sI and sII hydrates, Langmuir constants from Kihara cell
+potentials, guest fugacities from the Peng-Robinson EOS, reference properties of Dharmawardhana et al. (1980). The
+Kihara σ and ε/k were fitted to pure-gas equilibria (CH₄, C₂H₆, C₃H₈, CO₂, i-C₄H₁₀, N₂, H₂S; rms ≤ 0.3 K); a 0.6-gravity
+natural gas lands within 1 K of the Katz chart. It responds to composition (CO₂, H₂S, N₂, propane switching the gas to
+structure II) where a gravity correlation cannot. MEG and methanol are applied as a temperature depression in both.
+
+### Solver speed (v6)
+
+Two-phase results in systems that can form three phases (gas + free water) now seed the next flash, successive
+substitution is accelerated (GDEM, Michelsen) while every phase is established, the three-phase Rachford–Rice runs
+on scalar arithmetic, and PH/PS flashes start with a Newton step from the heat capacity: subsea examples solve
+2.5–3.5× faster than in v5.4 with identical converged results.
 
 ### Scenarios
 

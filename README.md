@@ -17,8 +17,9 @@ streamlit run app.py
 
 | Folder | Content |
 |---|---|
-| `procsim/` | Engine, no Streamlit dependency: component library, PR EOS + flashes (`thermo.py`), streams, unit operations, subsea equipment (`surf.py` + `data/surf_catalogue.csv`), subsea CAPEX / umbilical / tie-back screening (`subsea_design.py`), slugging / turndown / field layout (`subsea_ops.py`), flowsheet solver with recycles and adjusts, examples |
+| `procsim/` | Engine, no Streamlit dependency: component library, PR EOS + flashes (`thermo.py`), streams, unit operations, subsea equipment (`surf.py` + `data/surf_catalogue.csv`), subsea CAPEX / umbilical / tie-back screening (`subsea_design.py`), slugging / turndown / field layout (`subsea_ops.py`), field life — reservoir tank, deliverability, profiles, NPV, well count (`fieldlife.py`), flowsheet solver with recycles and adjusts, examples |
 | `pfd_canvas/` | Bidirectional Streamlit component — vanilla JavaScript + SVG, no build step (`frontend/pfd.js`) |
+| `fieldmap_canvas/` | Field-layout drawing component — vanilla JavaScript + SVG (`frontend/fieldmap.js`), fed by `procsim/fieldmap.py` |
 | `ui/` | Session/model sync, property views, fluid package manager, workbook, charts, help |
 | `tests/` | Verification suites — `python tests/run_all.py` |
 
@@ -50,6 +51,36 @@ view (power flowing and to hold at shut-in, heat-up time, annual energy). The pr
 gains a subsea section. Wells can solve their own rate for a wellhead pressure (with a deliverability
 curve); boosters take a performance curve and machines in parallel / series; a cool-down view gives the
 no-touch time after shutdown.
+
+**Field life (v6):** the production profile over the life of the field from the solved flowsheet — an EOS
+compositional tank (rock and water compressibility, pot aquifer, water injection, condensate drop-out and free-gas
+GOR rise through Corey relative permeabilities), deliverability from flowsheet solves with the chokes fully open
+against a minimum delivery pressure, plateau / water / liquid capacity and booster rating limits, water-cut rise
+after breakthrough, drilling ramp-up, boosting timing (fixed year or automatic when the plateau falls off), and
+the economics (CAPEX from the equipment list, OPEX, energy and CO₂ cost per year, NPV, IRR, payback, economic
+limit). It reports the drainage strategy, plateau length and recovery factor, compares well counts and boosting
+options (in parallel on several cores) and recommends the case with the highest NPV, which can be written back
+into the flowsheet. Well units carry *identical wells in parallel*; boosters can be *bypassed*.
+
+**v6.1–6.2 additions:** flow assurance — shut-in natural-convection U for cool-down, depressurisation below the
+hydrate pressure (blowdown time, liquid-head check), wax appearance temperature (Won multi-solid) and wax deposition
+with pigging interval, DNV-RP-O501 sand erosion of bends; subsea — gas lift in the well model, a water injection well
+unit, seabed-route flowlines with low points, choke opening (Cv) specification, subsea transformer and a power-from-
+shore vs gas-turbine comparison; new example *Gas lift and water injection (SURF)*.
+
+**v6.3 additions:** TEG dehydration contactor (water dew point, Kremser stages, reboiler duty), traced phase
+envelope with cricondenbar/cricondentherm, column free-water draw, undo for property edits, and a validation harness
+(`tests/validate_against.py`, `docs/VALIDATION.md`) for comparing with private reference cases.
+
+**v6.4 additions:** the SURF *Field layout* view is now a field-layout drawing (JavaScript/SVG component): host
+platform, templates with their well slots (producer, gas-lifted, injector, spare), satellites, PLEM, subsea stations
+and the DUTA, joined by colour-coded production, gas-lift, water-injection, chemical and power / DC-FO lines with
+their lengths, legend, north arrow, scale bar and title block. Drag structures, bend routes, rotate templates, hide
+services from the legend and export to SVG; edits are saved with the flowsheet and never re-solve. New example
+*Subsea hub (SURF)*: two templates, a satellite, a PLEM, gas lift and water injection.
+
+**Hydrate model (v6):** Motiee gas-gravity correlation or a van der Waals–Platteeuw model (sI/sII, Kihara potentials, PR
+fugacities, fitted to pure-gas data), selected on the Fluid package tab.
 
 **Scenarios:** save named cases of the flowsheet with their key results (production, power, CO₂, arrival
 conditions, CAPEX, no-touch time, slug surge) and compare them side by side, as differences to a base case,
@@ -87,7 +118,7 @@ with water reinjection and a multiphase pump on the oil and gas.
 
 ## Verification
 
-`python tests/run_all.py` runs every suite (about 975 checks). On GitHub the workflow `.github/workflows/tests.yml`
+`python tests/run_all.py` runs every suite (about 1,230 checks). On GitHub the workflow `.github/workflows/tests.yml`
 runs them on each push with the real Streamlit, Plotly, PyArrow, Chromium and Node on Python 3.12 and 3.14 (open the
 **Actions** tab of the repository to see the result; screenshots are attached to each run).
 
@@ -114,6 +145,12 @@ runs them on each push with the real Streamlit, Plotly, PyArrow, Chromium and No
   heat-up time from their formulas, annual energy), subsea separators (balances, Souders-Brown and wall
   thickness), cooler area / approach, intensifier pressure and work, CIMV pressure check and dosage, and the
   three new examples solving with closed balances.
+* **fieldlife** — the tank material balance against its definition (p/z ∝ moles for a gas; residuals of the volume
+  balance), compressibility, aquifer and voidage-replacement effects, the bubble / dew point, the produced
+  composition below it (immobile gas or condensate), water-cut rise, well distribution and IRR; full runs on the SURF
+  examples: plateau at the facility rate, pressure held by injection, recovery = cumulative / in place, NPV = sum of
+  discounted cash flows, the deliverability root (feasible at s*, not 6 % above), a lower delivery pressure lengthening
+  the plateau, more wells holding it longer, boosting recovering more than bypassed boosters.
 * **ui** — a headless run of the Streamlit app against stubs that validate widget arguments and Plotly property
   names (and forbid dual-axis charts), driving every property view, the analysis tab, case study and report.
 * **browser** — the PFD canvas in real headless Chromium (Playwright): every example drawn and fitted, palette

@@ -390,6 +390,133 @@ def subsea_separation():
     return m
 
 
+def gaslift_injection():
+    """Late-life oil wells on gas lift (lift gas from the host, injected at 2000 m) → template → 9 km flowline along a
+    hilly seabed route → SCR → arrival; raw seawater lifted by a subsea water-injection pump into two injectors for
+    pressure support."""
+    m = new_model()
+    m["fluid"]["components"] = list(dict.fromkeys(m["fluid"]["components"] + list(OIL_WC)))
+    tmp = add_unit(m, "template", 340, 120, "TMP-100 Template", {"template": "4-slot template"})
+    for k, (Pr, q, PI, glq) in enumerate([(185.0, 900.0, 60.0, 0.30), (180.0, 850.0, 55.0, 0.30)], start=1):
+        y = 20 + 170 * (k - 1)
+        f = add_unit(m, "feed", -300, y, f"Reservoir P-{k}", {"T_C": 75.0, "P_bar": Pr, "flow_basis": "kmol/h",
+                                                              "flow": q, "composition": dict(OIL_WC)})
+        lg = add_unit(m, "feed", -300, y + 80, f"Lift gas P-{k}", {"T_C": 6.0, "P_bar": 150.0, "flow_basis": "MSm³/d",
+                                                                   "flow": glq, "composition": {"C1": 0.93, "C2": 0.05, "C3": 0.02}})
+        w = add_unit(m, "well", -120, y, f"P-{k}", {"ipr": "Productivity index (liquid)", "PI": PI, "MD": 3000.0,
+                                                    "TVD": 2700.0, "ID": 125.0, "gl_depth": 2000.0})
+        xt = add_unit(m, "xmas_tree", 60, y, f"XT-{k}", {"tree": "Vertical Xmas tree (VXT)", "spec": "Choke fully open"})
+        connect(m, f, "out", w, "in")
+        connect(m, lg, "out", w, "lift", f"Lift gas to P-{k}")
+        connect(m, w, "out", xt, "in", f"P-{k} wellhead")
+        connect(m, xt, "out", tmp, "in", f"XT-{k} outlet")
+    fl = add_unit(m, "flowline", 560, 110, "FL-100 Flowline", {"design": "Wet insulation (multilayer PP)", "length": 9000.0,
+                                                                 "ID": 254.0, "n_seg": 12,
+                                                                 "route": [[0.0, 310.0], [2.0, 335.0], [4.0, 300.0],
+                                                                           [6.5, 325.0], [9.0, 290.0]]})
+    rs = add_unit(m, "riser", 740, 40, "RSR-100 Riser", {"rtype": "Steel catenary riser (SCR)", "depth": 290.0,
+                                                         "ID": 254.0, "fl_len": 9000.0, "fl_incl": 0.2, "n_seg": 8})
+    ar = add_unit(m, "separator3", 920, -10, "V-100 Arrival sep")
+    gas = add_unit(m, "product", 1100, -90, "Gas")
+    oil = add_unit(m, "product", 1110, 70, "Oil")
+    wat = add_unit(m, "product", 980, 140, "Produced water")
+    connect(m, tmp, "out", fl, "in", "Template outlet")
+    connect(m, fl, "out", rs, "in", "Riser base")
+    connect(m, rs, "out", ar, "feed", "Topside arrival")
+    connect(m, ar, "vapour", gas, "in")
+    connect(m, ar, "oil", oil, "in")
+    connect(m, ar, "water", wat, "in")
+    sw = add_unit(m, "feed", 260, 430, "Raw seawater", {"T_C": 6.0, "P_bar": 30.0, "flow_basis": "kg/h", "flow": 70000.0,
+                                                        "composition": {"H2O": 1.0}})
+    wip = add_unit(m, "subsea_pump", 470, 430, "P-200 Water injection pump", {"btype": "Water injection pump",
+                                                                             "spec": "Outlet pressure", "P_out": 80.0})
+    iw = add_unit(m, "injection_well", 680, 410, "IW-1 Water injectors", {"II": 25.0, "P_res": 290.0, "T_res": 75.0,
+                                                                          "n_par": 2, "MD": 3000.0, "TVD": 2700.0})
+    inj = add_unit(m, "product", 880, 470, "Water into the reservoir")
+    connect(m, sw, "out", wip, "in", "Seawater intake")
+    connect(m, wip, "out", iw, "in", "Injection water")
+    connect(m, iw, "out", inj, "in", "Injected water")
+    return m
+
+
+def teg_dehydration():
+    """Wet gas → inlet scrubber + TEG contactor (99.7 wt% lean glycol, 3 theoretical stages) → dry gas to export
+    with a −10 °C water dew point specification; removed water to the produced-water system."""
+    m = new_model(list(WET_GAS))
+    f = add_unit(m, "feed", 0, 60, "Wet gas", {"T_C": 30.0, "P_bar": 70.0, "flow_basis": "MSm³/d", "flow": 5.0,
+                                               "composition": dict(WET_GAS)})
+    t = add_unit(m, "teg_contactor", 220, 60, "T-100 TEG contactor", {"teg_wt": 99.7, "circ": 25.0, "stages": 3.0,
+                                                                      "dew_spec": -10.0})
+    d = add_unit(m, "product", 420, -20, "Export gas")
+    w = add_unit(m, "product", 420, 160, "Water and condensate to treatment")
+    connect(m, f, "out", t, "feed")
+    connect(m, t, "dry", d, "in", "Dry gas")
+    connect(m, t, "water", w, "in", "Removed liquids")
+    return m
+
+
+def multi_template_hub():
+    """A small subsea hub laid out like a field-layout drawing: a 6-slot central template (three oil wells, one of
+    them a 3 km satellite tied into a free slot), a 4-slot north template with two gas-lifted wells daisy-chained
+    into it over 4 km, a PLEM and a 7.3 km flowline to the host, and a subsea seawater pump feeding two water
+    injectors. Generic illustrative data."""
+    m = new_model()
+    m["fluid"]["components"] = list(dict.fromkeys(m["fluid"]["components"] + list(OIL_WC)))
+    ta = add_unit(m, "template", 520, 140, "TMP-A Central", {"template": "6-slot template"})
+    tb = add_unit(m, "template", 240, 520, "TMP-B North", {"template": "4-slot template"})
+
+    def oil_well(tag, x, y, Pr, q, PI, tmpl, lift=None):
+        f = add_unit(m, "feed", x - 360, y, f"Reservoir {tag}", {"T_C": 80.0, "P_bar": Pr, "flow_basis": "kmol/h",
+                                                                 "flow": q, "composition": dict(OIL_WC)})
+        w = add_unit(m, "well", x - 180, y, tag, {"ipr": "Productivity index (liquid)", "PI": PI, "MD": 3100.0,
+                                                  "TVD": 2800.0, "ID": 125.0, **({"gl_depth": 2000.0} if lift else {})})
+        xt = add_unit(m, "xmas_tree", x, y, f"XT-{tag}", {"tree": "Vertical Xmas tree (VXT)", "spec": "Choke fully open"})
+        connect(m, f, "out", w, "in")
+        if lift:
+            lg = add_unit(m, "feed", x - 360, y + 70, f"Lift gas {tag}", {"T_C": 6.0, "P_bar": 150.0, "flow_basis": "MSm³/d",
+                                                                          "flow": lift, "composition": {"C1": 0.93, "C2": 0.05, "C3": 0.02}})
+            connect(m, lg, "out", w, "lift", f"Lift gas to {tag}")
+        connect(m, w, "out", xt, "in", f"{tag} wellhead")
+        return xt
+
+    for k, (Pr, q, PI) in enumerate([(230.0, 1000.0, 60.0), (225.0, 950.0, 55.0)]):
+        xt = oil_well(f"A-{k + 1}", 300, 20 + 130 * k, Pr, q, PI, ta)
+        connect(m, xt, "out", ta, "in", f"XT-A-{k + 1} outlet")
+    xs = oil_well("S-1", 300, 300, 235.0, 800.0, 50.0, ta)
+    fs = add_unit(m, "flowline", 420, 300, "FL-300 Satellite line", {"design": "Wet insulation (multilayer PP)",
+                                                                     "length": 3000.0, "ID": 152.0, "n_seg": 6})
+    connect(m, xs, "out", fs, "in", "S-1 outlet")
+    connect(m, fs, "out", ta, "in", "Satellite S-1")
+    for k, (Pr, q, PI) in enumerate([(205.0, 850.0, 55.0), (200.0, 800.0, 50.0)]):
+        xt = oil_well(f"B-{k + 1}", 20, 470 + 130 * k, Pr, q, PI, tb, lift=0.25)
+        connect(m, xt, "out", tb, "in", f"XT-B-{k + 1} outlet")
+    fb = add_unit(m, "flowline", 380, 520, "FL-200 North line", {"design": "Wet insulation (multilayer PP)",
+                                                                 "length": 4000.0, "ID": 203.0, "n_seg": 6})
+    connect(m, tb, "out", fb, "in", "TMP-B outlet")
+    connect(m, fb, "out", ta, "in", "North template")
+    pl = add_unit(m, "jumper", 700, 140, "PLEM-100", {"kind": "PLEM", "ID": 305.0})
+    fl = add_unit(m, "flowline", 880, 140, "FL-100 Flowline", {"design": "Wet insulation (multilayer PP)", "length": 7300.0,
+                                                               "ID": 305.0, "n_seg": 10})
+    rs = add_unit(m, "riser", 1060, 80, "RSR-100 Riser", {"rtype": "Steel catenary riser (SCR)", "depth": 300.0,
+                                                          "ID": 305.0, "fl_len": 7300.0, "n_seg": 8})
+    ar = add_unit(m, "separator3", 1240, 40, "Host platform")
+    connect(m, ta, "out", pl, "in", "TMP-A outlet")
+    connect(m, pl, "out", fl, "in", "PLEM outlet")
+    connect(m, fl, "out", rs, "in", "Riser base")
+    connect(m, rs, "out", ar, "feed", "Topside arrival")
+    for port, nm, y in (("vapour", "Gas", -40), ("oil", "Oil", 100), ("water", "Produced water", 180)):
+        connect(m, ar, port, add_unit(m, "product", 1420, y, nm), "in")
+    sw = add_unit(m, "feed", 540, 700, "Raw seawater", {"T_C": 6.0, "P_bar": 30.0, "flow_basis": "kg/h", "flow": 90000.0,
+                                                        "composition": {"H2O": 1.0}})
+    wp = add_unit(m, "subsea_pump", 740, 700, "P-300 Water injection pump", {"btype": "Water injection pump",
+                                                                            "spec": "Outlet pressure", "P_out": 90.0})
+    iw = add_unit(m, "injection_well", 940, 690, "WI-1 Water injectors", {"II": 25.0, "P_res": 300.0, "T_res": 80.0,
+                                                                          "n_par": 2, "MD": 3100.0, "TVD": 2800.0})
+    connect(m, sw, "out", wp, "in", "Seawater intake")
+    connect(m, wp, "out", iw, "in", "Injection water")
+    connect(m, iw, "out", add_unit(m, "product", 1120, 740, "Water into the reservoir"), "in", "Injected water")
+    return m
+
 
 EXAMPLES = {
     "Two-stage gas compression with liquid recycle": compression_train,
@@ -402,4 +529,7 @@ EXAMPLES = {
     "Heated flowline (SURF): DEH oil tie-back with methanol injection and an intensifier": heated_oil_tieback,
     "Subsea compression station (SURF): cooler, separator, compressor and pump": subsea_compression,
     "Subsea separation (SURF): water removal and reinjection, multiphase pump": subsea_separation,
+    "Gas lift and water injection (SURF): lifted oil wells, hilly route, seawater injectors": gaslift_injection,
+    "Subsea hub (SURF): two templates, a satellite, PLEM, gas lift and water injection": multi_template_hub,
+    "Gas dehydration: TEG contactor with a water dew-point specification": teg_dehydration,
 }

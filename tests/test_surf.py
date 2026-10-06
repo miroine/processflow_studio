@@ -54,7 +54,10 @@ def balances(m, sol, label):
         pe = 0.0
         if u["type"] in PROFILE_TYPES:
             dz = sol.results[uid].get("Elevation change [m]", u["params"].get("dz", 0.0))
-            pe = sum(x.F * x.MW for x in ins if not x.empty) * G * dz / 1000.0 / 3600.0
+            ins_pe = ins
+            if u["type"] == "well":            # lift gas enters and leaves at the wellhead: no net potential energy
+                ins_pe = [sol.streams[s] for s in port_edges(m, uid, "in").get("in", [])]
+            pe = sum(x.F * x.MW for x in ins_pe if not x.empty) * G * dz / 1000.0 / 3600.0
         if u["type"] == "separator3":
             continue
         we = max(we, abs(hin + en.get(u["name"], 0.0) - pe - hout) / max(abs(hin), abs(hout), 1.0))
@@ -896,5 +899,144 @@ for first in ("procsim.surf", "procsim.unitops", "ui.surf"):
                          "from procsim.unitops import CATALOGUE, CALC; assert 'riser' in CATALOGUE and 'riser' in CALC"],
                         cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."), capture_output=True, text=True)
     c.check(f"SURF units register whichever module is imported first ({first})", r_.returncode == 0, r_.stderr[-300:])
+
+# ---- v6: identical wells in parallel, booster bypass -------------------------------------------------------------
+import copy as _copy   # noqa: E402
+m = subsea_field()
+s1 = solve(m)
+w1 = next(u for u, x in m["units"].items() if x["name"] == "W-1")
+fid = m["streams"][port_edges(m, w1, "in")["in"][0]]["src"][0]
+m2 = _copy.deepcopy(m)
+m2["units"][w1]["params"]["n_par"] = 3
+m2["units"][fid]["params"]["flow"] = m["units"][fid]["params"]["flow"] * 3
+s2 = solve(m2)
+r1, r2 = s1.results[w1], s2.results[w1]
+c.close("3 identical wells at 3× the rate: same wellhead pressure", r2["Wellhead P [bar(a)]"], r1["Wellhead P [bar(a)]"], 1e-9)
+c.close("3 identical wells: same bottomhole pressure", r2["Bottomhole flowing P [bar(a)]"], r1["Bottomhole flowing P [bar(a)]"], 1e-9)
+c.close("3 identical wells: 3× the gas rate", r2["Gas rate [MSm³/d]"], 3 * r1["Gas rate [MSm³/d]"], 1e-9)
+c.close("3 identical wells: per-well rate reported", r2["Gas rate per well [MSm³/d]"], r1["Gas rate [MSm³/d]"], 1e-9)
+balances(m2, s2, "field with a 3-well cluster")
+items2 = {i["Item"]: i["Qty"] for i in sd.equipment_list(m2, s2)[0]}
+c.eq("equipment list: 3 wells and 3 trees for the cluster", (items2["W-1"], items2["XT-1"]), (3, 3))
+mb = subsea_field_boosted()
+bu = next(u for u, x in mb["units"].items() if x["type"] in surf.BOOSTER_TYPES)
+mb["units"][bu]["params"]["online"] = surf.BYPASSED
+sbp = solve(mb)
+rb = sbp.results[bu]
+sin = sbp.streams[port_edges(mb, bu, "in")["in"][0]]
+sout = sbp.streams[port_edges(mb, bu, "out")["out"][0]]
+c.check("bypassed booster: status reported", rb["Status"].startswith("Bypassed"), rb.get("Status"))
+c.close("bypassed booster: no power", rb["Electrical power [kW]"], 0.0, 0.0)
+c.close("bypassed booster: outlet P = inlet P", sout.P, sin.P, 1e-12)
+c.close("bypassed booster: outlet T = inlet T", sout.T, sin.T, 1e-12)
+balances(mb, sbp, "boosted field, booster bypassed")
+
+# ---- v6: the hydrate model choice reaches every hydrate margin -----------------------------------------------------
+from procsim.transport import VDWP   # noqa: E402
+m = subsea_tieback()
+s_m = solve(m)
+m["fluid"]["hydrate_model"] = VDWP
+s_v = solve(m)
+fl_ = next(u for u, x in m["units"].items() if x["type"] in ("flowline", "pipe"))
+hm_m, hm_v = s_m.results[fl_].get("Min. hydrate margin along line [°C]"), s_v.results[fl_].get("Min. hydrate margin along line [°C]")
+c.check("vdW-P hydrate model: the line margin is computed", hm_v is not None, "")
+c.check("vdW-P vs Motiee line margin within 3 K", hm_m is not None and abs(hm_v - hm_m) < 3.0, f"{hm_m} vs {hm_v}")
+c.check("the hydrate model changes the result (not ignored)", hm_v != hm_m, "")
+balances(m, s_v, "MEG tie-back with the vdW-P hydrate model")
+cd_v = so.cooldown(m, s_v)
+c.check("cool-down uses the selected hydrate model", bool(cd_v) and all(r["No-touch time [h]"] >= 0 for r in cd_v), "")
+
+# ---- v6.2: gas lift, injection well, seabed route --------------------------------------------------------------
+from procsim.examples import gaslift_injection   # noqa: E402
+m = gaslift_injection()
+s1 = solve(m)
+c.check("gas-lift / injection example solves", all(v in ("ok", "warning") for v in s1.status.values()),
+        str({m["units"][k]["name"]: s1.errors.get(k) for k, v in s1.status.items() if v not in ("ok", "warning")}))
+balances(m, s1, "gas lift + injection example")
+p1 = next(u for u, x in m["units"].items() if x["name"] == "P-1")
+r = s1.results[p1]
+c.check("lift gas enters above the tubing pressure at the valve", r["Lift gas at the valve [bar(a)]"] > r["Tubing P at the valve [bar(a)]"], "")
+m0 = _copy.deepcopy(m)
+for x in m0["units"].values():
+    if x["name"].startswith("Lift gas"):
+        x["params"]["flow"] = 0.0
+s0 = solve(m0)
+c.check("gas lift raises the wellhead pressure (lighter column)", r["Wellhead P [bar(a)]"] > s0.results[p1]["Wellhead P [bar(a)]"] + 5.0,
+        f"{r['Wellhead P [bar(a)]']:.1f} vs {s0.results[p1]['Wellhead P [bar(a)]']:.1f}")
+c.close("without lift gas the well is the plain tubing model", s0.results[p1]["Bottomhole flowing P [bar(a)]"],
+        r["Bottomhole flowing P [bar(a)]"], 1e-9)
+out = s1.streams[port_edges(m, p1, "out")["out"][0]]
+lin = s1.streams[port_edges(m, p1, "in")["lift"][0]]
+rin = s1.streams[port_edges(m, p1, "in")["in"][0]]
+c.close("well outlet = reservoir + lift gas (moles)", out.F, rin.F + lin.F, 1e-9)
+m_lo = _copy.deepcopy(m)
+lg = next(x for x in m_lo["units"].values() if x["name"] == "Lift gas P-1")
+lg["params"]["P_bar"] = 40.0
+s_lo = solve(m_lo)
+c.check("lift gas below the tubing pressure at the valve is an error", s_lo.status[p1] == "error", s_lo.errors.get(p1))
+iw = next(u for u, x in m["units"].items() if x["type"] == "injection_well")
+ri = s1.results[iw]
+c.close("injector: required BHP = P_res + q / II", ri["Required bottomhole P [bar(a)]"],
+        290.0 + ri["Injection rate per well [Sm³/d]"] / 25.0, 1e-9)
+c.close("injector: margin = BHP − required", ri["Injection margin [bar]"],
+        ri["Bottomhole P [bar(a)]"] - ri["Required bottomhole P [bar(a)]"], 1e-9)
+c.check("injector: water gains ~ρgh down the tubing", 240.0 < ri["Hydrostatic + friction gain [bar]"] < 270.0,
+        f"{ri['Hydrostatic + friction gain [bar]']:.1f}")
+m_w = _copy.deepcopy(m)
+next(x for x in m_w["units"].values() if x["type"] == "subsea_pump")["params"]["P_out"] = 40.0
+s_w = solve(m_w)
+c.check("injector: too low a wellhead pressure gives a warning", "too low" in (s_w.results[iw].get("Warning") or ""), "")
+flu = next(u for u, x in m["units"].items() if x["type"] == "flowline")
+c.eq("route: low points counted", s1.results[flu]["Low points along the route"], 2)
+c.close("route: length = sum of the section lengths", s1.results[flu]["Route length [m]"],
+        sum(ln for ln, _ in surf.route_sections(m["units"][flu]["params"])), 1e-9)
+c.close("route: elevation change = start depth − end depth", s1.results[flu]["Elevation change [m]"], 310.0 - 290.0, 1e-9)
+c.eq("route: low points (deepest first)", surf.route_low_points(m["units"][flu]["params"]), [335.0, 325.0])
+c.close("route length used by CAPEX", sd.line_lengths_km(m, s1)[0], s1.results[flu]["Route length [m]"] / 1000.0, 1e-12)
+mf = subsea_field()
+sf_ = solve(mf)
+fl0 = next(u for u, x in mf["units"].items() if x["type"] == "flowline")
+pf = mf["units"][fl0]["params"]
+L, dz = pf["length"] / 1000.0, pf.get("dz", 0.0)
+mf2 = _copy.deepcopy(mf)
+mf2["units"][fl0]["params"]["route"] = [[0.0, 400.0], [math.sqrt((L * 1000) ** 2 - dz ** 2) / 1000.0, 400.0 - dz]]
+sf2 = solve(mf2)
+c.close("a straight two-point route reproduces the flowline", sf2.results[fl0]["Outlet P [bar(a)]"],
+        sf_.results[fl0]["Outlet P [bar(a)]"], 1e-6)
+
+# ---- v6.2: choke Cv, power system --------------------------------------------------------------------------------
+mc = subsea_field()
+for x in mc["units"].values():
+    if x["type"] == "xmas_tree":
+        x["params"].update({"spec": surf.CHOKE_CV, "Cv_max": 120.0, "opening": 70.0, "rangeability": 50.0})
+sc_ = solve(mc)
+xt1 = next(u for u, x in mc["units"].items() if x["name"] == "XT-1")
+c.close("equal-percentage trim: Cv = Cv_max · R^(opening − 1)", sc_.results[xt1]["Choke Cv at this opening [US gpm/psi½]"],
+        120.0 * 50.0 ** (0.7 - 1.0), 1e-9)
+c.check("choke Cv spec gives a positive pressure drop", sc_.results[xt1]["Choke ΔP [bar]"] > 0.0, "")
+mc2 = _copy.deepcopy(mc)
+next(x for x in mc2["units"].values() if x["name"] == "XT-1")["params"]["opening"] = 50.0
+sc2 = solve(mc2)
+c.check("closing the choke raises its pressure drop", sc2.results[xt1]["Choke ΔP [bar]"] > sc_.results[xt1]["Choke ΔP [bar]"], "")
+sin = sc_.streams[port_edges(mc, xt1, "in")["in"][0]]
+dp_c, _ = surf.choke_dp(sin, sin.P - 2.0, 1e6)
+c.check("a huge Cv gives almost no pressure drop", dp_c < 0.01, f"{dp_c:.4f}")
+balances(mc, sc_, "field with Cv-specified chokes")
+mb2 = subsea_field_boosted()
+sb2 = solve(mb2)
+ud = sd.umbilical_design(mb2, sb2)
+c.check("22 kV transmission gets a subsea step-down transformer", ud["cable"]["Voltage [kV]"] > 6.6 and
+        ud["cable"].get("Subsea step-down transformer [MVA]", 0) > 0, str(ud["cable"]))
+c.check("transformer in the CAPEX list", any(i["Item"] == "Subsea transformer" for i in sd.equipment_list(mb2, sb2)[0]), "")
+ps = sd.power_supply_options(mb2, sb2)
+gt, pfs = ps["rows"]
+c.check("power from shore emits less CO₂ than gas turbines", pfs["CO₂ [kt/y]"] < gt["CO₂ [kt/y]"], "")
+ann = sum(1.0 / 1.08 ** (k + 0.5) for k in range(20))
+c.close("discounted cost = CAPEX + annuity × (energy + CO₂)", gt["Discounted cost over the period [MUSD]"],
+        gt["CAPEX [MUSD]"] + ann * (gt["Energy cost [MUSD/y]"] + gt["CO₂ cost [MUSD/y]"]), 1e-9)
+mh = heated_oil_tieback()
+sh = solve(mh)
+uh = sd.umbilical_design(mh, sh)
+c.check("electrical heating alone gets a power cable", uh["cable"] is not None and uh["cable"]["Load: electrical heating [kW]"] > 0, "")
 
 sys.exit(c.report())

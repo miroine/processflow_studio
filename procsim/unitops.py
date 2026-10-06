@@ -44,6 +44,8 @@ def _s(key, label, options, default, show_if=None, help=None):
             "show_if": show_if, "help": help}
 
 
+WD_NONE, WD_FEED, WD_BOTH = "Keep (VLE only)", "Decant from the feeds", "Decant from the feeds and the condenser"
+
 CATALOGUE = {
     "feed": {
         "label": "Material stream (feed)", "prefix": "Feed", "category": "Streams",
@@ -202,7 +204,8 @@ CATALOGUE = {
         "label": "Column (absorber / stabiliser / distillation)", "prefix": "T", "category": "Separation",
         "ports": {"in": {"feed_top": {"multi": False, "optional": True}, "feed": {"multi": True, "optional": True},
                          "feed_bottom": {"multi": False, "optional": True}},
-                  "out": {"overhead": {"multi": False}, "bottoms": {"multi": False}}},
+                  "out": {"overhead": {"multi": False}, "bottoms": {"multi": False},
+                          "water": {"multi": False, "optional": True}}},
         "params": [_f("n_trays", "Number of trays (theoretical)", "-", 10, minv=1, maxv=60),
                    _f("feed_stage", "Feed tray for the 'feed' port (from top)", "-", 5, minv=1, maxv=60),
                    _f("P_top", "Top pressure", "bar(a)", 10.0, minv=0.05),
@@ -215,7 +218,11 @@ CATALOGUE = {
                       "Reboiler temperature", {"reboiler": "Yes"}),
                    _f("reb_value", "Specification value", "kW | kmol/h | – | °C | kmol/h", 120.0, {"reboiler": "Yes"},
                       help="Units follow the chosen specification: duty kW, bottoms/distillate kmol/h, "
-                           "boil-up ratio V/B, reboiler temperature °C")],
+                           "boil-up ratio V/B, reboiler temperature °C"),
+                   _s("water_draw", "Free water", [WD_NONE, WD_FEED, WD_BOTH], WD_NONE,
+                      help="The stage model is VLE-only. Decant: free water in the feeds is drawn off before the column "
+                           "(feed knock-out) and, with a condenser, from the overhead (reflux-drum water boot) to the "
+                           "'water' outlet")],
     },
     "recycle": {
         "label": "Recycle", "prefix": "RCY", "category": "Logical",
@@ -1217,14 +1224,25 @@ def calc_column(unit, ins, fp):
     if not 1 <= fs <= n_trays:
         raise UnitError(f"{unit['name']}: feed tray must be between 1 and {n_trays}")
     stage_of = {"feed_top": c0, "feed": c0 + fs - 1, "feed_bottom": c0 + n_trays - 1}
+    wd = p.get("water_draw", WD_NONE)
+    water_parts = []                                   # (kmol/h, composition, J/mol) of decanted free water
     for port, lst in ins.items():
         for st_ in lst:
             if st_ is not None and not st_.empty:
-                feeds.append((stage_of[port], st_.F, st_.z, st_.H))
                 streams_in.append(st_)
+                F_, z_, H_ = st_.F, st_.z, st_.H
+                w = st_.flash.phase("W") if wd != WD_NONE else None
+                if w is not None and len(st_.flash.phases) > 1 and w.beta < 0.999999:
+                    Fw = st_.F * w.beta
+                    water_parts.append((Fw, w.x.copy(), w.H, st_.T, st_.P))
+                    F_ = st_.F - Fw
+                    z_ = (st_.F * st_.z - Fw * w.x) / F_
+                    H_ = (st_.F * st_.H - Fw * w.H) / F_
+                feeds.append((stage_of[port], F_, z_, H_))
     if not feeds:
         z0 = next((x.z for lst in ins.values() for x in lst if x is not None), None)
-        return {"overhead": [zero_stream("", fp, z0)], "bottoms": [zero_stream("", fp, z0)]}, {"Status": "No flow"}, []
+        return ({"overhead": [zero_stream("", fp, z0)], "bottoms": [zero_stream("", fp, z0)],
+                 "water": [zero_stream("", fp, z0)]}, {"Status": "No flow"}, [])
     if not cond and not reb and not ({"feed_top", "feed_bottom"} & {k for k, v in ins.items() if v}):
         raise UnitError(f"{unit['name']}: an absorber needs a top (liquid) and/or bottom (gas) feed")
     P_top, P_bot = float(p["P_top"]), float(p["P_bot"])
@@ -1250,12 +1268,27 @@ def calc_column(unit, ins, fp):
     zbot = bot / Fbot if Fbot > 1e-12 else None
     frt = fp.pt_flash(ztop, float(T[0]), float(col.P[0])) if ztop is not None else None
     frb = fp.pt_flash(zbot, float(T[-1]), float(col.P[-1])) if zbot is not None else None
+    if wd == WD_BOTH and cond and frt is not None and frt.phase("W") is not None and len(frt.phases) > 1:
+        wph = frt.phase("W")
+        Fw = Ftop * wph.beta
+        water_parts.append((Fw, wph.x.copy(), wph.H, float(T[0]), float(col.P[0])))
+        rest = Ftop * ztop - Fw * wph.x
+        Ftop = float(rest.sum())
+        ztop = rest / Ftop if Ftop > 1e-12 else None
+        frt = fp.pt_flash(ztop, float(T[0]), float(col.P[0])) if ztop is not None else None
     out_top = make_stream("", fp, Ftop, ztop, frt) if frt else zero_stream("", fp, None, T[0], col.P[0])
     out_bot = make_stream("", fp, Fbot, zbot, frb) if frb else zero_stream("", fp, None, T[-1], col.P[-1])
+    if water_parts:
+        Fw = sum(w[0] for w in water_parts)
+        zw = sum(w[0] * w[1] for w in water_parts) / Fw
+        Hw = sum(w[0] * w[2] for w in water_parts) / Fw
+        out_w = make_stream("", fp, Fw, zw, _ph(fp, zw, min(w[4] for w in water_parts), Hw, water_parts[0][3]))
+    else:
+        out_w = zero_stream("", fp, None, T[0], col.P[0])
     # duties from the converged stage model (rigorous PR at the stage states)
     Qc, Qr = col.duties(X)
     Hin = sum(x.F * x.H for x in streams_in) / 3600.0
-    Hout = (out_top.F * out_top.H + out_bot.F * out_bot.H) / 3600.0
+    Hout = (out_top.F * out_top.H + out_bot.F * out_bot.H + (out_w.F * out_w.H if not out_w.empty else 0.0)) / 3600.0
     imbalance = Hout - Hin - Qc - Qr
     res = {"Top T [°C]": T[0] - K0, "Bottom T [°C]": T[-1] - K0,
            "Overhead flow [kmol/h]": Ftop, "Bottoms flow [kmol/h]": Fbot,
@@ -1271,6 +1304,8 @@ def calc_column(unit, ins, fp):
         except Exception:
             pass
     res["Outer iterations"] = col.outer_iterations
+    if water_parts:
+        res["Free water drawn [kg/h]"] = out_w.F * out_w.MW
     free_w = [nm for nm, fr_ in (("overhead", frt), ("bottoms", frb))
               if fr_ is not None and fr_.phase("W") is not None and len(fr_.phases) > 1]
     if free_w:
@@ -1292,7 +1327,7 @@ def calc_column(unit, ins, fp):
         en.append(EnergyStream(f"Q-{unit['name']} cond", Qc, unit["name"], "heat"))
     if reb:
         en.append(EnergyStream(f"Q-{unit['name']} reb", Qr, unit["name"], "heat"))
-    return {"overhead": [out_top], "bottoms": [out_bot]}, res, en
+    return {"overhead": [out_top], "bottoms": [out_bot], "water": [out_w]}, res, en
 
 
 CALC = {
@@ -1305,5 +1340,6 @@ CALC = {
 
 
 # ---- subsea (SURF) equipment: procsim/surf.py registers itself on import ----
-PROFILE_TYPES = ("pipe", "well", "jumper", "flowline", "riser")     # units that leave a line profile
+PROFILE_TYPES = ("pipe", "well", "jumper", "flowline", "riser", "injection_well")     # units that leave a line profile
 from . import surf as _surf   # noqa: E402,F401  (needs the helpers above; works whichever module loads first)
+from . import dehydration as _dehy   # noqa: E402,F401  (TEG contactor registers itself)

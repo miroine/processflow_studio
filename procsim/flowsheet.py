@@ -56,6 +56,8 @@ def build_fluid(model) -> FluidPackage:
         if a in fp.keys and b in fp.keys:
             i, j = fp.index(a), fp.index(b)
             fp.kij[i, j] = fp.kij[j, i] = float(v)
+    if fl.get("hydrate_model"):
+        fp.hydrate_model = fl["hydrate_model"]
     return fp
 
 

@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from procsim.streams import stream_properties, hydrate_risk, hydrate_state
-from procsim.transport import (hydrate_T_motiee, gas_gravity_dry, required_inhibitor_wt, injection_rate,
+from procsim.transport import (hydrate_T_motiee, gas_gravity_dry, hydrate_T, MOTIEE, VDWP, required_inhibitor_wt, injection_rate,
                                aqueous_inhibitor_wt, hydrate_depression, INHIBITORS)
 
 from .state import sol_is_current, fmt, attention_items
@@ -94,11 +94,13 @@ def flow_assurance(model, sol):
     curves = []
     if gas_x is not None and fp.iw >= 0:
         sg = gas_gravity_dry(fp, gas_x)
-        Ps = np.linspace(5.0, min(max(Pmax * 1.2, 20.0), 280.0), 40)
-        Tu = np.array([hydrate_T_motiee(sg, p) if sg else None for p in Ps], dtype=float)
+        rig = getattr(fp, "hydrate_model", MOTIEE) == VDWP
+        Ps = np.linspace(5.0, min(max(Pmax * 1.2, 20.0), 400.0 if rig else 280.0), 40)
+        Tu = np.array([hydrate_T(fp, gas_x, p) for p in Ps], dtype=float)
         ok = np.isfinite(Tu)
         if ok.any():
-            curves.append((f"Hydrate curve, uninhibited (SG {sg:.3f})", Ps[ok], Tu[ok], True))
+            lab = "vdW-P" if rig else f"Motiee, SG {sg:.3f}"
+            curves.append((f"Hydrate curve, uninhibited ({lab})", Ps[ok], Tu[ok], True))
             dT = hydrate_depression(fp, inh_x) if inh_x is not None else 0.0
             if dT > 0.05:
                 wt = sum(aqueous_inhibitor_wt(fp, inh_x).values())
@@ -153,10 +155,10 @@ def dosing_calculator(model, sol, names, path):
                                            key=f"dose_margin_{U.system()[:2]}"), delta=True)
     s = sol.streams[names[sname]]
     v = s.flash.phase("V")
-    sg = gas_gravity_dry(fp, v.x)
-    t_h = hydrate_T_motiee(sg, s.P) if sg else None
+    t_h = hydrate_T(fp, v.x, s.P)
     if t_h is None:
-        st.warning("Outside the Motiee correlation range (3.5–280 bar, gas gravity 0.55–1.0).")
+        st.warning("Outside the hydrate model's range (Motiee: 3.5–280 bar, gas gravity 0.55–1.0; "
+                   "van der Waals–Platteeuw: 2–600 bar with hydrate formers in the gas).")
         return
     T = s.T - 273.15
     need = t_h + margin - T

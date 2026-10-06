@@ -57,7 +57,10 @@ def unit_balances(model, sol, label):
         if u["type"] in PROFILE_TYPES:
             # potential energy of the elevation change leaves the enthalpy balance
             dz = sol.results[uid].get("Elevation change [m]", u["params"].get("dz", 0.0))
-            pe = sum(x.F * x.MW for x in ins) * 9.80665 * dz / 1000.0 / 3600.0
+            ins_pe = ins
+            if u["type"] == "well":          # lift gas enters and leaves at the wellhead
+                ins_pe = [sol.streams[s_] for s_ in port_edges(model, uid, "in").get("in", [])]
+            pe = sum(x.F * x.MW for x in ins_pe) * 9.80665 * dz / 1000.0 / 3600.0
             err = abs(hin + q - pe - hout) / ref
         if u["type"] == "separator" or u["type"] == "separator3":
             err = abs(hin + u["params"].get("duty", 0.0) - hout) / ref

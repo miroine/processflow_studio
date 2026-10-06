@@ -128,6 +128,10 @@ def divider():
     pass
 
 
+def toast(body, icon=None, **kw):
+    HOOK["texts"].append(str(body))
+
+
 def metric(label, value, delta=None, **kw):
     _text(label, value)
 
@@ -331,6 +335,9 @@ class _Progress:
     def progress(self, value, text=None):
         if not (0.0 <= float(value) <= 1.0):
             raise ValueError("progress value must be in [0, 1]")
+
+    def empty(self):
+        pass
 
 
 def progress(value, text=None):

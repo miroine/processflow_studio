@@ -238,7 +238,74 @@ for seedT in (30.0, 36.8):
 c.check("warm-started flashes find the same phases as cold flashes near the dew point", ok, "")
 c.close("warm-started flashes match cold flashes (H + phase fractions)", worst, 0.0, 1e-6)
 c.check("a two-phase (V+W) result never carries a three-row seed with a vanished reference phase",
-        cold[36.8].Kset is None, str(None if cold[36.8].Kset is None else cold[36.8].Kset.shape))
+        cold[36.8].Kset is None or cold[36.8].Kset.shape == (1, fpw.n),
+        str(None if cold[36.8].Kset is None else cold[36.8].Kset.shape))
+
+# ---- v6 speed-ups: two-phase seeds in three-phase systems, GDEM, scalar 3-phase Rachford-Rice, Newton PH step ----
+from procsim import thermo as TH                                                     # noqa: E402
+c.eq("a V+W result carries a one-row (two-phase) warm-start seed", None if cold[36.8].Kset is None else cold[36.8].Kset.shape,
+     (1, fpw.n))
+worst = 0.0
+same = True
+for T in (36.9, 38.0, 45.0, 60.0):
+    ref = fpw.pt_flash(zw, T + 273.15, 143.0)
+    warm = fpw.pt_flash(zw, T + 273.15, 143.0, cold[36.8].Kset)
+    same = same and [p.kind for p in warm.phases] == [p.kind for p in ref.phases]
+    worst = max(worst, abs(warm.H - ref.H) + sum(abs(a.beta - b.beta) for a, b in zip(warm.phases, ref.phases)))
+c.check("two-phase seeds reproduce the cold flash (phases)", same, "")
+c.close("two-phase seeds reproduce the cold flash (H + fractions)", worst, 0.0, 1e-6)
+w30 = fpw.pt_flash(zw, 30.0 + 273.15, 143.0, cold[36.8].Kset)
+c.eq("a two-phase seed below the dew point still finds the third phase", [p.kind for p in w30.phases], ["V", "L", "W"])
+rng = np.random.default_rng(3)
+dev = 0.0
+for _ in range(25):
+    K = np.vstack([np.ones(fpw.n), np.exp(rng.normal(0, 2, fpw.n)), np.exp(rng.normal(-3, 3, fpw.n))])
+    b_new, _ = FluidPackage._rr3(zw, K)
+    TH_save = FluidPackage._rr3
+    FluidPackage._rr3 = staticmethod(lambda z, K_, b=None: None)
+    try:
+        # the generic path (n-phase Newton) as the reference
+        beta = np.full(3, 1.0 / 3.0)
+        for _i in range(200):
+            E = K.T @ beta
+            g = 1.0 - K @ (zw / E)
+            H = (K * (zw / E ** 2)) @ K.T + np.eye(3) * 1e-14
+            free = (beta > 0) | (g < 0)
+            if np.all(np.abs(g[free]) < 1e-13):
+                break
+            d = np.zeros(3)
+            f = np.nonzero(free)[0]
+            d[f] = np.linalg.solve(H[np.ix_(f, f)], -g[f])
+            alpha, hit = 1.0, -1
+            for k in range(3):
+                if d[k] < 0 and beta[k] + alpha * d[k] < 0:
+                    alpha, hit = beta[k] / -d[k], k
+            Q0 = beta.sum() - float(zw @ np.log(E))
+            for _ls in range(30):
+                nb = beta + alpha * d
+                if hit >= 0 and alpha == beta[hit] / -d[hit]:
+                    nb[hit] = 0.0
+                nb = np.maximum(nb, 0.0)
+                En = K.T @ nb
+                if np.all(En > 0) and nb.sum() - float(zw @ np.log(En)) <= Q0 + 1e-15:
+                    break
+                alpha *= 0.5
+                hit = -1
+            beta = nb
+            if np.max(np.abs(alpha * d)) < 1e-15:
+                break
+    finally:
+        FluidPackage._rr3 = TH_save
+    dev = max(dev, float(np.max(np.abs(b_new - beta))))
+c.close("scalar 3-phase Rachford-Rice = matrix Newton (25 random K sets)", dev, 0.0, 1e-9)
+TH.GDEM = False
+off = fpw.pt_flash(zw, 25.0 + 273.15, 120.0)
+TH.GDEM = True
+on = fpw.pt_flash(zw, 25.0 + 273.15, 120.0)
+c.close("GDEM acceleration converges to the same split", sum(abs(a.beta - b.beta) for a, b in zip(on.phases, off.phases))
+        + abs(on.H - off.H), 0.0, 1e-6)
+ph = fpw.ph_flash(zw, 60.0, cold[30.0].H, 300.0)
+c.close("PH flash (Newton first step) returns the target enthalpy", ph.H, cold[30.0].H, 1e-4 * max(1.0, abs(cold[30.0].H)))
 t0 = _time.time()
 for T in np.linspace(34.0, 44.0, 11):
     fpw.pt_flash(zw, T + 273.15, 146.0)
@@ -254,5 +321,46 @@ a2 = fc.pt_flash(z2, 300.0, 50.0)                        # same T: served from t
 b2 = FluidPackage.from_keys(list(WET_GAS)).pt_flash(z2, 300.0, 50.0)
 c.close("cached mixing matrices reproduce a fresh package (H)", a2.H, b2.H, 1e-9 * max(1.0, abs(b2.H)))
 c.eq("cached mixing matrices reproduce a fresh package (phases)", [p.kind for p in a2.phases], [p.kind for p in b2.phases])
+
+# ---- v6: van der Waals-Platteeuw hydrate model ---------------------------------------------------------------
+from procsim import hydrate as HY                                                    # noqa: E402
+from procsim.transport import hydrate_T, VDWP, MOTIEE, hydrate_T_motiee              # noqa: E402
+HYD_DATA = {"C1": ("sI", [(273.7, 27.7), (277.6, 41.4), (283.2, 71.0), (285.9, 96.8)]),
+            "C2": ("sI", [(273.7, 5.3), (280.4, 11.5), (285.9, 24.6)]),
+            "C3": ("sII", [(273.7, 1.83), (277.6, 3.8)]),
+            "CO2": ("sI", [(273.7, 13.2), (280.0, 27.0), (282.9, 41.1)]),
+            "N2": ("sII", [(273.2, 160.0)])}
+worst = 0.0
+for g, (struct, pts) in HYD_DATA.items():
+    fpg = FluidPackage.from_keys([g, "H2O"])
+    for T, P in pts:
+        Tm, s_ = HY.equilibrium_T(fpg, np.array([1.0, 0.0]), P)
+        worst = max(worst, abs(Tm - T))
+c.close("vdW-P: pure-gas hydrate temperatures within 0.5 K of the data (CH4, C2H6, C3H8, CO2, N2)", worst, 0.0, 0.5)
+fpg = FluidPackage.from_keys(["C3", "H2O"])
+c.eq("vdW-P: propane forms structure II", HY.equilibrium_T(fpg, np.array([1.0, 0.0]), 2.0)[1], "sII")
+fpg = FluidPackage.from_keys(["CO2", "H2O"])
+c.eq("vdW-P: CO2 forms structure I", HY.equilibrium_T(fpg, np.array([1.0, 0.0]), 20.0)[1], "sI")
+fpg = FluidPackage.from_keys(["C1", "C2", "C3"])
+zk = np.array([0.92, 0.05, 0.03])
+Tk = HY.equilibrium_T(fpg, zk, 69.0)
+c.close("vdW-P: 0.6-gravity gas at 1000 psia vs the Katz chart (~16.7 °C)", Tk[0] - 273.15, 16.7, 1.0)
+c.eq("vdW-P: a little propane switches natural gas to structure II", Tk[1], "sII")
+Pk, sP = HY.equilibrium_P(fpg, zk, Tk[0])
+c.close("vdW-P: equilibrium P at the equilibrium T returns the pressure", Pk, 69.0, 0.3)
+c.check("vdW-P: hydrate T rises with pressure",
+        HY.equilibrium_T(fpg, zk, 30.0)[0] < Tk[0] < HY.equilibrium_T(fpg, zk, 150.0)[0], "")
+zc = np.array([0.80, 0.0, 0.0])
+fpc = FluidPackage.from_keys(["C1", "CO2", "N2"])
+t_c1 = HY.equilibrium_T(fpc, np.array([1.0, 0.0, 0.0]), 50.0)[0]
+c.check("vdW-P: CO2 raises and N2 lowers the methane hydrate temperature",
+        HY.equilibrium_T(fpc, np.array([0.8, 0.2, 0.0]), 50.0)[0] > t_c1 > HY.equilibrium_T(fpc, np.array([0.8, 0.0, 0.2]), 50.0)[0], "")
+fpw.hydrate_model = VDWP
+vd = hydrate_T(fpw, zw, 100.0)
+c.close("dispatcher: vdW-P interpolated curve = direct solve", vd, HY.equilibrium_T(fpw, zw, 100.0)[0] - 273.15, 0.05)
+fpw.hydrate_model = MOTIEE
+from procsim.transport import gas_gravity_dry as _sg                                  # noqa: E402
+c.close("dispatcher: Motiee by default", hydrate_T(fpw, zw, 100.0), hydrate_T_motiee(_sg(fpw, zw), 100.0), 1e-12)
+c.close("vdW-P within 3 K of Motiee for the wet gas at 100 bar", vd, hydrate_T(fpw, zw, 100.0), 3.0)
 
 sys.exit(c.report())

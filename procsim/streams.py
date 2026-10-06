@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .thermo import FluidPackage, FlashResult, V_STD_GAS
-from .transport import (phase_viscosity_cP, hydrate_T_motiee, gas_gravity_dry, hydrate_depression,
+from .transport import (phase_viscosity_cP, hydrate_T_motiee, gas_gravity_dry, hydrate_depression, hydrate_T,
                         aqueous_inhibitor_wt)
 
 PHASE_NAMES = {"V": "Vapour", "L": "Liquid", "W": "Aqueous"}
@@ -164,8 +164,7 @@ def hydrate_state(st: MaterialStream, fp: FluidPackage):
     v = st.flash.phase("V")
     if v is None:
         return None, None, None, None
-    sg = gas_gravity_dry(fp, v.x)
-    t_hyd = hydrate_T_motiee(sg, st.P) if sg else None
+    t_hyd = hydrate_T(fp, v.x, st.P)
     if t_hyd is None:
         return None, None, None, None
     aq = st.flash.phase("W")

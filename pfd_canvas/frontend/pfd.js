@@ -38,14 +38,16 @@
     hx:         { w: 104, h: 44, ports: { tube_in: [-52, 0, "L"], tube_out: [52, 0, "R"],
                                           shell_in: [26, -18, "U"], shell_out: [-26, 18, "D"] } },
     scrubber:   { w: 40, h: 104, ports: { feed: [-20, 8, "L"], vapour: [0, -52, "U"], liquid: [0, 52, "D"] } },
+    teg_contactor: { w: 44, h: 110, ports: { feed: [-22, 34, "L"], dry: [0, -55, "U"], water: [22, 42, "R"] } },
     column:     { w: 50, h: 190, ports: { feed_top: [-25, -70, "L"], feed: [-25, 0, "L"], feed_bottom: [-25, 70, "L"],
-                                          overhead: [0, -95, "U"], bottoms: [0, 95, "D"] },
+                                          overhead: [0, -95, "U"], bottoms: [0, 95, "D"], water: [25, 30, "R"] },
                   energies: [[25, -76, "R"], [25, 76, "R"]] },
     pipe:       { w: 84, h: 26, ports: { in: [-42, 0, "L"], out: [42, 0, "R"] }, energy: [0, -10, "U"] },
     recycle:    { w: 36, h: 36, ports: { in: [-18, 0, "L"], out: [18, 0, "R"] } },
     adjust:     { w: 40, h: 40, ports: {} },
     // subsea (SURF)
-    well:         { w: 40, h: 76, ports: { in: [-20, 30, "L"], out: [20, -30, "R"] } },
+    well:         { w: 40, h: 76, ports: { in: [-20, 30, "L"], lift: [-20, -6, "L"], out: [20, -30, "R"] } },
+    injection_well: { w: 40, h: 76, ports: { in: [-20, -30, "L"], out: [20, 30, "R"] } },
     xmas_tree:    { w: 50, h: 56, ports: { in: [-25, 18, "L"], out: [25, -8, "R"] } },
     template:     { w: 96, h: 60, ports: { in: [-48, 8, "L"], out: [48, 8, "R"] } },
     jumper:       { w: 76, h: 34, ports: { in: [-38, 10, "L"], out: [38, 10, "R"] } },
@@ -300,6 +302,12 @@
       <line x1="10" y1="-8" x2="10" y2="16" stroke="#6f7c8a" stroke-width="1"/>
       <rect x="23" y="-22" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
       <rect x="-29" y="15" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
+    teg_contactor: () => `
+      <rect x="-15" y="-48" width="30" height="96" rx="14" fill="url(#gV)" ${STK}/>
+      <path d="M-15,-30 L15,-30 M-15,-18 L15,-18 M-15,-6 L15,-6 M-15,6 L15,6 M-15,18 L15,18" stroke="#4d5a68" stroke-width="1"/>
+      <path d="M15,-38 L24,-38" stroke="#b08400" stroke-width="2"/>
+      <path d="M15,28 L24,28" stroke="#b08400" stroke-width="2"/>
+      <text x="0" y="40" font-size="8" text-anchor="middle" fill="#2f3a46">TEG</text>`,
     scrubber: () => `
       <path d="M-16,-40 A16,9 0 0 1 16,-40 L16,40 A16,9 0 0 1 -16,40 Z" fill="url(#gV)" ${STK}/>
       <rect x="-15.3" y="-33" width="30.6" height="7" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".8"/>
@@ -339,6 +347,15 @@
       <path d="M-9,28 L-14,26 M-9,32 L-14,34 M9,28 L14,26 M9,32 L14,34" stroke="#b5451b" stroke-width="1.3"/>
       <rect x="-7" y="-36" width="14" height="12" rx="2" fill="url(#gB)" ${STK}/>
       <line x1="7" y1="-30" x2="20" y2="-30" stroke="#2f3a46" stroke-width="2"/>`,
+    injection_well: () => `
+      <path d="M-18,24 L18,24 L18,36 L-18,36 Z" fill="url(#rock)" stroke="#6f5a3a" stroke-width="1"/>
+      <line x1="-18" y1="-24" x2="18" y2="-24" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>
+      <rect x="-9" y="-24" width="18" height="52" fill="url(#gV)" ${STK}/>
+      <rect x="-4" y="-24" width="8" height="52" fill="#dbe9f6" stroke="#4d5a68" stroke-width=".9"/>
+      <path d="M0,-14 L0,14 M0,14 L-4,7 M0,14 L4,7" fill="none" stroke="#3d5fc4" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M9,28 L14,26 M9,32 L14,34 M-9,28 L-14,26 M-9,32 L-14,34" stroke="#3d5fc4" stroke-width="1.3"/>
+      <rect x="-7" y="-36" width="14" height="12" rx="2" fill="url(#gB)" ${STK}/>
+      <line x1="-7" y1="-30" x2="-20" y2="-30" stroke="#2f3a46" stroke-width="2"/>`,
     xmas_tree: () => `
       <rect x="-9" y="-26" width="18" height="50" rx="2" fill="url(#gV)" ${STK}/>
       <path d="M-6,-16 L6,-16 L-6,-8 L6,-8 Z" fill="url(#gB)" stroke="#2f3a46" stroke-width="1"/>
