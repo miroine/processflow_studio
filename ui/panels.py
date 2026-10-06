@@ -11,6 +11,7 @@ from procsim.unitops import CATALOGUE, parse_fractions, PROFILE_TYPES
 from procsim.streams import stream_properties, phase_table, composition_table
 
 from .state import fmt, bump, connections, sol_is_current
+from . import state as S
 from . import charts
 from . import units as U
 
@@ -41,7 +42,10 @@ def _set_param(uid, key, wkey, conv=None):
         if conv is not None and v is not None:
             si_unit, label, delta = conv
             v = U.to_si(si_unit, v, label, delta)
-        ss.model["units"][uid]["params"][key] = v
+        params = ss.model["units"][uid]["params"]
+        if params.get(key) != v:
+            S.push_edit(f"{ss.model['units'][uid]['name']}: {key}")
+        params[key] = v
 
 
 def _visible(spec, params):
@@ -161,7 +165,9 @@ def _cached_envelope(fluid_json, z_tuple, tmin, tmax, pmax):
     import json
     fp = FluidPackage.from_dict(json.loads(fluid_json))
     T, P, g = charts.phase_envelope(fp, np.array(z_tuple), tmin, tmax, pmax)
-    return T, P, g
+    from procsim.envelope import trace_envelope
+    tr = trace_envelope(fp, np.array(z_tuple), pmax, tmin + 273.15, tmax + 273.15)
+    return T, P, g, tr
 
 
 def env_panel(st_, fp, key):
@@ -178,16 +184,24 @@ def env_panel(st_, fp, key):
     go_ = c4.button("Compute", key=f"envgo_{key}", width="stretch")
     k = f"env_{key}"
     if go_:
-        with st.spinner("Mapping the two-phase region (≈1 500 flashes)…"):
-            T, P, g = _cached_envelope(json.dumps(fp.to_dict()), tuple(np.round(st_.z, 12)), tmin, tmax, pmax)
-        st.session_state[k] = (T, P, g)
+        with st.spinner("Mapping and tracing the two-phase region (≈3 000 flashes)…"):
+            st.session_state[k] = _cached_envelope(json.dumps(fp.to_dict()), tuple(np.round(st_.z, 12)), tmin, tmax, pmax)
     if k in st.session_state:
-        T, P, g = st.session_state[k]
+        val = st.session_state[k]
+        T, P, g = val[:3]
+        tr = val[3] if len(val) > 3 else None
         pts = [(st_.name, st_.T - 273.15, st_.P)]
-        st.plotly_chart(charts.envelope_figure(T, P, g, pts, f"Phase envelope — {st_.name}"), width="stretch",
+        st.plotly_chart(charts.envelope_figure(T, P, g, pts, f"Phase envelope — {st_.name}", tr), width="stretch",
                         key=f"envfig_{key}")
-        st.caption("Envelope drawn from a grid of Peng-Robinson flashes (vapour-fraction contours). "
-                   "Near the cricondenbar/cricondentherm the grid resolution limits accuracy.")
+        if tr and (tr.get("cricondenbar") or tr.get("cricondentherm")):
+            c = st.columns(2)
+            cb, ct = tr.get("cricondenbar"), tr.get("cricondentherm")
+            if cb:
+                c[0].metric("Cricondenbar", f"{U.P(cb[1]):.1f} {U.uP()} at {U.T(cb[0] - 273.15):.1f} {U.uT()}")
+            if ct:
+                c[1].metric("Cricondentherm", f"{U.T(ct[0] - 273.15):.1f} {U.uT()} at {U.P(ct[1]):.1f} {U.uP()}")
+        st.caption("Shading and contours from a grid of Peng-Robinson flashes; the markers are traced bubble and dew "
+                   "points (bisection on the phase count), with the cricondenbar refined by bisection on pressure.")
     else:
         st.caption("Press **Compute** to map the envelope for this composition.")
 
@@ -277,10 +291,12 @@ def unit_view(uid):
         tabs.append("Convergence")
     if t in PROFILE_TYPES:
         tabs.append("Profile")
-    if t in ("compressor", "subsea_booster"):
+    if t in ("compressor", "subsea_booster", "subsea_pump", "subsea_compressor"):
         tabs.append("Performance curve")
     if t == "column":
         tabs.append("Profiles")
+    if t == "flowline":
+        tabs.append("Route")
     if t in ("separator", "separator3", "scrubber"):
         tabs.append("Sizing")
     tb = st.tabs(tabs)
@@ -319,17 +335,21 @@ def unit_view(uid):
                     well_deliverability_panel(uid, u, sol, res)
                 import pandas as _pd
                 n = len(prof["L"])
-                st.dataframe(U.df_display(_pd.DataFrame({"Distance [m]": prof["L"], "P [bar(a)]": prof["P"],
-                                                         "T [°C]": prof["T"], "Holdup [-]": prof["HL"][:n],
-                                                         "Regime": prof["regime"][:n],
-                                                         "Mixture velocity [m/s]": prof["vm"][:n]})),
-                             hide_index=True, width="stretch")
+                tbl = {"Distance [m]": prof["L"], "P [bar(a)]": prof["P"], "T [°C]": prof["T"],
+                       "Holdup [-]": prof["HL"][:n], "Regime": prof["regime"][:n],
+                       "Mixture velocity [m/s]": prof["vm"][:n]}
+                if any(q > 0 for q in prof.get("q_heat") or []) and len(prof["q_heat"]) == n - 1:
+                    tbl["Heat input to next node [W/m]"] = list(prof["q_heat"]) + [None]
+                st.dataframe(U.df_display(_pd.DataFrame(tbl)), hide_index=True, width="stretch")
             else:
                 st.caption("Solve the flowsheet to see the profile.")
+    if t == "flowline":
+        with tb[tabs.index("Route")]:
+            route_panel(uid, u, res)
     if t == "compressor":
         with tb[2]:
             compressor_curve_panel(uid, u, sol, res)
-    if t == "subsea_booster":
+    if t in ("subsea_booster", "subsea_pump", "subsea_compressor"):
         with tb[2]:
             booster_curve_panel(uid, u, sol, res)
     if t == "column":
@@ -584,6 +604,50 @@ def well_deliverability_panel(uid, u, sol, res):
     target = u["params"].get("WHP") if u["params"].get("rate_spec") == surf.RATE_WHP else None
     st.plotly_chart(charts.deliverability_figure(d["pts"], u["name"], op, target, liquid), width="stretch",
                     key=f"{key}_fig")
+
+
+def route_panel(uid, u, res):
+    """Flowline route along the seabed: [distance km, water depth m] points (overrides length and elevation)."""
+    ss = st.session_state
+    p = u["params"]
+    route = p.get("route") or []
+    st.caption("Seabed route: distance along the route [km] and water depth [m] at each point (at least two). With a "
+               "route the flowline is marched section by section along it - the length becomes the route length and "
+               "the elevation follows the seabed - and the low points, where liquid collects, are counted. Upload a "
+               "CSV with two columns or edit the table.")
+    df = pd.DataFrame({"Distance [km]": [float(r[0]) for r in route], "Water depth [m]": [float(r[1]) for r in route]})
+    ed = st.data_editor(df, key=_wkey(uid, "__route"), num_rows="dynamic", width="stretch",
+                        column_config={c: st.column_config.NumberColumn(format="%.3f") for c in df.columns})
+    new = [[float(a), float(b)] for a, b in zip(ed["Distance [km]"], ed["Water depth [m]"])
+           if a is not None and b is not None and a == a and b == b]
+    if new != [[float(a), float(b)] for a, b in route]:
+        p["route"] = new
+        st.rerun()
+    c1, c2 = st.columns(2)
+    up = c1.file_uploader("Route CSV (distance km, water depth m)", type=["csv"], key=_wkey(uid, "__routeup"))
+    if up is not None and ss.get(f"_route_file_{uid}") != (up.name, up.size):
+        try:
+            rd = pd.read_csv(up)
+            pts = [[float(a), float(b)] for a, b in zip(rd.iloc[:, 0], rd.iloc[:, 1])]
+            if len(pts) < 2:
+                raise ValueError("at least two points are needed")
+            ss[f"_route_file_{uid}"] = (up.name, up.size)
+            p["route"] = pts
+            ss.widget_ver += 1
+            st.rerun()
+        except Exception as e:                         # noqa: BLE001
+            st.error(f"Could not read the route: {e}")
+    if c2.button("Clear route", key=_wkey(uid, "__clrroute"), disabled=not route, width="stretch"):
+        p["route"] = []
+        ss.widget_ver += 1
+        st.rerun()
+    if len(route) >= 2:
+        st.plotly_chart(charts.route_figure(route, u["name"]), width="stretch", key=f"route_{uid}")
+        k = [x for x in ("Route length [m]", "Deepest point [m]", "Low points along the route") if res.get(x) is not None]
+        if k:
+            cc = st.columns(len(k))
+            for c, key in zip(cc, k):
+                c.metric(U.key(key), fmt(U.kv(key, res[key])[1]))
 
 
 def booster_curve_panel(uid, u, sol, res):

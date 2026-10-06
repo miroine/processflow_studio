@@ -128,6 +128,10 @@ def divider():
     pass
 
 
+def toast(body, icon=None, **kw):
+    HOOK["texts"].append(str(body))
+
+
 def metric(label, value, delta=None, **kw):
     _text(label, value)
 
@@ -145,11 +149,22 @@ def dataframe(data, **kw):
             raise KeyError(f"column_config for missing column {k}")
 
 
+class _RealFig:
+    """A real Plotly figure seen through the stub's interface (layout as a plain dict) for the tests."""
+    def __init__(self, fig):
+        self.data = [type(tr.__class__.__name__, (), {"kw": tr.to_plotly_json()})() for tr in fig.data]
+        self.layout = fig.to_plotly_json()["layout"]
+        self.real = fig
+
+
 def plotly_chart(fig, **kw):
     _check_width(kw)
     import plotly.graph_objects as go
     if not isinstance(fig, go.Figure):
         raise TypeError("plotly_chart expects a Figure")
+    if getattr(go, "__file__", "").find("stubs") < 0:
+        fig.to_json()                      # real Plotly: full serialisation, as Streamlit does
+        fig = _RealFig(fig)
     key = kw.get("key")
     _register("plotly_chart", "", key, str(id(fig)))
     HOOK["charts"].append(fig)
@@ -199,7 +214,8 @@ def selectbox(label, options, index=0, key=None, format_func=str, on_change=None
         format_func(o)
     if options and not (0 <= index < len(options)):
         raise IndexError(f"selectbox {label}: index {index} out of range")
-    if key is not None and key in session_state and session_state[key] in options:
+    if key is not None and key in session_state and ident not in HOOK["values"]:
+        # like real Streamlit: a remembered value is returned even when it is no longer an option
         return session_state[key]
     v = _value(ident, options[index] if options else None)
     if key is not None:
@@ -227,7 +243,12 @@ def multiselect(label, options, default=None, key=None, format_func=str, **kw):
     for d in default or []:
         if d not in options:
             raise ValueError(f"multiselect default {d!r} not in options")
-    return _value(ident, list(default or []))
+    if key is not None and key in session_state and ident not in HOOK["values"]:
+        return list(session_state[key])          # stale entries come back, as in real Streamlit
+    v = _value(ident, list(default or []))
+    if key is not None:
+        session_state[key] = v
+    return v
 
 
 _FMT = re.compile(r"^%[0-9.]*[defgiu]$")
@@ -257,6 +278,17 @@ def number_input(label, value=None, min_value=None, max_value=None, step=None, f
 
 def text_input(label, value="", key=None, on_change=None, args=None, **kw):
     ident = _register("text_input", label, key)
+    _cb(ident, on_change, args)
+    if key is not None and key in session_state:
+        return session_state[key]
+    v = _value(ident, value)
+    if key is not None:
+        session_state[key] = v
+    return v
+
+
+def text_area(label, value="", height=None, key=None, on_change=None, args=None, **kw):
+    ident = _register("text_area", label, key)
     _cb(ident, on_change, args)
     if key is not None and key in session_state:
         return session_state[key]
@@ -320,6 +352,9 @@ class _Progress:
     def progress(self, value, text=None):
         if not (0.0 <= float(value) <= 1.0):
             raise ValueError("progress value must be in [0, 1]")
+
+    def empty(self):
+        pass
 
 
 def progress(value, text=None):

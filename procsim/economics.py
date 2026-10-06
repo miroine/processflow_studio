@@ -34,7 +34,7 @@ DEFAULTS = {
     "co2_tax": 2000.0,            # currency / t CO2 (tax + quota; enter your own)
 }
 BOE_PER_SM3OE = 6.29
-ENV_TYPES = ("pipe", "well", "flowline", "riser", "jumper")   # heat to/from the sea or formation
+ENV_TYPES = ("pipe", "well", "flowline", "riser", "jumper", "subsea_cooler")   # heat to/from the sea or formation
 
 
 def params(model):
@@ -110,14 +110,32 @@ def compute(model, sol, p=None):
                      "Energy cost [cur/y]": cost, "CO₂ [t/y]": co2,
                      "CO₂ cost [cur/y]": co2 * float(p["co2_tax"])})
 
-    # direct electrical heating of flowlines is electric power
+    # flowline heating: electrical systems (DEH, heat-traced PiP) are electric power; a hot-water bundle is heat
+    # from a topside heater on the chosen heating medium
     for uid, u in model["units"].items():
-        deh = (sol.results.get(uid) or {}).get("DEH power [kW]")
-        if u["type"] == "flowline" and deh:
-            cost, co2, fuel = power_cost(deh)
-            rows.append({"Energy stream": f"DEH-{u['name']}", "Unit": u["name"], "Category": "Power",
-                         "Utility": p["driver"] + " (direct electrical heating)", "Duty [kW]": deh,
-                         "Energy [MWh/y]": deh * hours / 1000.0, "Fuel gas [Sm³/h]": fuel, "Energy cost [cur/y]": cost,
+        r = sol.results.get(uid) or {}
+        if u["type"] != "flowline":
+            continue
+        el = r.get("Electrical heating power [kW]", r.get("DEH power [kW]"))
+        hw = r.get("Topside heater duty for heating [kW]")
+        if el:
+            cost, co2, fuel = power_cost(el)
+            rows.append({"Energy stream": f"HEAT-{u['name']}", "Unit": u["name"], "Category": "Power",
+                         "Utility": p["driver"] + f" ({r.get('Heating system', 'flowline heating')})", "Duty [kW]": el,
+                         "Energy [MWh/y]": el * hours / 1000.0, "Fuel gas [Sm³/h]": fuel, "Energy cost [cur/y]": cost,
+                         "CO₂ [t/y]": co2, "CO₂ cost [cur/y]": co2 * float(p["co2_tax"])})
+        if hw:
+            if p["heating"] == "Gas-fired heater":
+                fuel = fuel_for(hw / (float(p["heater_eff"]) / 100.0))
+                cost, co2 = fuel * hours * float(p["fuel_price"]), fuel * hours * float(p["fuel_co2"]) / 1000.0
+            elif p["heating"] == "Electric":
+                mwh = hw * hours / 1000.0
+                cost, co2, fuel = mwh * float(p["el_price"]), mwh * float(p["grid_co2"]), 0.0
+            else:
+                cost = co2 = fuel = 0.0
+            rows.append({"Energy stream": f"HEAT-{u['name']}", "Unit": u["name"], "Category": "Heating",
+                         "Utility": p["heating"] + " (hot-water bundle)", "Duty [kW]": hw,
+                         "Energy [MWh/y]": hw * hours / 1000.0, "Fuel gas [Sm³/h]": fuel, "Energy cost [cur/y]": cost,
                          "CO₂ [t/y]": co2, "CO₂ cost [cur/y]": co2 * float(p["co2_tax"])})
 
     gas = liq = 0.0

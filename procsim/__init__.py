@@ -1,2 +1,2 @@
 """ProcessFlow Studio simulation engine."""
-__version__ = "5.3"
+__version__ = "7.0.0"

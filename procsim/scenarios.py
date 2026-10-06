@@ -58,7 +58,8 @@ def scenario_kpis(model, sol):
     except Exception:
         pass
     wells = [u for u, x in model["units"].items() if x["type"] == "well" and u in sol.results]
-    surf_units = any(x["type"] in ("well", "flowline", "riser", "template", "subsea_booster") for x in model["units"].values())
+    from .surf import SURF_TYPES
+    surf_units = any(x["type"] in SURF_TYPES for x in model["units"].values())
     if surf_units:
         k["Wells"] = len(wells)
         k["Well gas rate [MSm³/d]"] = sum(sol.results[u].get("Gas rate [MSm³/d]", 0.0) for u in wells) if wells else None
@@ -72,6 +73,7 @@ def scenario_kpis(model, sol):
         k["Min. hydrate margin [°C]"] = min(margins) if margins else None
         _, el = sd.booster_power_kW(model, sol)
         k["Subsea booster power [kW]"] = el
+        k["Flowline heating power [kW]"] = sd.heating_power_kW(model, sol)
         try:
             k["CAPEX [MUSD]"] = sd.equipment_list(model, sol)[1]["Total CAPEX [MUSD]"]
         except Exception:

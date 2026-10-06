@@ -54,7 +54,10 @@ def balances(m, sol, label):
         pe = 0.0
         if u["type"] in PROFILE_TYPES:
             dz = sol.results[uid].get("Elevation change [m]", u["params"].get("dz", 0.0))
-            pe = sum(x.F * x.MW for x in ins if not x.empty) * G * dz / 1000.0 / 3600.0
+            ins_pe = ins
+            if u["type"] == "well":            # lift gas enters and leaves at the wellhead: no net potential energy
+                ins_pe = [sol.streams[s] for s in port_edges(m, uid, "in").get("in", [])]
+            pe = sum(x.F * x.MW for x in ins_pe if not x.empty) * G * dz / 1000.0 / 3600.0
         if u["type"] == "separator3":
             continue
         we = max(we, abs(hin + en.get(u["name"], 0.0) - pe - hout) / max(abs(hin), abs(hout), 1.0))
@@ -684,7 +687,10 @@ flu = next(u for u, x in m["units"].items() if x["type"] == "flowline")
 m["units"][flu]["params"].update({"design": "Electrically heated (DEH)", "deh": "On"})
 sol = solve(m)
 t_ = econ(m, sol)["totals"]
-c.close("economics: DEH is charged as electric power", t_["Power demand [kW]"], sol.results[flu]["DEH power [kW]"], 1e-9)
+c.close("economics: DEH is charged as electric power", t_["Power demand [kW]"],
+        sol.results[flu]["Electrical heating power [kW]"], 1e-9)
+c.close("economics: DEH electrical power = heat / 60 % efficiency", sol.results[flu]["Electrical heating power [kW]"],
+        sol.results[flu]["DEH power [kW]"] / 0.6, 1e-9)
 
 # ---- scenarios ------------------------------------------------------------------------------------------------------
 m = subsea_field()
@@ -712,6 +718,180 @@ c.check("restore gives the scenario's model with the scenario list", back["units
 SC.delete(m, "Base")
 c.eq("delete a scenario", [x_["name"] for x_ in m["scenarios"]], ["Wet insulation"])
 
+# ==== v5.4: heated flowlines, subsea processing equipment, new examples ===========================================
+from procsim.examples import heated_oil_tieback, subsea_compression, subsea_separation      # noqa: E402
+
+HOT = {"T_C": 60.0, "P_bar": 80.0, "flow_basis": "kmol/h", "flow": 1500.0, "composition": dict(WELL_FLUID)}
+FLH = {"design": "Electrically heated (DEH)", "length": 20000.0, "ID": 254.0, "n_seg": 10}
+# fixed electrical heating
+m, (fl,), sol = chain([("flowline", dict(FLH, heating=surf.HEATING[1], heat_ctrl=surf.CTRL_FIXED, deh_W_m=80.0))], HOT)
+r = sol.results[fl]
+c.close("fixed heating: heat into the fluid = W/m × length", r["Heat into the fluid [kW]"], 80.0 * 20000.0 / 1000.0, 1e-9)
+c.close("DEH electrical power = heat / 60 % (typical efficiency)", r["Electrical heating power [kW]"], 1600.0 / 0.6, 1e-9)
+balances(m, sol, "flowline with fixed DEH")
+c.close("economics: electrical heating charged as power", econ(m, sol)["totals"]["Power demand [kW]"],
+        r["Electrical heating power [kW]"], 1e-9)
+# hold a minimum temperature
+m, (fl,), sol = chain([("flowline", dict(FLH, heating=surf.HEATING[1], heat_ctrl=surf.CTRL_HOLD, T_hold=30.0,
+                                         q_max_W_m=150.0))], HOT)
+r = sol.results[fl]
+prof = sol.profiles[fl]
+c.close("hold control: outlet held at the set temperature", r["Outlet T [°C]"], 30.0, 1e-6)
+c.check("hold control: no node below the set temperature", min(prof["T"]) >= 30.0 - 1e-6, str(min(prof["T"])))
+c.check("hold control: only part of the line needs heat", 0 < r["Heated length [m]"] < 20000.0, str(r["Heated length [m]"]))
+c.close("hold control: Σ q_heat·dL = controlled heating", sum(prof["q_heat"]) * 2000.0 / 1000.0, r["Controlled heating [kW]"], 1e-9)
+c.check("hold control: peak heat within the installed capacity", r["Peak heating [W/m]"] <= 150.0 + 1e-9, "")
+balances(m, sol, "flowline holding 30 °C")
+off = so.unheated_profile(m, sol, fl)
+c.check("without heating the same line arrives colder than the set temperature", off["T"][-1] < 30.0, str(off["T"][-1]))
+hl = so.heated_lines(m, sol)[0]
+U_, D_ = r["U used [W/m²·K]"], 0.254
+c.close("shut-in hold power = U·π·D·(T_set − T_sea)", hl["Hold power, shut-in [W/m]"], U_ * math.pi * D_ * (30.0 - 4.0), 1e-9)
+C_ = hl["Line heat capacity [kJ/(m·K)]"] * 1000.0
+c.close("heat-up time = −τ ln(1 − loss/q)", hl["Heat-up time from sea temperature [h]"],
+        -C_ / (U_ * math.pi * D_) * math.log(1 - U_ * math.pi * D_ * 26.0 / 150.0) / 3600.0, 1e-9)
+c.check("heat-up is impossible when the installed heating is below the hold power",
+        math.isinf(so.heat_up_time(C_, U_, D_, 10.0, 4.0, 30.0)), "")
+c.close("annual energy (continuous) = flowing power × hours + hold power × shutdown hours",
+        hl["Annual heating energy (continuous) [MWh/y]"],
+        r["Electrical heating power [kW]"] * 8400.0 / 1000.0 + hl["Electrical power to hold during shut-in [kW]"] * 96.0 / 1000.0, 1e-6)
+m, (fl,), sol = chain([("flowline", dict(FLH, heating=surf.HEATING[1], heat_ctrl=surf.CTRL_HOLD, T_hold=30.0,
+                                         q_max_W_m=20.0))], HOT)
+c.check("hold control: too little installed heating is flagged", sol.status[fl] == "warning" and
+        sol.results[fl]["Outlet T [°C]"] < 30.0, sol.results[fl].get("Warning"))
+m, (fl,), sol = chain([("flowline", dict(FLH, heating=surf.HEATING[2], heat_ctrl=surf.CTRL_FIXED, deh_W_m=50.0))], HOT)
+c.close("heat-traced PiP: 90 % efficiency", sol.results[fl]["Electrical heating power [kW]"], 1000.0 / 0.9, 1e-9)
+m, (fl,), sol = chain([("flowline", dict(FLH, heating=surf.HEATING[3], heat_ctrl=surf.CTRL_FIXED, deh_W_m=50.0))], HOT)
+t_ = econ(m, sol)
+c.check("hot-water bundle: topside heater duty, charged as heating", "Electrical heating power [kW]" not in sol.results[fl]
+        and abs(t_["totals"]["Heating demand [kW]"] - 1000.0 / 0.7) < 1e-6, str(t_["totals"]["Heating demand [kW]"]))
+m, (fl,), sol = chain([("flowline", dict(FLH, deh="On", deh_W_m=80.0))], HOT)
+c.close("v5 flowsheets with the DEH on/off switch still work", sol.results[fl]["DEH power [kW]"], 1600.0, 1e-9)
+
+# ---- subsea separator ------------------------------------------------------------------------------------------
+SEPF = {"T_C": 60.0, "P_bar": 40.0, "flow_basis": "kmol/h", "flow": 3000.0, "composition": dict(WELL_FLUID)}
+m = new_model(list(WELL_FLUID))
+f_ = add_unit(m, "feed", params=SEPF)
+sp = add_unit(m, "subsea_separator", params={"sep_type": "Liquid-liquid separator (horizontal)"})
+prods = {}
+for port in ("vapour", "oil", "water"):
+    prods[port] = add_unit(m, "product")
+    connect(m, sp, port, prods[port], "in")
+connect(m, f_, "out", sp, "feed")
+sol = solve(m)
+r = sol.results[sp]
+wat_ = sol.streams[port_edges(m, sp, "out")["water"][0]]
+c.check("liquid-liquid separator: water leaves on the water outlet", not wat_.empty and r["Water to reinjection [m³/d]"] > 0, "")
+balances(m, sol, "subsea separator (3 outlets)")
+D_m = r["Vessel ID [mm]"] / 1000.0
+c.close("separator: horizontal vessel L = 4 D", r["Length (T/T) [m]"], 4.0 * D_m, 1e-9)
+Pm = r["Design pressure [bar(a)]"] / 10.0
+c.close("separator: ASME wall t = P D / (2 S E − 1.2 P) + 3 mm", r["Wall thickness incl. corrosion [mm]"],
+        Pm * D_m / (2 * 138.0 - 1.2 * Pm) * 1000.0 + 3.0, 1e-9)
+c.close("separator: design pressure = 1.1 × operating", r["Design pressure [bar(a)]"], 1.1 * r["Vessel P [bar(a)]"], 1e-9)
+c.close("separator: liquid volume = liquid flow × residence time", r["Liquid hold-up volume [m³]"],
+        r["Liquid flow [m³/h]"] / 60.0 * 5.0, 1e-9)
+m["units"][sp]["params"]["sep_type"] = "Gas-liquid separator (vertical)"
+sol = solve(m)
+c.check("gas-liquid separator: all liquid on one outlet, water outlet empty",
+        sol.streams[port_edges(m, sp, "out")["water"][0]].empty and
+        sol.streams[port_edges(m, sp, "out")["oil"][0]].z[sol.fp.iw] > 0.1, "")
+balances(m, sol, "gas-liquid subsea separator")
+
+# ---- subsea cooler ---------------------------------------------------------------------------------------------
+GC = dict(GAS, T_C=70.0, P_bar=100.0, flow=3.0)
+m, (cl,), sol = chain([("subsea_cooler", {"spec": "Approach to sea temperature", "approach": 15.0, "T_sea": 4.0})], GC)
+r = sol.results[cl]
+c.close("cooler: outlet = sea + approach", r["Outlet T [°C]"], 19.0, 1e-9)
+balances(m, sol, "subsea cooler")
+A_ = r["Required area [m²]"]
+m2, (cl2,), s2 = chain([("subsea_cooler", {"spec": "Cooler area", "area": A_, "T_sea": 4.0})], GC)
+c.close("cooler: the reported area reproduces the outlet temperature", s2.results[cl2]["Outlet T [°C]"], 19.0, 1e-6)
+c.check("cooler: heat to the sea costs nothing", econ(m, sol)["totals"]["Cooling demand [kW]"] == 0, "")
+m, (cl,), sol = chain([("subsea_cooler", {"spec": "Outlet temperature", "T_out": 3.0, "T_sea": 4.0})], GC)
+c.check("cooler: cannot cool below the sea temperature", sol.status[cl] == "error", sol.errors.get(cl))
+m, (cl,), sol = chain([("subsea_cooler", {"spec": "Approach to sea temperature", "approach": 2.0})], GC)
+c.check("cooler: cooling wet gas into the hydrate region is flagged", sol.status[cl] == "warning" and
+        sol.results[cl]["Outlet hydrate margin [°C]"] < 0, sol.results[cl].get("Warning"))
+
+# ---- pressure intensifier and chemical injection ---------------------------------------------------------------
+MEOH = {"T_C": 6.0, "P_bar": 60.0, "flow_basis": "kg/h", "flow": 300.0, "comp_basis": "Mass fractions",
+        "composition": {"MeOH": 1.0}}
+keys = list(WET_GAS) + ["MeOH"]
+m, (pi_,), sol = chain([("intensifier", {"spec": "Area ratio", "ratio": 2.0, "P_hyd": 207.0})], MEOH, keys)
+r = sol.results[pi_]
+c.close("intensifier: outlet = hydraulic P × ratio × 85 %", r["Outlet P [bar(a)]"], 207.0 * 2.0 * 0.85, 1e-9)
+c.close("intensifier: hydraulic fluid = liquid × ratio / 95 %", r["Hydraulic fluid consumption [L/min]"],
+        r["Liquid flow [L/h]"] / 60.0 * 2.0 / 0.95, 1e-9)
+c.check("intensifier: hydraulic power drawn exceeds the power into the fluid",
+        r["Hydraulic power drawn [kW]"] > r["Power into the fluid [kW]"] > 0, "")
+balances(m, sol, "intensifier")
+m, (pi_,), sol = chain([("intensifier", {"spec": "Outlet pressure", "P_out": 300.0, "P_hyd": 207.0})], MEOH, keys)
+c.close("intensifier: area ratio for an outlet pressure", sol.results[pi_]["Area ratio [-]"], 300.0 / (207.0 * 0.85), 1e-9)
+m, (pi_,), sol = chain([("intensifier", {"spec": "Outlet pressure", "P_out": 50.0})], MEOH, keys)
+c.check("intensifier: outlet below the inlet is an error", sol.status[pi_] == "error", sol.errors.get(pi_))
+
+
+def cimv_case(chem_flow, chem_P=150.0):
+    mm = new_model(keys)
+    pf = add_unit(mm, "feed", params=dict(GAS, T_C=8.0, P_bar=100.0, flow=3.0))
+    cf = add_unit(mm, "feed", params=dict(MEOH, flow=chem_flow, P_bar=chem_P))
+    ci = add_unit(mm, "cimv")
+    pr = add_unit(mm, "product")
+    connect(mm, pf, "out", ci, "in")
+    connect(mm, cf, "out", ci, "chem")
+    connect(mm, ci, "out", pr, "in")
+    return mm, ci, solve(mm)
+
+
+m0, ci0, s0 = cimv_case(1e-9)
+m1, ci1, s1 = cimv_case(3000.0)
+c.check("CIMV: methanol raises the hydrate margin", s1.results[ci1]["Hydrate margin downstream [°C]"] >
+        s0.results[ci0]["Hydrate margin downstream [°C]"] + 2.0, "")
+c.check("CIMV: methanol shows up in the water", s1.results[ci1]["Inhibitor in water [wt%]"] > 5.0, "")
+balances(m1, s1, "chemical injection valve")
+m2, ci2, s2 = cimv_case(300.0, chem_P=102.0)
+c.check("CIMV: chemical below production P + valve ΔP is an error", s2.status[ci2] == "error" and "below" in s2.errors[ci2],
+        s2.errors.get(ci2))
+
+# ---- subsea pump / compressor types ---------------------------------------------------------------------------
+c.check("subsea pump offers pumps only", "Wet-gas compressor" not in CATALOGUE["subsea_pump"]["params"][0]["options"]
+        and "Water injection pump" in CATALOGUE["subsea_pump"]["params"][0]["options"], "")
+c.check("subsea compressor offers compressors only", set(CATALOGUE["subsea_compressor"]["params"][0]["options"]) ==
+        {"Wet-gas compressor", "Dry-gas centrifugal compressor"}, "")
+m, (k_,), sol = chain([("subsea_compressor", {"btype": "Dry-gas centrifugal compressor", "dP": 40.0})],
+                      dict(DRY := {"T_C": 30.0, "P_bar": 60.0, "flow_basis": "MSm³/d", "flow": 3.0,
+                                   "composition": {"C1": 0.9, "C2": 0.07, "C3": 0.03}}))
+c.check("dry-gas compressor on dry gas: within its window", sol.status[k_] == "ok", sol.results[k_].get("Warning"))
+
+# ---- new examples ----------------------------------------------------------------------------------------------
+for fn, name in ((heated_oil_tieback, "heated tie-back"), (subsea_compression, "compression station"),
+                 (subsea_separation, "separation station")):
+    m = fn()
+    sol = solve(m)
+    bad = {m["units"][u]["name"]: sol.errors.get(u) for u, s_ in sol.status.items() if s_ not in ("ok", "warning")}
+    c.check(f"{name} example solves", not bad, str(bad))
+    balances(m, sol, name)
+    if fn is heated_oil_tieback:
+        fl = next(u for u, x in m["units"].items() if x["type"] == "flowline")
+        c.close("heated tie-back: the flowline delivers 25 °C", sol.results[fl]["Outlet T [°C]"], 25.0, 1e-6)
+        items_, tot_ = sd.equipment_list(m, sol)
+        c.check("heated tie-back: CAPEX has the heating system and topside power",
+                tot_["by_group"]["Flowline heating"] > 0 and any(i_["Item"] == "Topside power" for i_ in items_), "")
+        c.check("heated tie-back: heated-lines view", so.heated_lines(m, sol)[0]["Can hold the line during shut-in"] == "yes", "")
+    if fn is subsea_compression:
+        k_ = next(u for u, x in m["units"].items() if x["type"] == "subsea_compressor")
+        c.close("compression station: dry gas to the compressor (GVF 100 %)", sol.results[k_]["Inlet GVF [%]"], 100.0, 1e-6)
+        lay = so.field_layout(m, sol)
+        c.eq("compression station layout: 4 well slots (compressor and pump are not slots)",
+             sum(1 for n_ in lay["nodes"] if n_["type"] == "well"), 4)
+        c.check("compression station layout: separator, compressor and pump placed",
+                {"subsea_separator", "subsea_compressor", "subsea_pump"} <= {n_["type"] for n_ in lay["nodes"]}, "")
+    if fn is subsea_separation:
+        inj = next(s_ for s_, x in m["streams"].items() if m["units"][x["dst"][0]]["name"] == "Water to injection well")
+        c.check("separation station: water to injection at 230 bar", abs(sol.streams[inj].P - 230.0) < 1e-6 and
+                sol.streams[inj].z[sol.fp.iw] > 0.95, "")
+
 # ---- import order ------------------------------------------------------------------------------------------
 import subprocess                                                                   # noqa: E402
 for first in ("procsim.surf", "procsim.unitops", "ui.surf"):
@@ -719,5 +899,144 @@ for first in ("procsim.surf", "procsim.unitops", "ui.surf"):
                          "from procsim.unitops import CATALOGUE, CALC; assert 'riser' in CATALOGUE and 'riser' in CALC"],
                         cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."), capture_output=True, text=True)
     c.check(f"SURF units register whichever module is imported first ({first})", r_.returncode == 0, r_.stderr[-300:])
+
+# ---- v6: identical wells in parallel, booster bypass -------------------------------------------------------------
+import copy as _copy   # noqa: E402
+m = subsea_field()
+s1 = solve(m)
+w1 = next(u for u, x in m["units"].items() if x["name"] == "W-1")
+fid = m["streams"][port_edges(m, w1, "in")["in"][0]]["src"][0]
+m2 = _copy.deepcopy(m)
+m2["units"][w1]["params"]["n_par"] = 3
+m2["units"][fid]["params"]["flow"] = m["units"][fid]["params"]["flow"] * 3
+s2 = solve(m2)
+r1, r2 = s1.results[w1], s2.results[w1]
+c.close("3 identical wells at 3× the rate: same wellhead pressure", r2["Wellhead P [bar(a)]"], r1["Wellhead P [bar(a)]"], 1e-9)
+c.close("3 identical wells: same bottomhole pressure", r2["Bottomhole flowing P [bar(a)]"], r1["Bottomhole flowing P [bar(a)]"], 1e-9)
+c.close("3 identical wells: 3× the gas rate", r2["Gas rate [MSm³/d]"], 3 * r1["Gas rate [MSm³/d]"], 1e-9)
+c.close("3 identical wells: per-well rate reported", r2["Gas rate per well [MSm³/d]"], r1["Gas rate [MSm³/d]"], 1e-9)
+balances(m2, s2, "field with a 3-well cluster")
+items2 = {i["Item"]: i["Qty"] for i in sd.equipment_list(m2, s2)[0]}
+c.eq("equipment list: 3 wells and 3 trees for the cluster", (items2["W-1"], items2["XT-1"]), (3, 3))
+mb = subsea_field_boosted()
+bu = next(u for u, x in mb["units"].items() if x["type"] in surf.BOOSTER_TYPES)
+mb["units"][bu]["params"]["online"] = surf.BYPASSED
+sbp = solve(mb)
+rb = sbp.results[bu]
+sin = sbp.streams[port_edges(mb, bu, "in")["in"][0]]
+sout = sbp.streams[port_edges(mb, bu, "out")["out"][0]]
+c.check("bypassed booster: status reported", rb["Status"].startswith("Bypassed"), rb.get("Status"))
+c.close("bypassed booster: no power", rb["Electrical power [kW]"], 0.0, 0.0)
+c.close("bypassed booster: outlet P = inlet P", sout.P, sin.P, 1e-12)
+c.close("bypassed booster: outlet T = inlet T", sout.T, sin.T, 1e-12)
+balances(mb, sbp, "boosted field, booster bypassed")
+
+# ---- v6: the hydrate model choice reaches every hydrate margin -----------------------------------------------------
+from procsim.transport import VDWP   # noqa: E402
+m = subsea_tieback()
+s_m = solve(m)
+m["fluid"]["hydrate_model"] = VDWP
+s_v = solve(m)
+fl_ = next(u for u, x in m["units"].items() if x["type"] in ("flowline", "pipe"))
+hm_m, hm_v = s_m.results[fl_].get("Min. hydrate margin along line [°C]"), s_v.results[fl_].get("Min. hydrate margin along line [°C]")
+c.check("vdW-P hydrate model: the line margin is computed", hm_v is not None, "")
+c.check("vdW-P vs Motiee line margin within 3 K", hm_m is not None and abs(hm_v - hm_m) < 3.0, f"{hm_m} vs {hm_v}")
+c.check("the hydrate model changes the result (not ignored)", hm_v != hm_m, "")
+balances(m, s_v, "MEG tie-back with the vdW-P hydrate model")
+cd_v = so.cooldown(m, s_v)
+c.check("cool-down uses the selected hydrate model", bool(cd_v) and all(r["No-touch time [h]"] >= 0 for r in cd_v), "")
+
+# ---- v6.2: gas lift, injection well, seabed route --------------------------------------------------------------
+from procsim.examples import gaslift_injection   # noqa: E402
+m = gaslift_injection()
+s1 = solve(m)
+c.check("gas-lift / injection example solves", all(v in ("ok", "warning") for v in s1.status.values()),
+        str({m["units"][k]["name"]: s1.errors.get(k) for k, v in s1.status.items() if v not in ("ok", "warning")}))
+balances(m, s1, "gas lift + injection example")
+p1 = next(u for u, x in m["units"].items() if x["name"] == "P-1")
+r = s1.results[p1]
+c.check("lift gas enters above the tubing pressure at the valve", r["Lift gas at the valve [bar(a)]"] > r["Tubing P at the valve [bar(a)]"], "")
+m0 = _copy.deepcopy(m)
+for x in m0["units"].values():
+    if x["name"].startswith("Lift gas"):
+        x["params"]["flow"] = 0.0
+s0 = solve(m0)
+c.check("gas lift raises the wellhead pressure (lighter column)", r["Wellhead P [bar(a)]"] > s0.results[p1]["Wellhead P [bar(a)]"] + 5.0,
+        f"{r['Wellhead P [bar(a)]']:.1f} vs {s0.results[p1]['Wellhead P [bar(a)]']:.1f}")
+c.close("without lift gas the well is the plain tubing model", s0.results[p1]["Bottomhole flowing P [bar(a)]"],
+        r["Bottomhole flowing P [bar(a)]"], 1e-9)
+out = s1.streams[port_edges(m, p1, "out")["out"][0]]
+lin = s1.streams[port_edges(m, p1, "in")["lift"][0]]
+rin = s1.streams[port_edges(m, p1, "in")["in"][0]]
+c.close("well outlet = reservoir + lift gas (moles)", out.F, rin.F + lin.F, 1e-9)
+m_lo = _copy.deepcopy(m)
+lg = next(x for x in m_lo["units"].values() if x["name"] == "Lift gas P-1")
+lg["params"]["P_bar"] = 40.0
+s_lo = solve(m_lo)
+c.check("lift gas below the tubing pressure at the valve is an error", s_lo.status[p1] == "error", s_lo.errors.get(p1))
+iw = next(u for u, x in m["units"].items() if x["type"] == "injection_well")
+ri = s1.results[iw]
+c.close("injector: required BHP = P_res + q / II", ri["Required bottomhole P [bar(a)]"],
+        290.0 + ri["Injection rate per well [Sm³/d]"] / 25.0, 1e-9)
+c.close("injector: margin = BHP − required", ri["Injection margin [bar]"],
+        ri["Bottomhole P [bar(a)]"] - ri["Required bottomhole P [bar(a)]"], 1e-9)
+c.check("injector: water gains ~ρgh down the tubing", 240.0 < ri["Hydrostatic + friction gain [bar]"] < 270.0,
+        f"{ri['Hydrostatic + friction gain [bar]']:.1f}")
+m_w = _copy.deepcopy(m)
+next(x for x in m_w["units"].values() if x["type"] == "subsea_pump")["params"]["P_out"] = 40.0
+s_w = solve(m_w)
+c.check("injector: too low a wellhead pressure gives a warning", "too low" in (s_w.results[iw].get("Warning") or ""), "")
+flu = next(u for u, x in m["units"].items() if x["type"] == "flowline")
+c.eq("route: low points counted", s1.results[flu]["Low points along the route"], 2)
+c.close("route: length = sum of the section lengths", s1.results[flu]["Route length [m]"],
+        sum(ln for ln, _ in surf.route_sections(m["units"][flu]["params"])), 1e-9)
+c.close("route: elevation change = start depth − end depth", s1.results[flu]["Elevation change [m]"], 310.0 - 290.0, 1e-9)
+c.eq("route: low points (deepest first)", surf.route_low_points(m["units"][flu]["params"]), [335.0, 325.0])
+c.close("route length used by CAPEX", sd.line_lengths_km(m, s1)[0], s1.results[flu]["Route length [m]"] / 1000.0, 1e-12)
+mf = subsea_field()
+sf_ = solve(mf)
+fl0 = next(u for u, x in mf["units"].items() if x["type"] == "flowline")
+pf = mf["units"][fl0]["params"]
+L, dz = pf["length"] / 1000.0, pf.get("dz", 0.0)
+mf2 = _copy.deepcopy(mf)
+mf2["units"][fl0]["params"]["route"] = [[0.0, 400.0], [math.sqrt((L * 1000) ** 2 - dz ** 2) / 1000.0, 400.0 - dz]]
+sf2 = solve(mf2)
+c.close("a straight two-point route reproduces the flowline", sf2.results[fl0]["Outlet P [bar(a)]"],
+        sf_.results[fl0]["Outlet P [bar(a)]"], 1e-6)
+
+# ---- v6.2: choke Cv, power system --------------------------------------------------------------------------------
+mc = subsea_field()
+for x in mc["units"].values():
+    if x["type"] == "xmas_tree":
+        x["params"].update({"spec": surf.CHOKE_CV, "Cv_max": 120.0, "opening": 70.0, "rangeability": 50.0})
+sc_ = solve(mc)
+xt1 = next(u for u, x in mc["units"].items() if x["name"] == "XT-1")
+c.close("equal-percentage trim: Cv = Cv_max · R^(opening − 1)", sc_.results[xt1]["Choke Cv at this opening [US gpm/psi½]"],
+        120.0 * 50.0 ** (0.7 - 1.0), 1e-9)
+c.check("choke Cv spec gives a positive pressure drop", sc_.results[xt1]["Choke ΔP [bar]"] > 0.0, "")
+mc2 = _copy.deepcopy(mc)
+next(x for x in mc2["units"].values() if x["name"] == "XT-1")["params"]["opening"] = 50.0
+sc2 = solve(mc2)
+c.check("closing the choke raises its pressure drop", sc2.results[xt1]["Choke ΔP [bar]"] > sc_.results[xt1]["Choke ΔP [bar]"], "")
+sin = sc_.streams[port_edges(mc, xt1, "in")["in"][0]]
+dp_c, _ = surf.choke_dp(sin, sin.P - 2.0, 1e6)
+c.check("a huge Cv gives almost no pressure drop", dp_c < 0.01, f"{dp_c:.4f}")
+balances(mc, sc_, "field with Cv-specified chokes")
+mb2 = subsea_field_boosted()
+sb2 = solve(mb2)
+ud = sd.umbilical_design(mb2, sb2)
+c.check("22 kV transmission gets a subsea step-down transformer", ud["cable"]["Voltage [kV]"] > 6.6 and
+        ud["cable"].get("Subsea step-down transformer [MVA]", 0) > 0, str(ud["cable"]))
+c.check("transformer in the CAPEX list", any(i["Item"] == "Subsea transformer" for i in sd.equipment_list(mb2, sb2)[0]), "")
+ps = sd.power_supply_options(mb2, sb2)
+gt, pfs = ps["rows"]
+c.check("power from shore emits less CO₂ than gas turbines", pfs["CO₂ [kt/y]"] < gt["CO₂ [kt/y]"], "")
+ann = sum(1.0 / 1.08 ** (k + 0.5) for k in range(20))
+c.close("discounted cost = CAPEX + annuity × (energy + CO₂)", gt["Discounted cost over the period [MUSD]"],
+        gt["CAPEX [MUSD]"] + ann * (gt["Energy cost [MUSD/y]"] + gt["CO₂ cost [MUSD/y]"]), 1e-9)
+mh = heated_oil_tieback()
+sh = solve(mh)
+uh = sd.umbilical_design(mh, sh)
+c.check("electrical heating alone gets a power cable", uh["cable"] is not None and uh["cable"]["Load: electrical heating [kW]"] > 0, "")
 
 sys.exit(c.report())

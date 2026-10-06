@@ -12,7 +12,7 @@ from procsim.flowsheet import build_fluid
 from procsim.streams import stream_properties, PHASE_NAMES
 from procsim.unitops import CATALOGUE
 
-from .state import fmt, sol_is_current
+from .state import fmt, sol_is_current, valid_choice
 from . import units as U
 
 
@@ -35,6 +35,17 @@ def fluid_tab():
         else:
             fl["components"] = sel
             st.rerun()
+    from procsim.transport import HYDRATE_MODELS, MOTIEE
+    cur = fl.get("hydrate_model", MOTIEE)
+    hm = st.selectbox("Hydrate model", list(HYDRATE_MODELS), index=list(HYDRATE_MODELS).index(cur) if cur in HYDRATE_MODELS
+                      else 0, key=f"fl_hydmodel_{ss.widget_ver}",
+                      help="Motiee: gas-gravity correlation (fast, 3.5–280 bar). van der Waals–Platteeuw: statistical "
+                           "model of sI and sII hydrates with Kihara cell potentials and PR fugacities, composition-"
+                           "specific (CO₂, H₂S, N₂ and propane effects), 2–600 bar. Inhibitors (MEG, methanol) are "
+                           "applied as a temperature depression in both.")
+    if hm != cur:
+        fl["hydrate_model"] = hm
+        st.rerun()
     fp = None
     try:
         fp = build_fluid(ss.model)
@@ -98,6 +109,7 @@ def fluid_tab():
                 rows.append({"Key": k, "NBP [°C]": d.get("hypo", {}).get("NBP_C"), "SG": d.get("hypo", {}).get("SG"),
                              "MW": c.MW, "Tc [°C]": c.Tc - 273.15, "Pc [bar]": c.Pc, "ω": c.omega})
             st.dataframe(pd.DataFrame(rows).set_index("Key").map(fmt), width="stretch")
+            valid_choice("hy_rm", ["—"] + list(hypos.keys()))
             rm = st.selectbox("Remove hypothetical", ["—"] + list(hypos.keys()), key="hy_rm")
             if rm != "—" and st.button("Remove"):
                 hypos.pop(rm)

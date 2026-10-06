@@ -120,8 +120,10 @@ def upstream_flowline(model, riser_uid, max_units=12):
 
 
 def _theta(u):
-    L = float(u["params"].get("length", 1.0))
-    return math.asin(max(-1.0, min(1.0, float(u["params"].get("dz", 0.0)) / L))) if L > 0 else 0.0
+    L = surf.flowline_length(u["params"]) or 1.0
+    secs = surf.route_sections(u["params"])
+    dz = sum(d for _, d in secs) if secs else float(u["params"].get("dz", 0.0))
+    return math.asin(max(-1.0, min(1.0, dz / L))) if L > 0 else 0.0
 
 
 def _rough_m(u):
@@ -156,7 +158,7 @@ def slug_assessment(model, sol, margin=1.2):
             top = sol.streams[top_sid[0]]
             sev = severe_slug(sol.fp, base, top, float(model["units"][rs]["params"]["ID"]) / 1000.0,
                               float(rr["Riser length [m]"]), float(rr["Water depth [m]"]), D,
-                              float(u["params"]["length"]), float(sol.results[fl_uid]["Average liquid holdup [-]"]))
+                              surf.flowline_length(u["params"]), float(sol.results[fl_uid]["Average liquid holdup [-]"]))
             risk = str(rr.get("Riser-base slugging risk", "Low"))
             sev["Risk"] = risk
             sev["Bøe number [-]"] = rr.get("Bøe number (< 1: severe slugging possible) [-]")
@@ -257,7 +259,7 @@ def operating_window(rows):
 
 # ------------------------------------------------------------------------------------------ field layout
 
-LINE_LEN = {"flowline": lambda u: float(u["params"].get("length", 0.0)) / 1000.0}
+LINE_LEN = {"flowline": lambda u: surf.flowline_length(u["params"]) / 1000.0}
 
 
 def _jumper_km(u):
@@ -271,7 +273,7 @@ def _jumper_km(u):
 
 def _len_km(u):
     if u["type"] == "flowline":
-        return float(u["params"].get("length", 0.0)) / 1000.0
+        return surf.flowline_length(u["params"]) / 1000.0
     if u["type"] == "jumper":
         return _jumper_km(u)
     return 0.0
@@ -325,6 +327,12 @@ def field_layout(model, sol=None):
             return
         if len(ins) == 1:
             walk(_src(model, ins[0]), dist + L, b, (x1, y1), depth + 1)
+            return
+        if t != "template":
+            # a processing station (mixer after a separator, a chemical injection point, ...): its branches are
+            # co-located equipment, not well slots - walk each one at the same spot along the line
+            for sid in ins:
+                walk(_src(model, sid), dist + L, b, (x1, y1), depth + 1)
             return
         # manifold / template: spread the inlet branches
         branch = []
@@ -408,7 +416,10 @@ STEEL_RHO_CP = 7850.0 * 480.0                  # J/m3K
 INSUL_MM = {"Bare carbon steel": 0.0, "Wet insulation (multilayer PP)": 60.0, "Pipe-in-pipe": 40.0,
             "Flexible pipe (insulated)": 30.0, "Towed bundle": 50.0, "Trenched and buried": 0.0,
             "Electrically heated (DEH)": 60.0}
-COOL_DEFAULTS = {"wall_mm": 20.0, "insul_mm": -1.0, "insul_MJ_m3K": 1.7, "insul_frac": 0.5, "shutin": "Settle-out"}
+U_FLOWING, U_NATURAL = "Flowing U (conservative)", "Natural convection after shut-in"
+U_MODES = (U_FLOWING, U_NATURAL)
+COOL_DEFAULTS = {"wall_mm": 20.0, "insul_mm": -1.0, "insul_MJ_m3K": 1.7, "insul_frac": 0.5, "shutin": "Settle-out",
+                 "U_mode": U_FLOWING}
 
 
 def cool_params(model):
@@ -441,13 +452,12 @@ def _vol_heat_capacity(fp, st, D, theta):
 
 def _hydrate_T(fp, st, P):
     """Inhibited hydrate temperature [°C] of a stream's gas at pressure P (None when not applicable)."""
-    from .transport import hydrate_T_motiee, gas_gravity_dry, hydrate_depression
+    from .transport import hydrate_T, hydrate_depression
     if st.empty or fp.iw < 0 or st.z[fp.iw] <= 1e-9:
         return None
     v = st.flash.phase("V")
     x = v.x if v is not None else st.z
-    sg = gas_gravity_dry(fp, x)
-    t = hydrate_T_motiee(sg, P) if sg else None
+    t = hydrate_T(fp, x, P)
     if t is None:
         return None
     aq = st.flash.phase("W")
@@ -526,9 +536,128 @@ def cooldown(model, sol):
         U = float(p.get("U", 0.0) or 0.0) or (row.get("U_W_m2K") or 5.0)
         ins_mm = (basis["insul_mm"] if basis["insul_mm"] >= 0
                   else (0.0 if t == "pipe" else INSUL_MM.get(p.get(key), 30.0)))
-        res = cooldown_line(sol.fp, u["name"], sol.profiles[uid], st_in, st_out, float(p["ID"]) / 1000.0, U,
-                            float(p.get("T_amb", 4.0)), basis, ins_mm)
+        D = float(p["ID"]) / 1000.0
+        prof = sol.profiles[uid]
+        U_flow = U
+        if basis.get("U_mode") == U_NATURAL:
+            from .flowassure import forced_film, shutin_U
+            vm = (prof.get("vm") or [1.0])[0]
+            HLs = prof.get("HL") or [0.0]
+            U = shutin_U(U_flow, forced_film(sol.fp, st_in, D, vm), sum(HLs) / len(HLs))
+        res = cooldown_line(sol.fp, u["name"], prof, st_in, st_out, D, U, float(p.get("T_amb", 4.0)), basis, ins_mm)
+        res["U flowing [W/m²·K]"] = U_flow
         res["Type"] = {"flowline": "Flowline", "riser": "Riser", "pipe": "Pipe"}[t]
         res["Insulation counted [mm]"] = ins_mm
         out.append(res)
     return out
+
+
+# ------------------------------------------------------------------------------------------- heated flowlines
+
+HEAT_DEFAULTS = {"margin": 3.0, "WAT": 0.0, "shutdowns": 4.0, "shutdown_h": 24.0, "mode": "Continuous"}
+HEAT_MODES = ("Continuous", "Shutdown and restart only")
+
+
+def heat_params(model):
+    p = dict(HEAT_DEFAULTS)
+    p.update({k: v for k, v in (model.get("heating") or {}).items() if k in HEAT_DEFAULTS})
+    return p
+
+
+def line_heat_capacity(fp, st_in, st_out, D, basis, insul_mm):
+    """Mean heat capacity per metre [J/(m K)] of the line contents (in-situ), steel wall and insulation share."""
+    A = math.pi * D * D / 4.0
+    c = 0.5 * (_vol_heat_capacity(fp, st_in, D, 0.0) + _vol_heat_capacity(fp, st_out, D, 0.0))
+    wall = basis["wall_mm"] / 1000.0
+    ins = insul_mm / 1000.0
+    Do = D + 2 * wall
+    return (A * c + STEEL_RHO_CP * math.pi * (D + wall) * wall
+            + basis["insul_frac"] * basis["insul_MJ_m3K"] * 1e6 * math.pi * (Do + ins) * ins)
+
+
+def heat_up_time(C, U, D, q, T_amb, T_set):
+    """Hours to heat the static line from sea temperature to T_set with q W/m installed:
+    C dT/dt = q − U π D (T − T_amb)  →  t = −τ ln(1 − U π D (T_set − T_amb) / q), τ = C / (U π D)."""
+    loss = U * math.pi * D * (T_set - T_amb)
+    if q <= loss or U <= 0:
+        return math.inf
+    tau = C / (U * math.pi * D)
+    return -tau * math.log(1.0 - loss / q) / 3600.0
+
+
+def heated_lines(model, sol):
+    """Flow-assurance and energy view of every heated flowline: power while flowing, power to hold the line
+    above the set temperature during a shutdown, heat-up time after a long shutdown, the unheated no-touch time,
+    and the annual energy for the chosen operating mode."""
+    from . import economics
+    basis, hp = cool_params(model), heat_params(model)
+    hours = float(economics.params(model)["hours"])
+    shut_h = float(hp["shutdowns"]) * float(hp["shutdown_h"])
+    cd = {r["Line"]: r for r in cooldown(model, sol)}
+    out = []
+    for uid, u in model["units"].items():
+        if u["type"] != "flowline" or uid not in sol.profiles or uid not in sol.results:
+            continue
+        p = u["params"]
+        system, ctrl = surf.heating_system(p)
+        if system == surf.HEAT_NONE:
+            continue
+        r = sol.results[uid]
+        ins = [s for lst in port_edges(model, uid, "in").values() for s in lst]
+        outs = [s for lst in port_edges(model, uid, "out").values() for s in lst]
+        st_in, st_out = sol.streams[ins[0]], sol.streams[outs[0]]
+        prof = sol.profiles[uid]
+        D, L = float(p["ID"]) / 1000.0, surf.flowline_length(p)
+        U, T_amb = float(r["U used [W/m²·K]"]), float(p.get("T_amb", 4.0))
+        eff = float(r["Heating system efficiency [%]"]) / 100.0
+        P_settle = sum(prof["P"]) / len(prof["P"])
+        Th = _hydrate_T(sol.fp, st_in, P_settle)
+        wat = float(hp["WAT"] or 0.0)
+        floor = max([x for x in (Th, wat if wat > 0 else None) if x is not None] or [T_amb])
+        T_set = float(p.get("T_hold", 25.0)) if ctrl == surf.CTRL_HOLD else floor + float(hp["margin"])
+        try:
+            row_ = surf.item("flowline", p.get("design"))
+        except UnitError:
+            row_ = {}
+        q_inst = (float(p.get("q_max_W_m", 0.0) or 0.0) if ctrl == surf.CTRL_HOLD else
+                  (float(p.get("deh_W_m", 0.0) or 0.0) or (row_.get("deh_W_m") or 0.0) or float(p.get("q_max_W_m", 0.0) or 0.0)))
+        insul = basis["insul_mm"] if basis["insul_mm"] >= 0 else INSUL_MM.get(p.get("design"), 30.0)
+        C = line_heat_capacity(sol.fp, st_in, st_out, D, basis, insul)
+        hold_Wm = max(U * math.pi * D * (T_set - T_amb), 0.0)
+        flowing_kW = float(r["Heat into the fluid [kW]"])
+        power_lbl = "Topside heater duty" if system == surf.HEATING[3] else "Electrical power"
+        t_up = heat_up_time(C, U, D, q_inst, T_amb, T_set)
+        if hp["mode"] == HEAT_MODES[0]:
+            energy = flowing_kW / eff * hours / 1000.0 + hold_Wm * L / 1000.0 / eff * shut_h / 1000.0
+        else:
+            restart = q_inst * L / 1000.0 / eff * (t_up if math.isfinite(t_up) else float(hp["shutdown_h"])) / 1000.0
+            energy = hold_Wm * L / 1000.0 / eff * shut_h / 1000.0 + float(hp["shutdowns"]) * restart
+        unheated = cd.get(u["name"], {}).get("No-touch time [h]")
+        minT = min(prof["T"])
+        res = {"Line": u["name"], "Heating system": system, "Control": ctrl, "Set temperature [°C]": T_set,
+               "Hydrate T at settle-out [°C]": Th, "WAT [°C]": wat if wat > 0 else None,
+               "Minimum fluid T flowing [°C]": minT,
+               "Margin to hydrate flowing [°C]": (minT - Th) if Th is not None else None,
+               "Heat into the fluid flowing [kW]": flowing_kW, f"{power_lbl} flowing [kW]": flowing_kW / eff,
+               "Installed heating [W/m]": q_inst, "Hold power, shut-in [W/m]": hold_Wm,
+               f"{power_lbl} to hold during shut-in [kW]": hold_Wm * L / 1000.0 / eff,
+               "Can hold the line during shut-in": "yes" if q_inst >= hold_Wm else "no — installed heating too low",
+               "Heat-up time from sea temperature [h]": t_up if math.isfinite(t_up) else None,
+               "Unheated no-touch time [h]": None if unheated is None or not math.isfinite(unheated) else unheated,
+               "Line heat capacity [kJ/(m·K)]": C / 1000.0, "Time constant [h]": C / (U * math.pi * D) / 3600.0 if U > 0 else None,
+               f"Annual heating energy ({hp['mode'].lower()}) [MWh/y]": energy,
+               "power_label": power_lbl, "uid": uid}
+        out.append(res)
+    return out
+
+
+def unheated_profile(model, sol, uid):
+    """Profile of a heated flowline recomputed with its heating switched off (for comparison)."""
+    u = model["units"][uid]
+    unit = {"name": u["name"], "type": "flowline", "params": dict(u["params"], heating=surf.HEAT_NONE, deh="Off")}
+    ins = [s for lst in port_edges(model, uid, "in").values() for s in lst]
+    try:
+        surf.calc_flowline(unit, {"in": [sol.streams[ins[0]]]}, sol.fp)
+    except (UnitError, FlashError, ValueError):
+        return None
+    return unit["_profile"]

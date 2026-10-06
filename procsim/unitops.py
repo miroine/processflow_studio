@@ -44,6 +44,8 @@ def _s(key, label, options, default, show_if=None, help=None):
             "show_if": show_if, "help": help}
 
 
+WD_NONE, WD_FEED, WD_BOTH = "Keep (VLE only)", "Decant from the feeds", "Decant from the feeds and the condenser"
+
 CATALOGUE = {
     "feed": {
         "label": "Material stream (feed)", "prefix": "Feed", "category": "Streams",
@@ -202,7 +204,8 @@ CATALOGUE = {
         "label": "Column (absorber / stabiliser / distillation)", "prefix": "T", "category": "Separation",
         "ports": {"in": {"feed_top": {"multi": False, "optional": True}, "feed": {"multi": True, "optional": True},
                          "feed_bottom": {"multi": False, "optional": True}},
-                  "out": {"overhead": {"multi": False}, "bottoms": {"multi": False}}},
+                  "out": {"overhead": {"multi": False}, "bottoms": {"multi": False},
+                          "water": {"multi": False, "optional": True}}},
         "params": [_f("n_trays", "Number of trays (theoretical)", "-", 10, minv=1, maxv=60),
                    _f("feed_stage", "Feed tray for the 'feed' port (from top)", "-", 5, minv=1, maxv=60),
                    _f("P_top", "Top pressure", "bar(a)", 10.0, minv=0.05),
@@ -215,7 +218,11 @@ CATALOGUE = {
                       "Reboiler temperature", {"reboiler": "Yes"}),
                    _f("reb_value", "Specification value", "kW | kmol/h | – | °C | kmol/h", 120.0, {"reboiler": "Yes"},
                       help="Units follow the chosen specification: duty kW, bottoms/distillate kmol/h, "
-                           "boil-up ratio V/B, reboiler temperature °C")],
+                           "boil-up ratio V/B, reboiler temperature °C"),
+                   _s("water_draw", "Free water", [WD_NONE, WD_FEED, WD_BOTH], WD_NONE,
+                      help="The stage model is VLE-only. Decant: free water in the feeds is drawn off before the column "
+                           "(feed knock-out) and, with a condenser, from the overhead (reflux-drum water boot) to the "
+                           "'water' outlet")],
     },
     "recycle": {
         "label": "Recycle", "prefix": "RCY", "category": "Logical",
@@ -310,9 +317,12 @@ def calc_valve(unit, ins, fp):
         raise UnitError(f"{unit['name']}: outlet pressure {P2:.2f} bar is above inlet {s.P:.2f} bar")
     fr = _ph(fp, s.z, P2, s.H, s.T)
     out = make_stream("", fp, s.F, s.z, fr)
-    return {"out": [out]}, {"Inlet T [°C]": s.T - K0, "Outlet T [°C]": fr.T - K0,
-                            "ΔP [bar]": s.P - P2, "ΔT (JT) [°C]": fr.T - s.T,
-                            "Outlet vapour fraction": fr.vf}, []
+    res = {"Inlet T [°C]": s.T - K0, "Outlet T [°C]": fr.T - K0,
+           "ΔP [bar]": s.P - P2, "ΔT (JT) [°C]": fr.T - s.T,
+           "Outlet vapour fraction": fr.vf}
+    from .process_units import valve_sizing
+    res.update(valve_sizing(unit, s, fr, P2))
+    return {"out": [out]}, res, []
 
 
 def calc_mixer(unit, ins, fp):
@@ -714,6 +724,11 @@ def calc_compressor(unit, ins, fp):
                         "N0": curve.N0, "N": N, "Q": Q_m, "Q_process": Q_act, "head": head_poly,
                         "eff": 100 * eta_p if eta_p else None,
                         "control_line": (1.0 + sm_min / 100.0) if asc else None}
+    from .process_units import driver_results
+    dres, dwarn = driver_results(unit, W)
+    res.update(dres)
+    if dwarn:
+        warn.append(dwarn)
     if warn:
         res["Warning"] = "; ".join(warn)
     en = [_energy(unit, W, "work")]
@@ -1059,7 +1074,9 @@ def calc_pipe(unit, ins, fp):
     Optional private parameters used by the subsea (SURF) units that build on this model:
     ``T_amb_out`` - ambient temperature at the outlet (linear ambient profile, e.g. a geothermal gradient);
     ``q_in_W_m`` - heat input per metre (direct electrical heating); ``z0``/``L0`` - elevation and
-    distance at the inlet, for multi-section profiles."""
+    distance at the inlet, for multi-section profiles; ``T_hold`` [°C] with ``q_max_W_m`` - controlled heating
+    that keeps the fluid at or above T_hold, limited to q_max per metre (the heat needed is reported per
+    increment in the profile, ``q_heat`` [W/m])."""
     p = unit["params"]
     s = _one(ins, "in")
     if s.empty:
@@ -1078,14 +1095,18 @@ def calc_pipe(unit, ins, fp):
     Tamb_out = float(p.get("T_amb_out", p.get("T_amb", 4.0))) + K0
     q_in = float(p.get("q_in_W_m", 0.0) or 0.0)            # W/m heat input (DEH)
     z0, L0 = float(p.get("z0", 0.0)), float(p.get("L0", 0.0))
+    T_hold = (float(p["T_hold"]) + K0) if p.get("T_hold") is not None else None
+    q_max = float(p.get("q_max_W_m", 0.0) or 0.0)
     method = p.get("method", "Beggs & Brill")
     sigma = float(p.get("sigma", 0.02))
     n_mol = s.F * 1000.0 / 3600.0            # mol/s
     MW = s.MW
     st = s
     prof = {"L": [L0], "P": [s.P], "T": [s.T - K0], "HL": [], "regime": [], "vm": [], "z": [z0],
-            "Hm": [_hyd_margin(s, fp)]}
+            "Hm": [_hyd_margin(s, fp)], "q_heat": []}
     Qtot = 0.0
+    Qheat = 0.0
+    capped = False
     evr = 0.0
 
     def advance(state, grad, Tamb, h):
@@ -1107,6 +1128,7 @@ def calc_pipe(unit, ins, fp):
         # Heun predictor-corrector; where the pressure falls fast (gas expanding near the end of a long
         # line) the increment is sub-stepped so that no step loses more than 5 % of the local pressure
         rem, cur, g = dL, st, g1
+        heat_inc = 0.0
         while rem > dL * 1e-9:
             h = rem
             if g > 0 and g * h / 1e5 > 0.05 * cur.P:
@@ -1122,11 +1144,27 @@ def calc_pipe(unit, ins, fp):
                         raise
                     h = max(h / 4.0, h_min)
             Qtot += q
+            if T_hold is not None and nxt.T < T_hold - 1e-9:
+                # controlled heating: add what it takes to bring the fluid back to T_hold, up to q_max·h
+                frt = fp.pt_flash(nxt.z, T_hold, nxt.P, nxt.flash.Kset)
+                need = (frt.H - nxt.H) * n_mol                  # W
+                cap = q_max * h if q_max > 0 else math.inf
+                add = min(need, cap)
+                if add >= need - 1e-9:
+                    nxt = make_stream("", fp, nxt.F, nxt.z, frt)
+                else:
+                    capped = True
+                    nxt = make_stream("", fp, nxt.F, nxt.z, _ph(fp, nxt.z, nxt.P, nxt.H + add / n_mol, nxt.T,
+                                                                nxt.flash.Kset))
+                Qheat += add
+                Qtot -= add
+                heat_inc += add
             rem -= h
             cur = nxt
             if rem > dL * 1e-9:
                 g, _ = pipe_gradient(fp, cur, D, eps, theta, method, sigma)
         st_new = cur
+        prof["q_heat"].append(heat_inc / dL)
         evr = max(evr, d1["vm"] / (122.0 / math.sqrt(max(d1["rho_ns"], 1e-6))))
         prof["HL"].append(d1["HL"])
         prof["regime"].append(d1["regime"])
@@ -1153,10 +1191,19 @@ def calc_pipe(unit, ins, fp):
     hm = [x for x in prof["Hm"] if x is not None]
     if hm:
         res["Min. hydrate margin along line [°C]"] = min(hm)
+    warns = []
+    if T_hold is not None:
+        res["Controlled heating [kW]"] = Qheat / 1000.0
+        res["Heated length [m]"] = dL * sum(1 for q in prof["q_heat"] if q > 1e-9)
+        res["Peak heating [W/m]"] = max(prof["q_heat"] or [0.0])
+        if capped:
+            warns.append(f"installed heating ({q_max:.0f} W/m) cannot hold {T_hold - K0:.1f} °C along the whole line")
     if evr > 1.0:
-        res["Warning"] = f"Mixture velocity exceeds the API RP 14E erosional velocity (ratio {evr:.2f})"
+        warns.append(f"Mixture velocity exceeds the API RP 14E erosional velocity (ratio {evr:.2f})")
+    if warns:
+        res["Warning"] = "; ".join(warns)
     unit["_profile"] = prof
-    en = [_energy(unit, -Qtot / 1000.0)] if (U > 0 or q_in > 0) else []
+    en = [_energy(unit, -Qtot / 1000.0)] if (U > 0 or q_in > 0 or Qheat > 0) else []
     return {"out": [make_stream("", fp, st.F, st.z, st.flash)]}, res, en
 
 
@@ -1185,14 +1232,25 @@ def calc_column(unit, ins, fp):
     if not 1 <= fs <= n_trays:
         raise UnitError(f"{unit['name']}: feed tray must be between 1 and {n_trays}")
     stage_of = {"feed_top": c0, "feed": c0 + fs - 1, "feed_bottom": c0 + n_trays - 1}
+    wd = p.get("water_draw", WD_NONE)
+    water_parts = []                                   # (kmol/h, composition, J/mol) of decanted free water
     for port, lst in ins.items():
         for st_ in lst:
             if st_ is not None and not st_.empty:
-                feeds.append((stage_of[port], st_.F, st_.z, st_.H))
                 streams_in.append(st_)
+                F_, z_, H_ = st_.F, st_.z, st_.H
+                w = st_.flash.phase("W") if wd != WD_NONE else None
+                if w is not None and len(st_.flash.phases) > 1 and w.beta < 0.999999:
+                    Fw = st_.F * w.beta
+                    water_parts.append((Fw, w.x.copy(), w.H, st_.T, st_.P))
+                    F_ = st_.F - Fw
+                    z_ = (st_.F * st_.z - Fw * w.x) / F_
+                    H_ = (st_.F * st_.H - Fw * w.H) / F_
+                feeds.append((stage_of[port], F_, z_, H_))
     if not feeds:
         z0 = next((x.z for lst in ins.values() for x in lst if x is not None), None)
-        return {"overhead": [zero_stream("", fp, z0)], "bottoms": [zero_stream("", fp, z0)]}, {"Status": "No flow"}, []
+        return ({"overhead": [zero_stream("", fp, z0)], "bottoms": [zero_stream("", fp, z0)],
+                 "water": [zero_stream("", fp, z0)]}, {"Status": "No flow"}, [])
     if not cond and not reb and not ({"feed_top", "feed_bottom"} & {k for k, v in ins.items() if v}):
         raise UnitError(f"{unit['name']}: an absorber needs a top (liquid) and/or bottom (gas) feed")
     P_top, P_bot = float(p["P_top"]), float(p["P_bot"])
@@ -1218,12 +1276,27 @@ def calc_column(unit, ins, fp):
     zbot = bot / Fbot if Fbot > 1e-12 else None
     frt = fp.pt_flash(ztop, float(T[0]), float(col.P[0])) if ztop is not None else None
     frb = fp.pt_flash(zbot, float(T[-1]), float(col.P[-1])) if zbot is not None else None
+    if wd == WD_BOTH and cond and frt is not None and frt.phase("W") is not None and len(frt.phases) > 1:
+        wph = frt.phase("W")
+        Fw = Ftop * wph.beta
+        water_parts.append((Fw, wph.x.copy(), wph.H, float(T[0]), float(col.P[0])))
+        rest = Ftop * ztop - Fw * wph.x
+        Ftop = float(rest.sum())
+        ztop = rest / Ftop if Ftop > 1e-12 else None
+        frt = fp.pt_flash(ztop, float(T[0]), float(col.P[0])) if ztop is not None else None
     out_top = make_stream("", fp, Ftop, ztop, frt) if frt else zero_stream("", fp, None, T[0], col.P[0])
     out_bot = make_stream("", fp, Fbot, zbot, frb) if frb else zero_stream("", fp, None, T[-1], col.P[-1])
+    if water_parts:
+        Fw = sum(w[0] for w in water_parts)
+        zw = sum(w[0] * w[1] for w in water_parts) / Fw
+        Hw = sum(w[0] * w[2] for w in water_parts) / Fw
+        out_w = make_stream("", fp, Fw, zw, _ph(fp, zw, min(w[4] for w in water_parts), Hw, water_parts[0][3]))
+    else:
+        out_w = zero_stream("", fp, None, T[0], col.P[0])
     # duties from the converged stage model (rigorous PR at the stage states)
     Qc, Qr = col.duties(X)
     Hin = sum(x.F * x.H for x in streams_in) / 3600.0
-    Hout = (out_top.F * out_top.H + out_bot.F * out_bot.H) / 3600.0
+    Hout = (out_top.F * out_top.H + out_bot.F * out_bot.H + (out_w.F * out_w.H if not out_w.empty else 0.0)) / 3600.0
     imbalance = Hout - Hin - Qc - Qr
     res = {"Top T [°C]": T[0] - K0, "Bottom T [°C]": T[-1] - K0,
            "Overhead flow [kmol/h]": Ftop, "Bottoms flow [kmol/h]": Fbot,
@@ -1239,6 +1312,8 @@ def calc_column(unit, ins, fp):
         except Exception:
             pass
     res["Outer iterations"] = col.outer_iterations
+    if water_parts:
+        res["Free water drawn [kg/h]"] = out_w.F * out_w.MW
     free_w = [nm for nm, fr_ in (("overhead", frt), ("bottoms", frb))
               if fr_ is not None and fr_.phase("W") is not None and len(fr_.phases) > 1]
     if free_w:
@@ -1260,7 +1335,7 @@ def calc_column(unit, ins, fp):
         en.append(EnergyStream(f"Q-{unit['name']} cond", Qc, unit["name"], "heat"))
     if reb:
         en.append(EnergyStream(f"Q-{unit['name']} reb", Qr, unit["name"], "heat"))
-    return {"overhead": [out_top], "bottoms": [out_bot]}, res, en
+    return {"overhead": [out_top], "bottoms": [out_bot], "water": [out_w]}, res, en
 
 
 CALC = {
@@ -1273,5 +1348,7 @@ CALC = {
 
 
 # ---- subsea (SURF) equipment: procsim/surf.py registers itself on import ----
-PROFILE_TYPES = ("pipe", "well", "jumper", "flowline", "riser")     # units that leave a line profile
+PROFILE_TYPES = ("pipe", "well", "jumper", "flowline", "riser", "injection_well")     # units that leave a line profile
 from . import surf as _surf   # noqa: E402,F401  (needs the helpers above; works whichever module loads first)
+from . import dehydration as _dehy   # noqa: E402,F401  (TEG contactor registers itself)
+from . import process_units as _pu   # noqa: E402,F401  (HYSYS-style units register themselves)

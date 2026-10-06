@@ -22,6 +22,20 @@ from procsim.unitops import CATALOGUE, PROFILE_TYPES                            
 c = Checker("flowsheet")
 
 
+def atoms(keys):
+    """Element matrix (components × C, H, O, N, S) for the library component keys."""
+    fixed = {"N2": (0, 0, 0, 2, 0), "CO2": (1, 0, 2, 0, 0), "H2S": (0, 2, 0, 0, 1), "H2O": (0, 2, 1, 0, 0), "O2": (0, 0, 2, 0, 0),
+             "H2": (0, 2, 0, 0, 0), "MeOH": (1, 4, 1, 0, 0), "MEG": (2, 6, 2, 0, 0), "SO2": (0, 0, 2, 0, 1)}
+    rows = []
+    for k in keys:
+        if k in fixed:
+            rows.append(fixed[k])
+        else:                                   # alkanes: C1, C2, iC4, nC5 ...
+            n = int("".join(ch for ch in k if ch.isdigit()))
+            rows.append((n, 2 * n + 2, 0, 0, 0))
+    return np.array(rows, float)
+
+
 def unit_balances(model, sol, label):
     """Component and energy balance around every solved unit."""
     fp = sol.fp
@@ -30,8 +44,8 @@ def unit_balances(model, sol, label):
         en_by_unit[e.unit] = en_by_unit.get(e.unit, 0.0) + (0.0 if "fan" in e.name else e.duty_kW)
     worst_m, worst_e = 0.0, 0.0
     for uid, u in model["units"].items():
-        if u["type"] in ("feed", "product", "adjust") or sol.status.get(uid) not in ("ok", "warning"):
-            continue
+        if u["type"] in ("feed", "product", "adjust", "flare") or sol.status.get(uid) not in ("ok", "warning"):
+            continue                              # (a flare burns its gas: nothing leaves as a stream)
         if u["type"] == "recycle":
             # tear stream: inlet and outlet agree to the recycle tolerance, not exactly
             i_ = sol.streams[port_edges(model, uid, "in")["in"][0]]
@@ -44,11 +58,20 @@ def unit_balances(model, sol, label):
         nin = sum((s.F * s.z for s in ins if not s.empty), np.zeros(fp.n))
         nout = sum((s.F * s.z for s in outs if not s.empty), np.zeros(fp.n))
         scale = max(nin.sum(), 1e-9)
-        worst_m = max(worst_m, float(np.max(np.abs(nin - nout))) / scale)
+        reactor = u["type"] in ("conv_reactor", "eq_reactor")
+        if reactor:                               # moles change: the atoms balance instead
+            A = atoms(fp.keys)
+            worst_m = max(worst_m, float(np.max(np.abs((nin - nout) @ A))) / float((nin @ A).sum()))
+        else:
+            worst_m = max(worst_m, float(np.max(np.abs(nin - nout))) / scale)
         if u["type"] == "recycle":
             continue
         hin = sum(s.heat_flow_kW for s in ins if not s.empty)
         hout = sum(s.heat_flow_kW for s in outs if not s.empty)
+        if reactor:                               # enthalpies include the heat of formation
+            from procsim.process_units import formation_flow_kW
+            hin += sum(formation_flow_kW(fp, s) for s in ins)
+            hout += sum(formation_flow_kW(fp, s) for s in outs)
         q = en_by_unit.get(u["name"], 0.0)
         if u["type"] == "expander":
             pass   # expander energy stream is negative (work out) -> hin + q = hout
@@ -57,7 +80,10 @@ def unit_balances(model, sol, label):
         if u["type"] in PROFILE_TYPES:
             # potential energy of the elevation change leaves the enthalpy balance
             dz = sol.results[uid].get("Elevation change [m]", u["params"].get("dz", 0.0))
-            pe = sum(x.F * x.MW for x in ins) * 9.80665 * dz / 1000.0 / 3600.0
+            ins_pe = ins
+            if u["type"] == "well":          # lift gas enters and leaves at the wellhead
+                ins_pe = [sol.streams[s_] for s_ in port_edges(model, uid, "in").get("in", [])]
+            pe = sum(x.F * x.MW for x in ins_pe) * 9.80665 * dz / 1000.0 / 3600.0
             err = abs(hin + q - pe - hout) / ref
         if u["type"] == "separator" or u["type"] == "separator3":
             err = abs(hin + u["params"].get("duty", 0.0) - hout) / ref
@@ -69,10 +95,11 @@ def unit_balances(model, sol, label):
 def overall_balance(model, sol, label):
     fp = sol.fp
     feeds = [sid for sid, s in model["streams"].items() if model["units"][s["src"][0]]["type"] == "feed"]
-    prods = [sid for sid, s in model["streams"].items() if model["units"][s["dst"][0]]["type"] == "product"]
+    prods = [sid for sid, s in model["streams"].items() if model["units"][s["dst"][0]]["type"] in ("product", "flare")]
     nin = sum(sol.streams[s].F * sol.streams[s].z for s in feeds)
     nout = sum(sol.streams[s].F * sol.streams[s].z for s in prods if not sol.streams[s].empty)
-    c.close(f"{label}: overall component balance feeds = products", float(np.max(np.abs(nin - nout)) / nin.sum()),
+    A = atoms(fp.keys)                            # element balance (reactors change the moles, not the atoms)
+    c.close(f"{label}: overall component balance feeds = products", float(np.max(np.abs((nin - nout) @ A)) / (nin @ A).sum()),
             0.0, 2e-4)
 
 

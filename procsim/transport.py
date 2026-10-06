@@ -74,6 +74,20 @@ def hydrate_T_motiee(gas_gravity, P_bar):
     return (tf - 32.0) / 1.8
 
 
+MOTIEE, VDWP = "Motiee (gas-gravity correlation)", "van der Waals–Platteeuw (statistical, EOS fugacities)"
+HYDRATE_MODELS = (MOTIEE, VDWP)
+
+
+def hydrate_T(fp, x, P_bar):
+    """Uninhibited hydrate formation temperature [°C] of a gas composition at P with the fluid package's hydrate
+    model (Motiee by default; van der Waals-Platteeuw when selected). None when not applicable."""
+    if getattr(fp, "hydrate_model", MOTIEE) == VDWP:
+        from .hydrate import hydrate_T_C
+        return hydrate_T_C(fp, x, P_bar)
+    sg = gas_gravity_dry(fp, x)
+    return hydrate_T_motiee(sg, P_bar) if sg else None
+
+
 def gas_gravity_dry(fp, x):
     """Gas gravity of a vapour composition on a water-free basis."""
     x = np.asarray(x, float).copy()

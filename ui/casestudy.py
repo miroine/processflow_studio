@@ -12,7 +12,7 @@ from procsim.flowsheet import solve, build_fluid
 from procsim.streams import stream_properties
 from procsim.unitops import CATALOGUE
 
-from .state import sol_is_current, fmt
+from .state import sol_is_current, fmt, valid_choice
 from . import charts
 from . import units as U
 
@@ -102,6 +102,7 @@ def case_study_tab():
     params = units[uid]["params"]
     si_unit = {s["key"]: param_unit(s, params) for s in specs}
     labels = {s["key"]: s["label"] + (f" [{si_unit[s['key']]}]" if si_unit[s["key"]] else "") for s in specs}
+    valid_choice(f"cs_key_{uid}", labels)
     key = c2.selectbox("Specification", list(labels.keys()), format_func=lambda k: U.key(labels[k]),
                        key=f"cs_key_{uid}")
     cur = float(params.get(key, 0.0))

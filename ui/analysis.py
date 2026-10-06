@@ -9,10 +9,10 @@ import pandas as pd
 import streamlit as st
 
 from procsim.streams import stream_properties, hydrate_risk, hydrate_state
-from procsim.transport import (hydrate_T_motiee, gas_gravity_dry, required_inhibitor_wt, injection_rate,
+from procsim.transport import (hydrate_T_motiee, gas_gravity_dry, hydrate_T, MOTIEE, VDWP, required_inhibitor_wt, injection_rate,
                                aqueous_inhibitor_wt, hydrate_depression, INHIBITORS)
 
-from .state import sol_is_current, fmt, attention_items
+from .state import sol_is_current, fmt, attention_items, valid_choice
 from . import charts
 from . import units as U
 from .state import qfmt
@@ -79,6 +79,7 @@ def flow_assurance(model, sol):
     names = {s["name"]: sid for sid, s in model["streams"].items() if sid in sol.streams and not sol.streams[sid].empty}
     dp = [model["streams"][s]["name"] for s in default_path(model, sol)]
     st.markdown("##### P–T path against the hydrate curve")
+    valid_choice("fa_path", names, multi=True)
     sel = st.multiselect("Streams along the path (in order)", list(names.keys()), default=dp, key="fa_path")
     traj, gas_x, inh_x, Pmax = [], None, None, 10.0
     for n in sel:
@@ -94,11 +95,13 @@ def flow_assurance(model, sol):
     curves = []
     if gas_x is not None and fp.iw >= 0:
         sg = gas_gravity_dry(fp, gas_x)
-        Ps = np.linspace(5.0, min(max(Pmax * 1.2, 20.0), 280.0), 40)
-        Tu = np.array([hydrate_T_motiee(sg, p) if sg else None for p in Ps], dtype=float)
+        rig = getattr(fp, "hydrate_model", MOTIEE) == VDWP
+        Ps = np.linspace(5.0, min(max(Pmax * 1.2, 20.0), 400.0 if rig else 280.0), 40)
+        Tu = np.array([hydrate_T(fp, gas_x, p) for p in Ps], dtype=float)
         ok = np.isfinite(Tu)
         if ok.any():
-            curves.append((f"Hydrate curve, uninhibited (SG {sg:.3f})", Ps[ok], Tu[ok], True))
+            lab = "vdW-P" if rig else f"Motiee, SG {sg:.3f}"
+            curves.append((f"Hydrate curve, uninhibited ({lab})", Ps[ok], Tu[ok], True))
             dT = hydrate_depression(fp, inh_x) if inh_x is not None else 0.0
             if dT > 0.05:
                 wt = sum(aqueous_inhibitor_wt(fp, inh_x).values())
@@ -143,6 +146,7 @@ def dosing_calculator(model, sol, names, path):
         return
     coldest = min((n for n in (path or cands) if n in cands), key=lambda n: sol.streams[names[n]].T, default=cands[0])
     c1, c2, c3, c4 = st.columns(4)
+    valid_choice("dose_st", cands)
     sname = c1.selectbox("Design point (coldest point of the line)", cands, index=cands.index(coldest), key="dose_st")
     inh = c2.selectbox("Inhibitor", ["MEG", "MeOH"], key="dose_inh")
     lean = c3.number_input("Lean inhibitor purity [wt%]", value=90.0 if inh == "MEG" else 100.0, min_value=10.0,
@@ -153,10 +157,10 @@ def dosing_calculator(model, sol, names, path):
                                            key=f"dose_margin_{U.system()[:2]}"), delta=True)
     s = sol.streams[names[sname]]
     v = s.flash.phase("V")
-    sg = gas_gravity_dry(fp, v.x)
-    t_h = hydrate_T_motiee(sg, s.P) if sg else None
+    t_h = hydrate_T(fp, v.x, s.P)
     if t_h is None:
-        st.warning("Outside the Motiee correlation range (3.5–280 bar, gas gravity 0.55–1.0).")
+        st.warning("Outside the hydrate model's range (Motiee: 3.5–280 bar, gas gravity 0.55–1.0; "
+                   "van der Waals–Platteeuw: 2–600 bar with hydrate formers in the gas).")
         return
     T = s.T - 273.15
     need = t_h + margin - T
@@ -245,12 +249,16 @@ def compositions_panel(model, sol):
              if model["units"][s["dst"][0]]["type"] in ("product",) and s["name"] in names]
     feeds = [s["name"] for sid, s in model["streams"].items()
              if model["units"][s["src"][0]]["type"] == "feed" and s["name"] in names]
+    valid_choice("an_comp_sel", names, multi=True)
     sel = st.multiselect("Streams", list(names.keys()), default=(feeds + prods)[:8], key="an_comp_sel")
     basis = st.radio("Basis", ["mole", "mass"], horizontal=True, key="an_comp_basis")
     if sel:
         st.plotly_chart(charts.composition_figure(model, sol, [names[n] for n in sel], basis), width="stretch",
                         key="an_compfig")
     st.markdown("##### Phase envelope")
+    if not names:
+        return
+    valid_choice("ch_env_stream", names)
     pick = st.selectbox("Stream", list(names.keys()), key="ch_env_stream")
     from .panels import env_panel
     env_panel(sol.streams[names[pick]], sol.fp, "charts")

@@ -147,6 +147,14 @@ def build_report(model, sol, svg=None, title="Process simulation report", projec
     except Exception as e:       # optional section: note the failure instead of breaking the report
         parts.append(f"<p class='note'>Subsea section unavailable ({_e(type(e).__name__)}: {_e(e)})</p>")
     try:
+        parts.append(_fieldlife_section(model))
+    except Exception as e:       # optional section: note the failure instead of breaking the report
+        parts.append(f"<p class='note'>Field-life section unavailable ({_e(type(e).__name__)}: {_e(e)})</p>")
+    try:
+        parts.append(_prognosis_section(model))
+    except Exception as e:       # optional section
+        parts.append(f"<p class='note'>Prognosis section unavailable ({_e(type(e).__name__)}: {_e(e)})</p>")
+    try:
         parts.append(_scenario_section(model, sol))
     except Exception as e:       # optional section: note the failure instead of breaking the report
         parts.append(f"<p class='note'>Scenario comparison unavailable ({_e(type(e).__name__)}: {_e(e)})</p>")
@@ -220,3 +228,61 @@ def _scenario_section(model, sol):
     rows = [[U.key(lab)] + [fmt(U.kv(lab, kp.get(lab))[1]) if not isinstance(kp.get(lab), str) else kp.get(lab)
                             for kp in cols.values()] for lab in labels]
     return "<h2 class='break'>Scenario comparison</h2>" + _table(["Result"] + list(cols), rows)
+
+
+def _prognosis_section(model):
+    """Drainage-strategy comparison and uncertainty ranges stored with the flowsheet, when they are current."""
+    import re
+    from .state import model_hash
+    from .fieldlife import settings_key
+    pr = model.get("prognosis_result") or {}
+    key = [model_hash(model), settings_key(model)]
+    strat = pr.get("strategy") if (pr.get("strategy") or {}).get("key") == key else None
+    unc = pr.get("unc") if (pr.get("unc") or {}).get("key") == key else None
+    if not strat and not unc:
+        return ""
+    out = ["<h2 class='break'>Prognosis (screening)</h2>"]
+    if strat:
+        out.append("<h3>Drainage strategies</h3>" + _table(
+            list(strat["rows"][0]), [[fmt(v) if not isinstance(v, str) else v for v in r.values()]
+                                     for r in strat["rows"]]))
+    if unc:
+        out.append(f"<h3>Uncertainty ({unc['n']} samples per well count)</h3>" + _table(
+            list(unc["rows"][0]), [[fmt(v) for v in r.values()] for r in unc["rows"]]))
+        out.append(f"<p>Highest expected NPV: <b>{unc['best']} wells</b>; most robust (best P90 NPV): "
+                   f"<b>{unc['robust']} wells</b>.</p>")
+    out.append("<p class='note'>P90 is the low case (10th percentile), P10 the high case. One EOS tank, illustrative "
+               "prices and costs, independent inputs.</p>")
+    return "".join(out)
+
+
+def _fieldlife_section(model):
+    """Field-life results stored with the flowsheet, when they belong to the current flowsheet and settings."""
+    import re
+    from .state import model_hash
+    from .fieldlife import settings_key
+    fl = model.get("fieldlife_result")
+    if not fl or fl.get("key") != [model_hash(model), settings_key(model)]:
+        return ""
+    out = ["<h2 class='break'>Field life (screening)</h2>"]
+    for line in fl.get("strategy", []):
+        html = _e(line)
+        html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", html)
+        out.append(f"<p>{html}</p>")
+    sm = fl["summary"]
+    out.append(_table(["Result", "Value"], [[k, fmt(v) if not isinstance(v, str) else v] for k, v in sm.items()]))
+    if fl.get("events"):
+        out.append("<h3>Events</h3><ul>" + "".join(f"<li>{_e(e)}</li>" for _, e in fl["events"]) + "</ul>")
+    cols = ["Year", "Gas [MSm³/d]", "Oil/condensate [Sm³/d]", "Water [Sm³/d]", "Reservoir P [bar(a)]",
+            "Recovery factor [%]", "Limited by", "Cash flow [MUSD]"]
+    rows = []
+    for r in fl["annual"]:
+        rows.append([fmt(U.kv(c, r.get(c))[1]) if not isinstance(r.get(c), str) else r.get(c) for c in cols])
+    out.append("<h3>Production profile</h3>" + _table([U.key(c) for c in cols], rows))
+    if fl.get("sweep"):
+        sc = ["Wells", "Boosting", "Plateau [years]", "Recovery factor [%]", "NPV [MUSD]", "IRR [%]"]
+        out.append("<h3>Well count and boosting</h3>" + _table(sc, [[fmt(r.get(c)) if not isinstance(r.get(c), str)
+                                                                       else r.get(c) for c in sc] for r in fl["sweep"]]))
+    out.append("<p class='note'>One EOS tank model for all wells; deliverability from flowsheet solves with the chokes "
+               "fully open; illustrative prices and costs.</p>")
+    return "".join(out)

@@ -1,30 +1,38 @@
-category,item,description,U_W_m2K,roughness_mm,dP_bar,slots,header_ID_mm,header_length_m,K_bend,K_extra,length_m,bends,length_factor,hog_frac,sag_frac,deh_W_m,eff_pct,min_gvf,max_gvf,max_dP_bar,rated_kW,motor_eff,cost_MUSD,note
-flowline,Bare carbon steel,Uncoated steel line with anti-corrosion coating only,25,0.045,,,,,,,,,,,,,,,,,,,1.5,Illustrative generic value
-flowline,Wet insulation (multilayer PP),Steel line with multilayer polypropylene wet insulation,4,0.045,,,,,,,,,,,,,,,,,,,2.5,Illustrative generic value
-flowline,Pipe-in-pipe,Carrier pipe with dry insulation in the annulus,1,0.045,,,,,,,,,,,,,,,,,,,4,Illustrative generic value
-flowline,Flexible pipe (insulated),Unbonded flexible with insulation layers (rough bore),3,1.0,,,,,,,,,,,,,,,,,,,3.5,Illustrative generic value
-flowline,Towed bundle,Flowlines and utilities inside a carrier pipe,1.5,0.045,,,,,,,,,,,,,,,,,,,5,Illustrative generic value
-flowline,Trenched and buried,Steel line buried in the seabed (soil insulation),3,0.045,,,,,,,,,,,,,,,,,,,3,Illustrative generic value
-flowline,Electrically heated (DEH),Wet-insulated line prepared for direct electrical heating,4,0.045,,,,,,,,,,,,100,,,,,,,4.5,Illustrative generic value
-riser,Vertical (top-tensioned),Straight vertical riser from seabed to hang-off,5,0.045,,,,,,,,,1.0,,,,,,,,,,6,Illustrative generic value
-riser,Steel catenary riser (SCR),Steel riser hanging in a catenary from the vessel,5,0.045,,,,,,,,,1.6,,,,,,,,,,5,Illustrative generic value
-riser,Lazy-wave (flexible),Flexible riser with a buoyancy section (hog and sag bends),3,1.0,,,,,,,,,2.2,0.40,0.25,,,,,,,,8,Illustrative generic value
-riser,Free-hanging flexible,Flexible riser in a simple catenary,3,1.0,,,,,,,,,1.5,,,,,,,,,,6,Illustrative generic value
-riser,Hybrid riser tower,Vertical steel tower with flexible jumper to the vessel,2,0.045,,,,,,,,,1.05,,,,,,,,,,15,Illustrative generic value
-tree,Vertical Xmas tree (VXT),Master and wing valves above the tubing hanger,,,2.0,,,,,,,,,,,,,,,,,,12,Illustrative generic value
-tree,Horizontal Xmas tree (HXT),Valves on the side of the tree body,,,1.5,,,,,,,,,,,,,,,,,,14,Illustrative generic value
-template,4-slot template,Production template with four well slots and one header,,0.045,,4,254,25,,4,,,,,,,,,,,,,35,Illustrative generic value
-template,6-slot template,Production template with six well slots and one header,,0.045,,6,305,35,,5,,,,,,,,,,,,,50,Illustrative generic value
-template,8-slot template,Production template with eight well slots and one header,,0.045,,8,356,45,,6,,,,,,,,,,,,,65,Illustrative generic value
-jumper,Rigid M-shape jumper,Rigid steel jumper with four bends,,0.045,,,,,0.35,1.0,50,4,,,,,,,,,,,2,Illustrative generic value
-jumper,Rigid spool (Z-shape),Rigid steel spool piece with two bends,,0.045,,,,,0.35,0.5,30,2,,,,,,,,,,,1.5,Illustrative generic value
-jumper,Flexible jumper,Flexible jumper (rough bore) without bends,,1.0,,,,,0.0,0.5,60,0,,,,,,,,,,,1.8,Illustrative generic value
-jumper,PLET,Pipeline end termination (valve and hub),,0.045,,,,,0.35,1.5,8,1,,,,,,,,,,,4,Illustrative generic value
-jumper,PLEM,Pipeline end manifold (valves and tee),,0.045,,,,,0.35,2.5,15,2,,,,,,,,,,,8,Illustrative generic value
-valve,SSIV,Subsea isolation valve at the riser base,,,0.3,,,,,,,,,,,,,,,,,,6,Illustrative generic value
-valve,HIPPS valve set,High-integrity pressure protection (two valves in series),,,0.8,,,,,,,,,,,,,,,,,,12,Illustrative generic value
-valve,Manual isolation valve,ROV-operated isolation valve,,,0.2,,,,,,,,,,,,,,,,,,1,Illustrative generic value
-booster,Helico-axial multiphase pump,Multiphase pump for oil-dominated or mixed flow,,,,,,,,,,,,,,,50,0,0.95,100,3000,0.93,60,Illustrative generic value
-booster,Hybrid multiphase pump,Hybrid centrifugal/helico-axial pump for low gas fractions,,,,,,,,,,,,,,,55,0,0.5,150,3000,0.93,55,Illustrative generic value
-booster,Wet-gas compressor,Subsea compressor tolerant of a few percent liquid by volume,,,,,,,,,,,,,,,70,0.95,1,60,6000,0.94,150,Illustrative generic value
-booster,Single-phase liquid pump,Centrifugal pump for (nearly) gas-free liquid,,,,,,,,,,,,,,,70,0,0.05,200,2500,0.93,40,Illustrative generic value
+category,item,description,U_W_m2K,roughness_mm,dP_bar,slots,header_ID_mm,header_length_m,K_bend,K_extra,length_m,bends,length_factor,hog_frac,sag_frac,deh_W_m,eff_pct,min_gvf,max_gvf,max_dP_bar,rated_kW,motor_eff,cost_MUSD,sb_K,res_min,note
+flowline,Bare carbon steel,Uncoated steel line with anti-corrosion coating only,25,0.045,,,,,,,,,,,,,,,,,,,1.5,,,Illustrative generic value
+flowline,Wet insulation (multilayer PP),Steel line with multilayer polypropylene wet insulation,4,0.045,,,,,,,,,,,,,,,,,,,2.5,,,Illustrative generic value
+flowline,Pipe-in-pipe,Carrier pipe with dry insulation in the annulus,1,0.045,,,,,,,,,,,,,,,,,,,4,,,Illustrative generic value
+flowline,Flexible pipe (insulated),Unbonded flexible with insulation layers (rough bore),3,1.0,,,,,,,,,,,,,,,,,,,3.5,,,Illustrative generic value
+flowline,Towed bundle,Flowlines and utilities inside a carrier pipe,1.5,0.045,,,,,,,,,,,,,,,,,,,5,,,Illustrative generic value
+flowline,Trenched and buried,Steel line buried in the seabed (soil insulation),3,0.045,,,,,,,,,,,,,,,,,,,3,,,Illustrative generic value
+flowline,Electrically heated (DEH),Wet-insulated line prepared for direct electrical heating,4,0.045,,,,,,,,,,,,100,,,,,,,4.5,,,Illustrative generic value
+riser,Vertical (top-tensioned),Straight vertical riser from seabed to hang-off,5,0.045,,,,,,,,,1.0,,,,,,,,,,6,,,Illustrative generic value
+riser,Steel catenary riser (SCR),Steel riser hanging in a catenary from the vessel,5,0.045,,,,,,,,,1.6,,,,,,,,,,5,,,Illustrative generic value
+riser,Lazy-wave (flexible),Flexible riser with a buoyancy section (hog and sag bends),3,1.0,,,,,,,,,2.2,0.40,0.25,,,,,,,,8,,,Illustrative generic value
+riser,Free-hanging flexible,Flexible riser in a simple catenary,3,1.0,,,,,,,,,1.5,,,,,,,,,,6,,,Illustrative generic value
+riser,Hybrid riser tower,Vertical steel tower with flexible jumper to the vessel,2,0.045,,,,,,,,,1.05,,,,,,,,,,15,,,Illustrative generic value
+tree,Vertical Xmas tree (VXT),Master and wing valves above the tubing hanger,,,2.0,,,,,,,,,,,,,,,,,,12,,,Illustrative generic value
+tree,Horizontal Xmas tree (HXT),Valves on the side of the tree body,,,1.5,,,,,,,,,,,,,,,,,,14,,,Illustrative generic value
+template,4-slot template,Production template with four well slots and one header,,0.045,,4,254,25,,4,,,,,,,,,,,,,35,,,Illustrative generic value
+template,6-slot template,Production template with six well slots and one header,,0.045,,6,305,35,,5,,,,,,,,,,,,,50,,,Illustrative generic value
+template,8-slot template,Production template with eight well slots and one header,,0.045,,8,356,45,,6,,,,,,,,,,,,,65,,,Illustrative generic value
+jumper,Rigid M-shape jumper,Rigid steel jumper with four bends,,0.045,,,,,0.35,1.0,50,4,,,,,,,,,,,2,,,Illustrative generic value
+jumper,Rigid spool (Z-shape),Rigid steel spool piece with two bends,,0.045,,,,,0.35,0.5,30,2,,,,,,,,,,,1.5,,,Illustrative generic value
+jumper,Flexible jumper,Flexible jumper (rough bore) without bends,,1.0,,,,,0.0,0.5,60,0,,,,,,,,,,,1.8,,,Illustrative generic value
+jumper,PLET,Pipeline end termination (valve and hub),,0.045,,,,,0.35,1.5,8,1,,,,,,,,,,,4,,,Illustrative generic value
+jumper,PLEM,Pipeline end manifold (valves and tee),,0.045,,,,,0.35,2.5,15,2,,,,,,,,,,,8,,,Illustrative generic value
+valve,SSIV,Subsea isolation valve at the riser base,,,0.3,,,,,,,,,,,,,,,,,,6,,,Illustrative generic value
+valve,HIPPS valve set,High-integrity pressure protection (two valves in series),,,0.8,,,,,,,,,,,,,,,,,,12,,,Illustrative generic value
+valve,Manual isolation valve,ROV-operated isolation valve,,,0.2,,,,,,,,,,,,,,,,,,1,,,Illustrative generic value
+booster,Helico-axial multiphase pump,Multiphase pump for oil-dominated or mixed flow,,,,,,,,,,,,,,,50,0,0.95,100,3000,0.93,60,,,Illustrative generic value
+booster,Hybrid multiphase pump,Hybrid centrifugal/helico-axial pump for low gas fractions,,,,,,,,,,,,,,,55,0,0.5,150,3000,0.93,55,,,Illustrative generic value
+booster,Wet-gas compressor,Subsea compressor tolerant of a few percent liquid by volume,,,,,,,,,,,,,,,70,0.95,1,60,6000,0.94,150,,,Illustrative generic value
+booster,Single-phase liquid pump,Centrifugal pump for (nearly) gas-free liquid,,,,,,,,,,,,,,,70,0,0.05,200,2500,0.93,40,,,Illustrative generic value
+booster,Dry-gas centrifugal compressor,Subsea compressor for dry gas downstream of a separator,,,,,,,,,,,,,,,76,0.995,1,60,11500,0.95,180,,,Illustrative generic value
+booster,Water injection pump,Single-phase pump for produced or raw seawater injection,,,,,,,,,,,,,,,72,0,0.02,250,3000,0.94,45,,,Illustrative generic value
+separator,Gas-liquid separator (vertical),Subsea gas/liquid separation ahead of a compressor and a pump,,,,,,,,,,,,,,,,,,,,,80,0.1,2,Illustrative generic value
+separator,Liquid-liquid separator (horizontal),Subsea oil/water separation for water removal and reinjection,,,,,,,,,,,,,,,,,,,,,120,0.15,5,Illustrative generic value
+separator,Inline pipe separator,Compact gravity pipe separator,,,,,,,,,,,,,,,,,,,,,60,0.25,1,Illustrative generic value
+process,Passive subsea cooler,Seawater-cooled tube bundle (natural convection),250,,,,,,,,,,,,,,,,,,,,25,,,Illustrative generic value
+process,Pressure intensifier,Hydraulically driven reciprocating booster for chemicals or hydraulics,,,,,,,,,,,,,,,85,,,,,,4,,,Illustrative generic value
+process,Chemical injection metering valve,Subsea CIMV with flow metering at the tree or manifold,,,5,,,,,,,,,,,,,,,,,,1.5,,,Illustrative generic value

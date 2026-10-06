@@ -56,6 +56,8 @@ def build_fluid(model) -> FluidPackage:
         if a in fp.keys and b in fp.keys:
             i, j = fp.index(a), fp.index(b)
             fp.kij[i, j] = fp.kij[j, i] = float(v)
+    if fl.get("hydrate_model"):
+        fp.hydrate_model = fl["hydrate_model"]
     return fp
 
 
@@ -601,7 +603,7 @@ def solve(model_in, fp: FluidPackage | None = None) -> Solution:
             continue
         if u["type"] in PROFILE_TYPES and "_profile" in u:
             sol.profiles[uid] = u["_profile"]
-        if u["type"] in ("compressor", "subsea_booster") and "_map" in u:
+        if u["type"] in ("compressor", "subsea_booster", "subsea_pump", "subsea_compressor") and "_map" in u:
             sol.maps[uid] = u["_map"]
         if u["type"] == "column" and "_column" in u:
             sol.columns[uid] = u["_column"]

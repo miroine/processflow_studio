@@ -13,8 +13,9 @@ from procsim.streams import stream_properties, hydrate_risk
 from procsim.examples import EXAMPLES, WET_GAS
 
 ENERGY_DIR = {"compressor": "in", "pump": "in", "heater": "in", "expander": "out", "cooler": "out",
-              "aircooler": "out", "subsea_booster": "in"}
-WORK_TYPES = ("compressor", "pump", "expander", "subsea_booster")
+              "aircooler": "out", "subsea_booster": "in", "subsea_pump": "in", "subsea_compressor": "in",
+              "intensifier": "in"}
+WORK_TYPES = ("compressor", "pump", "expander", "subsea_booster", "subsea_pump", "subsea_compressor", "intensifier")
 
 
 # --------------------------------------------------------------- formatting
@@ -56,6 +57,22 @@ def _duty(v, power):
     return f"{fmt(U.value('kW', v, power=power), 0 if (power or not U.field()) else 2)} {U.unit('kW', power=power)}"
 
 
+def valid_choice(key, options, multi=False):
+    """Drop a remembered selectbox / multiselect value that is no longer among the options (e.g. a stream name from
+    the previously loaded example). Streamlit returns the stale session value as it is, which then fails as a
+    KeyError where it is looked up."""
+    ss = st.session_state
+    if key not in ss:
+        return
+    v = ss[key]
+    opts = list(options)
+    if multi:
+        if not isinstance(v, (list, tuple)) or any(x not in opts for x in v):
+            del ss[key]
+    elif v not in opts:
+        del ss[key]
+
+
 def qfmt(label, v, digits=None):
     """'value unit' in the current display system for a labelled SI quantity."""
     from . import units as U
@@ -86,6 +103,34 @@ def init_state():
         ss.solve_error = None
 
 
+EDIT_HISTORY = 25
+_NOT_UNDONE = ("scenarios", "fieldlife_result", "prognosis_result")          # kept as they are when an edit is undone
+
+
+def push_edit(label):
+    """Remember the model before a specification edit (for 'Undo edit')."""
+    ss = st.session_state
+    m = {k: v for k, v in ss.model.items() if k not in _NOT_UNDONE}
+    hist = ss.setdefault("edit_hist", [])
+    hist.append((label, copy.deepcopy(m)))
+    del hist[:-EDIT_HISTORY]
+
+
+def undo_edit():
+    """Restore the model as it was before the last specification edit. Returns the edit's label or None."""
+    ss = st.session_state
+    hist = ss.get("edit_hist") or []
+    if not hist:
+        return None
+    label, m = hist.pop()
+    for k in _NOT_UNDONE:
+        if k in ss.model:
+            m[k] = ss.model[k]
+    ss.model = m
+    ss.widget_ver += 1
+    return label
+
+
 def bump(fit=False):
     """Python changed the structure: make the canvas adopt the model."""
     st.session_state.nonce += 1
@@ -100,6 +145,8 @@ def load_model(m, fit=True):
     st.session_state.selected = []
     st.session_state.sol = None
     st.session_state.sol_hash = None
+    st.session_state.edit_hist = []
+    st.session_state.fm_svg = None
     bump(fit)
 
 
@@ -113,8 +160,10 @@ def canvas_structure(model):
 
 SHORT = {"column": "Column", "hx": "Heat exchanger", "separator": "2-phase separator",
          "separator3": "3-phase separator", "feed": "Feed stream", "product": "Product stream", "splitter": "Tee",
-         "well": "Well", "xmas_tree": "Xmas tree", "template": "Template", "jumper": "Jumper / PLET",
-         "flowline": "Flowline", "riser": "Riser", "subsea_valve": "SSIV / HIPPS", "subsea_booster": "Subsea booster"}
+         "teg_contactor": "TEG contactor", "amine_contactor": "Amine contactor", "relief_valve": "Relief valve (PSV)", "flare": "Flare", "comp_splitter": "Component splitter", "conv_reactor": "Conversion reactor", "eq_reactor": "Equilibrium reactor", "well": "Well", "injection_well": "Injection well", "xmas_tree": "Xmas tree", "template": "Template", "jumper": "Jumper / PLET",
+         "flowline": "Flowline", "riser": "Riser", "subsea_valve": "SSIV / HIPPS", "subsea_booster": "Subsea booster",
+         "subsea_pump": "Subsea pump", "subsea_compressor": "Subsea compressor", "subsea_separator": "Subsea separator",
+         "subsea_cooler": "Subsea cooler", "intensifier": "Intensifier", "cimv": "Chemical injection"}
 
 
 def catalogue_payload():
@@ -221,7 +270,8 @@ def process_canvas_value(key="pfd"):
 
 def model_hash(model):
     m = copy.deepcopy(model)
-    for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios"):   # post-processing settings: editing them never re-solves
+    for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios", "heating", "fieldlife",
+              "fieldlife_result", "waxsand", "power", "fa2", "design", "prognosis", "prognosis_result"):   # post-processing settings and results: editing them never re-solves
         m.pop(k, None)
     for u in m["units"].values():
         for k in ("x", "y", "flip"):
@@ -305,10 +355,36 @@ def _unit_label(u, res):
         return (f"WH {qfmt('Wellhead P [bar(a)]', res['Wellhead P [bar(a)]'], 0)} · "
                 f"{qfmt('Wellhead T [°C]', res['Wellhead T [°C]'], 0)} · "
                 f"{qfmt('Gas [MSm³/d]', res.get('Gas rate [MSm³/d]', 0.0), 2)}")
+    if t == "teg_contactor" and res.get("Water dew point of dried gas [°C]") is not None:
+        return f"dew point {qfmt('Dew point [°C]', res['Water dew point of dried gas [°C]'], 1)}"
+    if t == "amine_contactor" and res.get("CO₂ in sweet gas [mol%]") is not None:
+        return f"CO₂ {qfmt('CO₂ in sweet gas [mol%]', res['CO₂ in sweet gas [mol%]'], 2)} · {qfmt('Reboiler duty [kW]', res['Reboiler duty [kW]'], 0)}"
+    if t == "relief_valve" and res.get("Selected orifice") is not None:
+        return f"orifice {str(res['Selected orifice']).split(' ')[0]} · {qfmt('Relieving load [kg/h]', res['Relieving load [kg/h]'], 0)}"
+    if t == "flare" and res.get("Heat release [MW]") is not None:
+        return f"{qfmt('Heat release [MW]', res['Heat release [MW]'], 0)} · flame {qfmt('Flame length [m]', res['Flame length [m]'], 0)}"
+    if t in ("conv_reactor", "eq_reactor") and res.get("Outlet T [°C]") is not None:
+        return f"→ {qfmt('Outlet T [°C]', res['Outlet T [°C]'], 0)}"
+    if t == "injection_well" and res.get("Injection rate [Sm³/d]") is not None:
+        return (f"{qfmt('Rate [Sm³/d]', res['Injection rate [Sm³/d]'], 0)} · margin "
+                f"{qfmt('Margin [bar]', res['Injection margin [bar]'], 0)}")
     if t == "xmas_tree" and res.get("Choke ΔP [bar]") is not None:
         crit = " · critical" if str(res.get("Choke flow", "")).startswith("Critical") else ""
         return f"choke ΔP {qfmt('Choke ΔP [bar]', res['Choke ΔP [bar]'], 1)}{crit}"
-    if t == "subsea_booster" and res.get("Shaft power [kW]") is not None:
+    if t == "subsea_separator" and res.get("Vessel ID [mm]") is not None:
+        return f"ID {qfmt('ID [mm]', res['Vessel ID [mm]'], 0)} · {qfmt('Vessel P [bar(a)]', res['Vessel P [bar(a)]'], 0)}"
+    if t == "subsea_cooler" and res.get("Outlet T [°C]") is not None:
+        return f"→ {qfmt('Outlet T [°C]', res['Outlet T [°C]'], 0)} · {qfmt('Duty [kW]', res['Duty rejected to sea [kW]'], 0)}"
+    if t == "intensifier" and res.get("Outlet P [bar(a)]") is not None:
+        return f"→ {qfmt('Outlet P [bar(a)]', res['Outlet P [bar(a)]'], 0)} · 1:{res['Area ratio [-]']:.1f}"
+    if t == "cimv" and res.get("Chemical rate [L/h]") is not None:
+        return f"{res['Chemical rate [L/h]']:,.0f} L/h" + (
+            f" · margin {qfmt('Margin [°C]', res['Hydrate margin downstream [°C]'], 0)}"
+            if res.get("Hydrate margin downstream [°C]") is not None else "")
+    if t == "flowline" and res.get("Heating system"):
+        k_ = "Electrical heating power [kW]" if "Electrical heating power [kW]" in res else "Topside heater duty for heating [kW]"
+        return f"ΔP {qfmt('Pressure drop [bar]', res['Pressure drop [bar]'], 1)} · heat {qfmt('Duty [kW]', res[k_], 0)}"
+    if t in ("subsea_booster", "subsea_pump", "subsea_compressor") and res.get("Shaft power [kW]") is not None:
         return (f"{qfmt('Shaft power [kW]', res['Shaft power [kW]'], 0 if 'SI' in _sys() else 0)} · "
                 f"GVF {res['Inlet GVF [%]']:.0f} %")
     if t == "template" and res.get("Slots used"):

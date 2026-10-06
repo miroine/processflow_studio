@@ -6,7 +6,7 @@ import streamlit as st
 
 from procsim import scenarios as SC
 
-from .state import sol_is_current, fmt, load_model
+from .state import sol_is_current, fmt, load_model, valid_choice
 from . import charts
 from . import units as U
 
@@ -60,12 +60,14 @@ def scenarios_tab():
     names = [s["name"] for s in scs]
     c = st.columns([2, 2])
     diff = c[0].toggle("Show differences to a base case", value=False, key="sc_diff")
+    valid_choice("sc_base", names)
     base = c[1].selectbox("Base case", names, key="sc_base") if diff else None
     df = comparison_frame(model, current, base)
     st.dataframe(df, hide_index=True, width="stretch")
     labels, cols = SC.comparison(scs, current)
     numeric = [lab for lab in labels if any(isinstance(kp.get(lab), (int, float)) for kp in cols.values())]
     if numeric:
+        valid_choice("sc_chart", numeric)
         pick = st.selectbox("Chart", numeric, key="sc_chart",
                             index=numeric.index("CAPEX [MUSD]") if "CAPEX [MUSD]" in numeric else 0, format_func=U.key)
         vals = []
@@ -78,6 +80,7 @@ def scenarios_tab():
                        mime="text/csv", key="sc_dl")
     st.markdown("##### Manage")
     m1, m2, m3 = st.columns([2, 1, 1])
+    valid_choice("sc_pick", names)
     pick_sc = m1.selectbox("Scenario", names, key="sc_pick",
                            format_func=lambda n: f"{n} · saved {next(s['saved'] for s in scs if s['name'] == n)}")
     m2.markdown("<div style='padding-top:28px'></div>", unsafe_allow_html=True)

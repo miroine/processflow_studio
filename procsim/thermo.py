@@ -98,6 +98,9 @@ class FlashResult:
         return " + ".join({"V": "Vapour", "L": "Liquid", "W": "Aqueous"}[k] for k in kinds)
 
 
+GDEM = True     # SS acceleration (switch off to compare)
+
+
 class FluidPackage:
     """Peng-Robinson (1978 alpha) with editable kij and Peneloux volume shift."""
 
@@ -129,6 +132,7 @@ class FluidPackage:
         self.polar = np.array([c.key in ("H2O", "MeOH", "MEG") for c in self.comps])
         self._kcache = {}
         self._tcache = {}
+        self.hydrate_model = "Motiee (gas-gravity correlation)"     # see transport.HYDRATE_MODELS
         # Peneloux with a Rackett Z_RA works well for hydrocarbons but badly for
         # water; calibrate water's shift to its 15 degC density instead.
         for i, c in enumerate(self.comps):
@@ -168,7 +172,7 @@ class FluidPackage:
         return a, dadT
 
     # --------------------------------------------------------- mixture
-    def _mix(self, x, T, idx):
+    def _mix(self, x, T, idx, want_dam=True):
         """Return mixture a, b, dadT, and the vector sum_j x_j a_ij (for lnphi)."""
         key = idx.tobytes()
         # a_ij(T) and da_ij/dT depend on T and the component set only: flashes evaluate many compositions at the
@@ -192,7 +196,7 @@ class FluidPackage:
         aij, daij = hit
         xa = aij @ x
         am = float(x @ xa)
-        dam = float(x @ daij @ x)
+        dam = float(x @ (daij @ x)) if want_dam else None     # only caloric properties need da/dT
         bm = float(x @ self.b[idx])
         return am, bm, dam, xa, aij, daij
 
@@ -241,7 +245,7 @@ class FluidPackage:
 
         want: None (min G), 'V' (largest root) or 'L' (smallest root).
         Returns (lnphi, Z, mix-tuple)."""
-        am, bm, dam, xa, aij, daij = self._mix(x, T, idx)
+        am, bm, dam, xa, aij, daij = self._mix(x, T, idx, False)
         A = am * P / (R_BAR * T) ** 2
         B = bm * P / (R_BAR * T)
         roots = self._zroots(A, B)
@@ -279,6 +283,8 @@ class FluidPackage:
     def phase_props(self, x, T, P, idx, Z, mix):
         """H, S, Cp, Cv, V for one phase (x over idx)."""
         am, bm, dam = mix
+        if dam is None:
+            dam = self._mix(x, T, idx)[2]
         B = bm * P / (R_BAR * T)
         V = Z * R_BAR * T / P
         L = math.log((Z + (1 + SQ2) * B) / (Z + (1 - SQ2) * B))
@@ -396,7 +402,13 @@ class FluidPackage:
             return g
 
         phases = None
-        if K0 is not None and np.ndim(K0) == 2 and K0.shape == (nrow, self.n):
+        if K0 is not None and three and np.ndim(K0) == 2 and K0.shape == (1, self.n):
+            # seed from a two-phase result (e.g. gas + free water) in a system that may form three phases: a
+            # two-phase SS from it, accepted only if converged and the dominant phase is stable (no third phase)
+            phases = run([np.maximum(K0[0][idx], 1e-30)])
+            if phases is not None and (not self._last_conv or len(phases) != 2 or not complete(phases)):
+                phases = None
+        elif K0 is not None and np.ndim(K0) == 2 and K0.shape == (nrow, self.n):
             phases = run([np.maximum(K0[r][idx], 1e-30) for r in range(nrow)])      # warm start
             if phases is not None and (not self._last_conv or (len(phases) > 1 and not complete(phases))):
                 phases = None
@@ -441,6 +453,12 @@ class FluidPackage:
             return res
         res.phases = phases
         res.Kset = ksets.get(id(phases))       # warm-start seed describing the chosen split
+        if res.Kset is None and three and len(phases) == 2:
+            # two phases where three were possible: seed the next flash with their K (phase 2 relative to phase 1)
+            a, b = phases[1].x, phases[0].x
+            with np.errstate(divide="ignore", invalid="ignore"):
+                k = np.where(b > 0, np.maximum(a, 1e-300) / np.maximum(b, 1e-300), 1.0)
+            res.Kset = k[None, :]
         pv = res.phase("V")
         pl = res.phase("L") or res.phase("W")
         if pv is not None and pl is not None:
@@ -486,6 +504,8 @@ class FluidPackage:
         npha = K.shape[0]
         if npha == 2:
             return FluidPackage._rr2(z, K[1])
+        if npha == 3:
+            return FluidPackage._rr3(z, K, beta0)
         beta = np.full(npha, 1.0 / npha) if beta0 is None else np.maximum(beta0, 1e-10)
         for _ in range(100):
             E = K.T @ beta
@@ -525,11 +545,93 @@ class FluidPackage:
         E = K.T @ beta
         return beta, E
 
+    @staticmethod
+    def _solve_small(Hm, g, f):
+        """Solve H[f,f] d = -g[f] for 1-3 free phases (Cramer's rule; plain floats)."""
+        n = len(f)
+        if n == 1:
+            a = Hm[f[0]][f[0]]
+            return [-g[f[0]] / a] if a != 0 else [-g[f[0]]]
+        if n == 2:
+            i, j = f
+            a, b, c, d = Hm[i][i], Hm[i][j], Hm[j][i], Hm[j][j]
+            det = a * d - b * c
+            if det == 0:
+                return [-g[i], -g[j]]
+            return [(-g[i] * d + b * g[j]) / det, (-a * g[j] + c * g[i]) / det]
+        a = Hm
+        det = (a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+               + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]))
+        if det == 0:
+            return [-g[0], -g[1], -g[2]]
+        r = [-g[0], -g[1], -g[2]]
+        out = []
+        for c in range(3):
+            m = [row[:] for row in a]
+            for k in range(3):
+                m[k][c] = r[k]
+            out.append((m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])) / det)
+        return out
+
+    @staticmethod
+    def _rr3(z, K, beta0=None):
+        """Three-phase Michelsen Rachford-Rice (same algorithm as _rr, scalar arithmetic for speed).
+        K: (3, n) with reference row ones."""
+        K1, K2 = K[1], K[2]
+        if beta0 is None:
+            beta = [1.0 / 3.0] * 3
+        else:
+            beta = [max(float(b), 1e-10) for b in beta0]
+        nb = beta
+        for _ in range(100):
+            E = beta[0] + beta[1] * K1 + beta[2] * K2
+            zE = z / E
+            zE2 = zE / E
+            k1z, k2z = K1 * zE2, K2 * zE2
+            g = [1.0 - float(zE.sum()), 1.0 - float(K1 @ zE), 1.0 - float(K2 @ zE)]
+            h00, h01, h02 = float(zE2.sum()) + 1e-14, float(k1z.sum()), float(k2z.sum())
+            h11, h12, h22 = float(k1z @ K1) + 1e-14, float(k1z @ K2), float(k2z @ K2) + 1e-14
+            Hm = [[h00, h01, h02], [h01, h11, h12], [h02, h12, h22]]
+            f = [k for k in range(3) if beta[k] > 0 or g[k] < 0]
+            if all(abs(g[k]) < 1e-13 for k in f):
+                break
+            d = [0.0, 0.0, 0.0]
+            for k, v in zip(f, FluidPackage._solve_small(Hm, g, f)):
+                d[k] = v
+            alpha = 1.0
+            hit = -1
+            for k in range(3):
+                if d[k] < 0 and beta[k] + alpha * d[k] < 0:
+                    alpha = beta[k] / -d[k]
+                    hit = k
+            Q0 = sum(beta) - float(z @ np.log(E))
+            for _ls in range(30):
+                nb = [beta[k] + alpha * d[k] for k in range(3)]
+                if hit >= 0 and alpha == beta[hit] / -d[hit]:
+                    nb[hit] = 0.0
+                nb = [max(v, 0.0) for v in nb]
+                En = nb[0] + nb[1] * K1 + nb[2] * K2
+                if En.min() > 0:
+                    Qn = sum(nb) - float(z @ np.log(En))
+                    if Qn <= Q0 + 1e-15:
+                        break
+                alpha *= 0.5
+                hit = -1
+            step = max(abs(alpha * v) for v in d)
+            beta = nb
+            if step < 1e-15:
+                break
+        beta = np.array(beta)
+        E = beta[0] + beta[1] * K1 + beta[2] * K2
+        return beta, E
+
     def _ss(self, zl, T, P, idx, Ks):
         """Successive substitution. Ks: (np-1, n) K of non-reference phases."""
         npha = Ks.shape[0] + 1
         lnK = np.log(np.maximum(Ks, 1e-300))
         beta = None
+        d_prev = None
         it = 0
         for it in range(1, 400):
             K = np.vstack([np.ones(idx.size), np.exp(lnK)])
@@ -542,10 +644,22 @@ class FluidPackage:
                 lp, Z, mix = self.lnphi(X[k], T, P, idx)
                 lps.append((lp, Z, mix))
             new = np.array([lps[0][0] - lps[k][0] for k in range(1, npha)])
-            err = float(np.max(np.abs(new - lnK)))
+            d = new - lnK
+            err = float(np.max(np.abs(d)))
             lnK = new
             if err < 1e-10:
                 break
+            # GDEM acceleration (Michelsen): SS converges linearly with the dominant eigenvalue lam of its
+            # iteration matrix; every 5th step jump ahead along the last correction by lam/(1-lam). The fixed
+            # point (the converged K) is unchanged; only the number of steps falls. Not applied while a phase is
+            # nearly absent (beta < 1e-3): the jump can push a trace phase out of the split near a dew point
+            if GDEM and it % 5 == 0 and d_prev is not None and err > 1e-8 and np.all(beta > 1e-3):
+                b0, b1 = d_prev.ravel(), d.ravel()
+                den = float(b0 @ b1)
+                lam = float(b1 @ b1) / den if den > 0 else 0.0
+                if 0.0 < lam < 0.97:
+                    lnK = lnK + d * min(lam / (1.0 - lam), 20.0)
+            d_prev = d
             # trivial-solution detection: all non-ref phases collapsing onto the reference
             if it > 8 and np.all(np.max(np.abs(lnK), axis=1) < 1e-4):
                 return None
@@ -739,11 +853,17 @@ class FluidPackage:
         f1 = f(T1)
         if abs(f1) < 1e-6:
             return cache[T1]
-        dT = 5.0 if f1 < 0 else -5.0
+        # first step: Newton with the frozen-phase heat capacity (dH/dT = Cp, dS/dT = Cp/T); exact for a single
+        # phase, too long a step in two-phase regions (latent heat) where the secant below takes over
+        slope = cache[T1].Cp if prop == "H" else cache[T1].Cp / T1
+        dT = -f1 / slope if slope > 1e-6 else (5.0 if f1 < 0 else -5.0)
+        dT = max(-30.0, min(30.0, dT))
+        if abs(dT) < 1e-4:
+            dT = 1e-4 if f1 < 0 else -1e-4
         T2 = min(max(T1 + dT, lo), hi)
         f2 = f(T2)
         for _ in range(25):
-            if abs(f2) < 1e-6 * max(1.0, abs(target)) or abs(T2 - T1) < 1e-8:
+            if abs(f2) < 1e-7 * max(1.0, abs(target)) or abs(T2 - T1) < 1e-8:
                 return cache[T2]
             if f2 == f1:
                 break

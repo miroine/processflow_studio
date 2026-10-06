@@ -38,14 +38,22 @@
     hx:         { w: 104, h: 44, ports: { tube_in: [-52, 0, "L"], tube_out: [52, 0, "R"],
                                           shell_in: [26, -18, "U"], shell_out: [-26, 18, "D"] } },
     scrubber:   { w: 40, h: 104, ports: { feed: [-20, 8, "L"], vapour: [0, -52, "U"], liquid: [0, 52, "D"] } },
+    teg_contactor: { w: 44, h: 110, ports: { feed: [-22, 34, "L"], dry: [0, -55, "U"], water: [22, 42, "R"] } },
+    amine_contactor: { w: 44, h: 110, ports: { feed: [-22, 34, "L"], sweet: [0, -55, "U"], acid: [22, 42, "R"] } },
+    relief_valve: { w: 40, h: 44, ports: { in: [-20, 10, "L"], out: [0, -22, "U"] } },
+    flare:      { w: 36, h: 100, ports: { in: [-18, 40, "L"] } },
+    comp_splitter: { w: 50, h: 70, ports: { feed: [-25, 0, "L"], top: [25, -20, "R"], bottom: [25, 20, "R"] }, energy: [0, 35, "D"] },
+    conv_reactor: { w: 50, h: 76, ports: { feed: [-25, 0, "L"], out: [25, 0, "R"] }, energy: [0, 38, "D"] },
+    eq_reactor: { w: 50, h: 76, ports: { feed: [-25, 0, "L"], out: [25, 0, "R"] }, energy: [0, 38, "D"] },
     column:     { w: 50, h: 190, ports: { feed_top: [-25, -70, "L"], feed: [-25, 0, "L"], feed_bottom: [-25, 70, "L"],
-                                          overhead: [0, -95, "U"], bottoms: [0, 95, "D"] },
+                                          overhead: [0, -95, "U"], bottoms: [0, 95, "D"], water: [25, 30, "R"] },
                   energies: [[25, -76, "R"], [25, 76, "R"]] },
     pipe:       { w: 84, h: 26, ports: { in: [-42, 0, "L"], out: [42, 0, "R"] }, energy: [0, -10, "U"] },
     recycle:    { w: 36, h: 36, ports: { in: [-18, 0, "L"], out: [18, 0, "R"] } },
     adjust:     { w: 40, h: 40, ports: {} },
     // subsea (SURF)
-    well:         { w: 40, h: 76, ports: { in: [-20, 30, "L"], out: [20, -30, "R"] } },
+    well:         { w: 40, h: 76, ports: { in: [-20, 30, "L"], lift: [-20, -6, "L"], out: [20, -30, "R"] } },
+    injection_well: { w: 40, h: 76, ports: { in: [-20, -30, "L"], out: [20, 30, "R"] } },
     xmas_tree:    { w: 50, h: 56, ports: { in: [-25, 18, "L"], out: [25, -8, "R"] } },
     template:     { w: 96, h: 60, ports: { in: [-48, 8, "L"], out: [48, 8, "R"] } },
     jumper:       { w: 76, h: 34, ports: { in: [-38, 10, "L"], out: [38, 10, "R"] } },
@@ -53,6 +61,13 @@
     riser:        { w: 64, h: 96, ports: { in: [-32, 40, "L"], out: [32, -40, "R"] } },
     subsea_valve: { w: 40, h: 40, ports: { in: [-20, 10, "L"], out: [20, 10, "R"] } },
     subsea_booster: { w: 60, h: 58, ports: { in: [-30, 4, "L"], out: [30, 4, "R"] }, energy: [0, 29, "D"] },
+    subsea_pump:       { w: 56, h: 58, ports: { in: [-28, 6, "L"], out: [28, -4, "R"] }, energy: [0, 29, "D"] },
+    subsea_compressor: { w: 64, h: 58, ports: { in: [-32, 4, "L"], out: [32, 4, "R"] }, energy: [0, 29, "D"] },
+    subsea_separator:  { w: 50, h: 100, ports: { feed: [-25, 0, "L"], vapour: [0, -50, "U"], oil: [25, 26, "R"],
+                                                 water: [0, 50, "D"] } },
+    subsea_cooler:     { w: 70, h: 56, ports: { in: [-35, -16, "L"], out: [35, 16, "R"] } },
+    intensifier:       { w: 64, h: 40, ports: { in: [-32, 6, "L"], out: [32, 6, "R"] }, energy: [-8, -20, "U"] },
+    cimv:              { w: 44, h: 44, ports: { in: [-22, 8, "L"], chem: [0, -22, "U"], out: [22, 8, "R"] } },
   };
 
   function portPos(u, port) {
@@ -293,6 +308,42 @@
       <line x1="10" y1="-8" x2="10" y2="16" stroke="#6f7c8a" stroke-width="1"/>
       <rect x="23" y="-22" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
       <rect x="-29" y="15" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
+    teg_contactor: () => `
+      <rect x="-15" y="-48" width="30" height="96" rx="14" fill="url(#gV)" ${STK}/>
+      <path d="M-15,-30 L15,-30 M-15,-18 L15,-18 M-15,-6 L15,-6 M-15,6 L15,6 M-15,18 L15,18" stroke="#4d5a68" stroke-width="1"/>
+      <path d="M15,-38 L24,-38" stroke="#b08400" stroke-width="2"/>
+      <path d="M15,28 L24,28" stroke="#b08400" stroke-width="2"/>
+      <text x="0" y="40" font-size="8" text-anchor="middle" fill="#2f3a46">TEG</text>`,
+    amine_contactor: () => `
+      <rect x="-15" y="-48" width="30" height="96" rx="14" fill="url(#gV)" ${STK}/>
+      <path d="M-15,-30 L15,-30 M-15,-18 L15,-18 M-15,-6 L15,-6 M-15,6 L15,6 M-15,18 L15,18" stroke="#4d5a68" stroke-width="1"/>
+      <path d="M15,-38 L24,-38" stroke="#7a5ea8" stroke-width="2"/>
+      <path d="M15,28 L24,28" stroke="#7a5ea8" stroke-width="2"/>
+      <text x="0" y="40" font-size="8" text-anchor="middle" fill="#2f3a46">AMINE</text>`,
+    relief_valve: () => `
+      <path d="M-14,16 L-14,-2 L0,8 L14,-2 L14,16 Z M-14,-2 L-14,-14 L14,-14 L14,-2" fill="url(#gV)" ${STK}/>
+      <line x1="0" y1="-14" x2="0" y2="-22" stroke="#2f3a46" stroke-width="1.6"/>
+      <path d="M-8,-14 L8,-14 L8,-22 L-8,-22 Z" fill="none" stroke="#c0392b" stroke-width="1.4"/>
+      <path d="M-4,-18 L4,-18" stroke="#c0392b" stroke-width="1.4"/>`,
+    flare: () => `
+      <rect x="-3" y="-20" width="6" height="68" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <path d="M-9,-20 L9,-20 L5,-26 L-5,-26 Z" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <path d="M0,-50 C9,-40 8,-31 0,-27 C-8,-31 -9,-40 0,-50 Z" fill="#f2a33a" stroke="#c0392b" stroke-width="1.1"/>
+      <path d="M0,-42 C4,-37 3,-32 0,-30 C-3,-32 -4,-37 0,-42 Z" fill="#fde28a"/>`,
+    comp_splitter: () => `
+      <rect x="-18" y="-30" width="36" height="60" rx="3" fill="url(#gV)" ${STK}/>
+      <path d="M-18,0 L0,0 M0,0 L18,-20 M0,0 L18,20" stroke="#4d5a68" stroke-width="1.3" fill="none"/>
+      <text x="-2" y="-18" font-size="8" text-anchor="middle" fill="#2f3a46">SPLIT</text>`,
+    conv_reactor: () => `
+      <rect x="-15" y="-34" width="30" height="68" rx="12" fill="url(#gV)" ${STK}/>
+      <path d="M-15,-6 L15,-6 M-15,8 L15,8" stroke="#4d5a68" stroke-width="1"/>
+      <text x="0" y="-12" font-size="9" text-anchor="middle" font-weight="700" fill="#2f3a46">R</text>
+      <text x="0" y="24" font-size="7" text-anchor="middle" fill="#2f3a46">conv</text>`,
+    eq_reactor: () => `
+      <rect x="-15" y="-34" width="30" height="68" rx="12" fill="url(#gV)" ${STK}/>
+      <path d="M-15,-6 L15,-6 M-15,8 L15,8" stroke="#4d5a68" stroke-width="1"/>
+      <text x="0" y="-12" font-size="9" text-anchor="middle" font-weight="700" fill="#2f3a46">R</text>
+      <text x="0" y="24" font-size="9" text-anchor="middle" fill="#2f3a46">⇌</text>`,
     scrubber: () => `
       <path d="M-16,-40 A16,9 0 0 1 16,-40 L16,40 A16,9 0 0 1 -16,40 Z" fill="url(#gV)" ${STK}/>
       <rect x="-15.3" y="-33" width="30.6" height="7" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".8"/>
@@ -332,6 +383,15 @@
       <path d="M-9,28 L-14,26 M-9,32 L-14,34 M9,28 L14,26 M9,32 L14,34" stroke="#b5451b" stroke-width="1.3"/>
       <rect x="-7" y="-36" width="14" height="12" rx="2" fill="url(#gB)" ${STK}/>
       <line x1="7" y1="-30" x2="20" y2="-30" stroke="#2f3a46" stroke-width="2"/>`,
+    injection_well: () => `
+      <path d="M-18,24 L18,24 L18,36 L-18,36 Z" fill="url(#rock)" stroke="#6f5a3a" stroke-width="1"/>
+      <line x1="-18" y1="-24" x2="18" y2="-24" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>
+      <rect x="-9" y="-24" width="18" height="52" fill="url(#gV)" ${STK}/>
+      <rect x="-4" y="-24" width="8" height="52" fill="#dbe9f6" stroke="#4d5a68" stroke-width=".9"/>
+      <path d="M0,-14 L0,14 M0,14 L-4,7 M0,14 L4,7" fill="none" stroke="#3d5fc4" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M9,28 L14,26 M9,32 L14,34 M-9,28 L-14,26 M-9,32 L-14,34" stroke="#3d5fc4" stroke-width="1.3"/>
+      <rect x="-7" y="-36" width="14" height="12" rx="2" fill="url(#gB)" ${STK}/>
+      <line x1="-7" y1="-30" x2="-20" y2="-30" stroke="#2f3a46" stroke-width="2"/>`,
     xmas_tree: () => `
       <rect x="-9" y="-26" width="18" height="50" rx="2" fill="url(#gV)" ${STK}/>
       <path d="M-6,-16 L6,-16 L-6,-8 L6,-8 Z" fill="url(#gB)" stroke="#2f3a46" stroke-width="1"/>
@@ -385,6 +445,56 @@
       <rect x="25" y="-2" width="5" height="12" rx="1" fill="url(#gV)" ${STK}/>
       <rect x="-3" y="16" width="6" height="10" fill="url(#gMot)" stroke="#2f3a46" stroke-width="1"/>
       <line x1="-30" y1="26" x2="30" y2="26" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    subsea_pump: () => `
+      <rect x="-12" y="-28" width="24" height="10" rx="2" fill="#f2b33d" ${STK}/>
+      <rect x="-3" y="-18" width="6" height="6" fill="url(#gMot)" stroke="#2f3a46" stroke-width="1"/>
+      <circle cx="0" cy="2" r="16" fill="url(#gB)" ${STK}/>
+      <path d="M0,2 L0,-11 M0,2 L11,9 M0,2 L-11,9" stroke="#1d4f86" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="0" cy="2" r="3" fill="#f4f7fa" stroke="#1d4f86" stroke-width="1"/>
+      <rect x="-28" y="2" width="12" height="8" fill="url(#gV)" ${STK}/>
+      <path d="M12,-9 L28,-9 L28,1 L15,1" fill="url(#gV)" ${STK}/>
+      <line x1="-28" y1="26" x2="28" y2="26" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    subsea_compressor: () => `
+      <rect x="-14" y="-28" width="28" height="9" rx="2" fill="#f2b33d" ${STK}/>
+      <rect x="-30" y="-17" width="60" height="34" rx="9" fill="#e9eef3" ${STK}/>
+      <path d="M-22,-11 L22,-5 L22,13 L-22,19 Z" transform="translate(0,-4)" fill="url(#gB)" stroke="#2f3a46" stroke-width="1.2"/>
+      <line x1="-12" y1="-9" x2="-12" y2="9" stroke="#34507a" stroke-width="1"/>
+      <line x1="0" y1="-7" x2="0" y2="7" stroke="#34507a" stroke-width="1"/>
+      <line x1="11" y1="-5" x2="11" y2="5" stroke="#34507a" stroke-width="1"/>
+      <rect x="-3" y="17" width="6" height="9" fill="url(#gMot)" stroke="#2f3a46" stroke-width="1"/>
+      <line x1="-32" y1="26" x2="32" y2="26" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    subsea_separator: () => `
+      <rect x="-24" y="38" width="48" height="6" fill="#f2b33d" ${STK}/>
+      <path d="M-18,-36 A18,10 0 0 1 18,-36 L18,30 A18,10 0 0 1 -18,30 Z" fill="url(#gV)" ${STK}/>
+      <rect x="-17.3" y="-30" width="34.6" height="6" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".8"/>
+      <path d="M-17.3,8 L17.3,8 L17.3,30 A17.3,9.3 0 0 1 -17.3,30 Z" fill="${LIQ}"/>
+      <path d="M-17.3,22 L17.3,22 L17.3,30 A17.3,9.3 0 0 1 -17.3,30 Z" fill="${WAT}"/>
+      <line x1="-17" y1="8" x2="17" y2="8" stroke="#2d6db5" stroke-width="1" stroke-dasharray="3 2"/>
+      <rect x="-3" y="-50" width="6" height="5" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-3" y="44" width="6" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <line x1="-25" y1="50" x2="25" y2="50" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    subsea_cooler: () => `
+      <rect x="-30" y="-24" width="60" height="44" rx="3" fill="#eef5fb" ${STK}/>
+      <path d="M-35,-16 L-22,-16 L-22,10 L-12,10 L-12,-16 L-2,-16 L-2,10 L8,10 L8,-16 L18,-16 L18,16 L35,16" fill="none"
+            stroke="#2f3a46" stroke-width="4.5" stroke-linejoin="round"/>
+      <path d="M-35,-16 L-22,-16 L-22,10 L-12,10 L-12,-16 L-2,-16 L-2,10 L8,10 L8,-16 L18,-16 L18,16 L35,16" fill="none"
+            stroke="#7fb3e0" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="M-26,-30 q4,-3 8,0 t8,0 t8,0 t8,0 t8,0 t8,0" fill="none" stroke="#2d6db5" stroke-width="1.2"/>`,
+    intensifier: () => `
+      <rect x="-26" y="-10" width="26" height="28" rx="2" fill="url(#gB)" ${STK}/>
+      <rect x="0" y="-1" width="26" height="14" rx="2" fill="url(#gV)" ${STK}/>
+      <line x1="-12" y1="-8" x2="-12" y2="16" stroke="#34507a" stroke-width="2"/>
+      <line x1="-12" y1="6" x2="18" y2="6" stroke="#34507a" stroke-width="2"/>
+      <rect x="16" y="1" width="3" height="10" fill="#34507a"/>
+      <rect x="-32" y="2" width="6" height="8" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="26" y="2" width="6" height="8" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <text x="-13" y="-13" text-anchor="middle" font-size="7" font-weight="700" fill="#2f3a46">HYD</text>`,
+    cimv: () => `
+      <path d="M-18,0 L-18,16 L0,8 Z M18,0 L18,16 L0,8 Z" fill="url(#gV)" ${STK}/>
+      <line x1="0" y1="8" x2="0" y2="-10" stroke="#2f3a46" stroke-width="1.4"/>
+      <circle cx="0" cy="-12" r="7" fill="#f2b33d" ${STK}/>
+      <path d="M-4,-12 L4,-12 M0,-12 L3,-15" stroke="#2f3a46" stroke-width="1.2"/>
+      <line x1="0" y1="-19" x2="0" y2="-22" stroke="#2f3a46" stroke-width="1.6"/>`,
     subsea_valve: () => `
       <path d="M-18,1 L-18,19 L0,10 Z M18,1 L18,19 L0,10 Z" fill="url(#gV)" ${STK}/>
       <line x1="0" y1="10" x2="0" y2="-6" stroke="#2f3a46" stroke-width="1.4"/>
