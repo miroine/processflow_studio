@@ -1022,6 +1022,77 @@ for nm_ in [n for n in EXAMPLES if "(topside)" in n]:
         _w = _sp(ss.sol.streams[_sid], ss.sol.fp)["Wobbe index [MJ/Sm³]"]
         c.close("gas mixing: the Adjust brings the sales gas to a Wobbe index of 50.5", _w, 50.5, 0.01)
 
+# ---- 16p. v7.2: Profile tab (one steady-state solve per time step) --------------------------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Oil stabilisation"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("profile tab renders on an example without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("profile tab offers the table, the fill and the run buttons",
+        {"prof_fill", "prof_run"} <= {k_ for _, _, k_ in st.HOOK["log"]}, "")
+h0 = ss.sol_hash
+ss["prof_n"] = 4
+ss["prof_fe"] = 0.6
+st.HOOK["press"].add("prof_fill")
+run()
+rows_ = ss.model.get("profile", {}).get("rows") or []
+c.eq("filling the table creates the requested steps", len(rows_), 4)
+c.close("last step rate = factor x flowsheet rate", rows_[-1]["Well fluid | flow"], 1800.0, 1e-9)
+c.check("the table is shown in an editor", any((k_ or "").startswith("prof_ed_") for _, _, k_ in st.HOOK["log"]), "")
+st.HOOK["errors"].clear()
+st.HOOK["press"].add("prof_run")
+run()
+res_ = (ss.get("prof_result") or {}).get("res")
+c.check("profile run stored", bool(res_) and len(res_["steps"]) == 4, str(ss.get("prof_result", {}).keys()))
+c.eq("every step solved", [s_["status"] for s_ in res_["steps"]], ["ok"] * 4)
+c.check("profile chart rendered", any("Profile results" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.eq("running a profile does not re-solve or change the flowsheet", ss.sol_hash, h0)
+c.check("profile: no UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("profile survives in the flowsheet but is not part of the solve hash", "profile" in ss.model and
+        __import__("ui.state", fromlist=["x"]).model_hash(ss.model) == h0, "")
+ss["prof_n"] = 5
+st.HOOK["press"].add("prof_fill")
+run()
+c.check("results are flagged as out of date after the table changes",
+        any("run the profile again" in t_ for t_ in st.HOOK["texts"]), str(st.HOOK["texts"][-4:]))
+st.HOOK["errors"].clear()
+st.HOOK["press"].add("New (blank)")
+run()
+c.check("profile tab on a blank flowsheet shows a hint, not an error", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+
+# ---- 16r. v7.3: Dynamic tab ------------------------------------------------------------------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Dynamic: HP separator"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("dynamic tab renders on a dynamic example without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("dynamic tab offers a run button", "dyn_run" in {k_ for _, _, k_ in st.HOOK["log"]}, "")
+c.check("the example carries its dynamic settings", bool(ss.model.get("dynamics", {}).get("events")), "")
+h0 = ss.sol_hash
+st.HOOK["press"].add("dyn_run")
+run()
+res_ = (ss.get("dyn_result") or {}).get("res")
+c.check("dynamic run stored", bool(res_) and res_["status"] == "ok", str(res_ and res_["message"]))
+c.check("dynamic chart rendered", any("Dynamic results" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("dynamic: no UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.eq("running a dynamic simulation does not re-solve", ss.sol_hash, h0)
+c.check("dynamic settings are saved with the flowsheet but are not part of the solve hash", "dynamics" in ss.model and
+        __import__("ui.state", fromlist=["x"]).model_hash(ss.model) == h0, "")
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Dynamic: compressor"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("dynamic tab renders on the compressor example", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Oil stabilisation"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("dynamic tab on a flowsheet it cannot handle shows a hint, not an error", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+st.HOOK["errors"].clear()
+st.HOOK["press"].add("New (blank)")
+run()
+c.check("dynamic tab on a blank flowsheet shows a hint, not an error", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+
 # ---- 16z. remembered choices from a previous example (Streamlit Cloud KeyError in compositions_panel) -------
 st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if "Gas lift" in n)
 st.HOOK["press"].add("Load example")

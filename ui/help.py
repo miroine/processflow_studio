@@ -248,6 +248,52 @@ not the hydraulics), quarterly steps, illustrative prices.
   3 % of the first are reported together. Units without a capacity (coolers, heaters, a separator without a diameter) are not
   checked; surge (turndown) is not part of it.
 
+### Profile simulation (v7.2) — *Profile* tab
+
+Runs the flowsheet for a **time profile** instead of one operating point.
+
+* **Table**: one row per time step with *Time*, and per feed the rate, pressure and temperature (units follow the feed's flow
+  basis; bar(a); °C). Any other numeric unit parameter (a separator pressure, a compressor speed) can be added as
+  *Unit | parameter*. A blank cell keeps the flowsheet value. Generate a starting table (linear or exponential decline of rate
+  and pressure, temperature change), edit any cell, or upload / download a CSV.
+* **Run**: every row is solved as a complete **steady-state** flowsheet, recycles and Adjust loops included. A row that does not
+  solve (for example a feed pressure that falls below a fixed downstream pressure, as when a reservoir declines below a set choke outlet) is
+  marked with the reason and skipped in the charts; the others still run. Nothing is carried from one step to the next, so this is a
+  quasi-steady profile (the plant at each step's conditions), **not** a dynamic simulation - there is no hold-up, no inventory and
+  no start-up path between steps.
+* **Results**: pick any stream property, unit result or overall quantity (gas and liquid products, power, CO₂) to chart against
+  time and tabulate; cumulative gas, liquid, power and CO₂ integrate each step's steady result over its duration (each step is held
+  until the next row's time, the last repeats the previous duration). Download everything as CSV.
+* The single-step solution on the *Flowsheet* tab is unchanged; the profile never alters the flowsheet or triggers a re-solve.
+  Each step is a full solve (about as long as one normal solve), so 100 steps take 100 solves.
+
+### Dynamic simulation (v7.3) — *Dynamic* tab
+
+A **lumped, time-domain** model built from the solved steady-state flowsheet (seconds to hours).
+
+* **What it models**: separators, scrubbers and mixers as well-mixed holdups (component inventory and internal energy; pressure,
+  temperature and phases from a Peng-Robinson U-V flash at every step); pipes as chains of 2 - 60 isothermal cells with
+  hydrostatic head; valves (equal-percentage, rangeability 50, actuator lag); compressors (head from the performance map and speed,
+  speed lag and coast-down, check valve, surge collapse); pumps; PSV / blowdown orifices; heaters and coolers (outlet temperature)
+  as quasi-steady units. Feeds and products are boundaries.
+* **Starting point**: every valve, compressor and pump coefficient is calibrated to the steady solution, so with no event nothing
+  moves. Vessel volumes default to 3 minutes of liquid residence at 50 % level (mixers 20 s); change them in *Vessels and lines*.
+* **Controllers**: PI with anti-windup, error in % of span. Defaults are created for level (liquid / oil outlet valve), water
+  level, pressure (gas outlet valve) and anti-surge (compressor with the anti-surge valve switched on; reverse acting, acts on the
+  surge margin). Edit the set-point, Kc and Ti, or un-tick *Active* to hold a valve.
+* **Events**: a table of time, event, target and value (what the value means is listed under the table). Times are in the unit you
+  pick. A ramp [s] smooths a feed change.
+* **Run**: the step adapts (largest step is yours; use 1 s or less with compressors); a step that would change pressure by more
+  than 5 %, temperature by 10 K or level by 3 % is retried smaller. Results are charted in stacked panels with the events marked, and
+  can be downloaded as CSV. The mole balance (initial + fed − discharged − final) is shown and should be ~1e-10.
+* **Limits**: no pressure waves or momentum (no water hammer or surge in the line); no slip in pipes (no slugging, no liquid
+  accumulation by slip); vessels are well mixed (no stratification, carry-over or foaming); valves are ideal characteristics;
+  liquid-full vessels, columns, heat exchangers, reactors and similar units are not supported - the tab names the unit that stops
+  the model; at a splitter the pressure downstream is taken from the first destination. Time-varying Profile tables are not applied.
+  Use it to size a controller, a blowdown valve or an anti-surge response in a first pass, then confirm with a validated dynamic
+  simulator.
+* The dynamic settings are saved with the flowsheet; running a simulation does not re-solve or alter the flowsheet.
+
 ### Prognosis (v7.0) — *Prognosis* tab
 
 Built on the Field life model; it answers "which strategy, how many wells, what recovery factor, how sure?".

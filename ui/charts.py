@@ -1193,3 +1193,45 @@ def capacity_sweep_figure(sw):
     fig.update_xaxes(title="Throughput [× present rate]")
     fig.update_yaxes(title="Utilisation [%]", rangemode="tozero")
     return fig
+
+
+def profile_figure(times, series, time_unit, failed=()):
+    """Stacked panels (one per quantity, own y-axis) against time for a profile run.  series: {label: [values]};
+    failed: times of steps that did not solve (marked on the axis)."""
+    names = list(series)[:6]
+    n = max(1, len(names))
+    fig = make_subplots(rows=n, cols=1, shared_xaxes=True, vertical_spacing=min(0.08, 0.5 / n),
+                        subplot_titles=[s.split(" | ")[-1] if s.startswith("Overall") else s for s in names])
+    for i, lab in enumerate(names, start=1):
+        ys = [None if v is None else float(v) for v in series[lab]]
+        fig.add_trace(go.Scatter(x=list(times), y=ys, mode="lines+markers", name=lab, showlegend=False,
+                                 line=dict(color=SERIES[(i - 1) % len(SERIES)], width=2.5, shape="hv"),
+                                 marker=dict(size=7),
+                                 hovertemplate="t = %{x:.4g} " + time_unit + " → %{y:.5g}<extra></extra>"), row=i, col=1)
+    if failed:
+        fig.add_trace(go.Scatter(x=list(failed), y=[0] * len(failed), mode="markers", name="step not solved",
+                                 marker=dict(symbol="x", size=11, color=CRITICAL), yaxis="y",
+                                 hovertemplate="step at %{x:.4g} did not solve<extra></extra>"), row=1, col=1)
+    _style_subplots(fig, "Profile results", f"one steady-state solve per time step; time in {time_unit}",
+                    height=max(360, 190 * n + 90))
+    fig.update_xaxes(title_text=f"Time [{time_unit}]", row=n, col=1)
+    return fig
+
+
+def dynamic_figure(times, series, time_unit, events=()):
+    """Stacked panels (one per quantity, own y-axis) against time for a dynamic run; events are marked as dotted
+    vertical lines.  series: {label: [values]}; times already in ``time_unit``; events: [(time in the same unit, text)]."""
+    names = list(series)[:6]
+    n = max(1, len(names))
+    fig = make_subplots(rows=n, cols=1, shared_xaxes=True, vertical_spacing=min(0.07, 0.5 / n), subplot_titles=names)
+    for i, lab in enumerate(names, start=1):
+        ys = [None if v is None else float(v) for v in series[lab]]
+        fig.add_trace(go.Scatter(x=list(times), y=ys, mode="lines", name=lab, showlegend=False,
+                                 line=dict(color=SERIES[(i - 1) % len(SERIES)], width=2.4),
+                                 hovertemplate="t = %{x:.5g} " + time_unit + " → %{y:.5g}<extra></extra>"), row=i, col=1)
+    for t, txt in list(events)[:12]:
+        fig.add_vline(x=t, line=dict(color=GREY, width=1, dash="dot"))
+    _style_subplots(fig, "Dynamic results", f"time in {time_unit}" + (" - dotted lines mark the events" if events else ""),
+                    height=max(360, 190 * n + 90))
+    fig.update_xaxes(title_text=f"Time [{time_unit}]", row=n, col=1)
+    return fig

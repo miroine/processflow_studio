@@ -111,6 +111,30 @@ HP / LP flare system), gas-quality properties on gas streams (GCV, Wobbe index, 
 separators for a gas-load check, and a *Debottlenecking* panel on the Design tab (utilisation of every unit and a throughput sweep
 that ranks the limits).
 
+**v7.2 additions (profile simulation, *Profile* tab):** the process flowsheet can be run for a time profile as well as for a single
+step. A table with one row per time step holds the feed rate, pressure and temperature (and, optionally, any other numeric unit
+parameter); every row is solved as a full steady-state flowsheet (recycles and Adjust loops included) and the results are charted
+against time with cumulative gas, liquid, power and CO₂. A blank cell keeps the flowsheet value; a step that does not solve is
+marked and does not stop the run. Tables can be generated (linear or exponential decline), edited, uploaded and downloaded as CSV.
+It is a quasi-steady profile: nothing carries over between steps (no hold-up, no dynamics). An example table for the *Oil stabilisation*
+example is in `docs/example_profile_oil_stabilisation.csv` (upload it on the *Profile* tab).
+
+**v7.3 additions (dynamic simulation, *Dynamic* tab):** a lumped, time-domain simulation of the solved flowsheet, from seconds to
+hours. It starts from the steady-state solution (t = 0 reproduces it) and follows a table of events - feed-rate / temperature /
+pressure steps and ramps, set-point and valve changes, compressor trip / start / speed, pump trip, opening a blowdown valve or PSV,
+a fire heat input, a back-pressure change. Four applications are covered: **vessel hold-up with level and pressure control**
+(separators, scrubbers, mixers; PI controllers with anti-windup), **blowdown / depressurisation** (orifice flow to a flare header,
+API 520 / ISO 4126 gas flow, choked and subsonic, PSV with reseat), **pipeline line-pack** (pipes become chains of isothermal cells)
+and **compressor trip, coast-down and surge** (map-based flow, speed lag, check valve, anti-surge valve and controller). Vessels
+are well-mixed holdups solved with a U-V flash at every step (Peng-Robinson), total moles are conserved to round-off, and the
+time step adapts. Four examples (all generic data): *Dynamic: HP separator ...*, *gas vessel blowdown*, *compressor trip*,
+*pipeline line-pack*. Limits: no pressure waves or momentum (no water hammer), well-mixed holdups (no stratification, no
+foaming or carry-over), homogeneous flow in pipes (no slip, no slugging), valves are ideal characteristics, liquid-full vessels and
+columns, heat exchangers, reactors and other unit types are not supported (the tab says which unit is the problem).
+Valve, compressor and pump coefficients are calibrated at the steady state, so a flowsheet with no data for them still starts at
+its steady point; vessel volumes and valve sizes default to generic values - change them for a real design. Not a replacement for
+a validated dynamic simulator (HYSYS Dynamics, UniSim, OLGA, K-Spice).
+
 **Hydrate model (v6):** Motiee gas-gravity correlation or a van der Waals–Platteeuw model (sI/sII, Kihara potentials, PR
 fugacities, fitted to pure-gas data), selected on the Fluid package tab.
 

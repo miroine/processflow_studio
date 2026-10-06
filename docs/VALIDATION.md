@@ -37,6 +37,8 @@ the app with your own trusted cases without putting them in the public repositor
 | Gas quality | GCV of methane, ethane and propane (15 °C, ideal gas) within 0.4 % of the published values; relative density = MW/28.965; Wobbe = GCV/√RD; mixtures mole-weighted | topside |
 | Debottlenecking | utilisation equals the unit's own results (stonewall, driver power, opening, gas load); the sweep reproduces the base utilisation; the predicted limit factor re-solves to 100 % within 1.5 % | topside |
 | Topside examples | split fractions, pump power = QΔP/η, injection margin, blend flow and GCV by weighting, Adjust hits the Wobbe target, flare gas = relief loads + purge, mass / energy balances of every example | topside, flowsheet |
+| Profile simulation | a step equals a plain solve of the same flowsheet (exactly); liquid rate scales with the feed rate at constant P and T; pressure, temperature and other-unit-parameter columns reach the solver; cumulative = Σ rate × duration (rectangle rule); a failed step leaves a gap and the run continues; CSV round trip | profile |
+| Dynamic simulation | t = 0 reproduces the steady state and nothing moves without an event; total moles close to < 1e-7; a blowdown follows the analytic isentropic choked-orifice decay (P within 4 %, T within 6 K, ideal-gas reference at k = 1.31, Z = 0.95); line-pack balance closes and a rate step builds pack; level and pressure controllers recover from a feed step and the level rises without the controller; compressor trip coasts down and the anti-surge valve opens; the surge margin is protected by the ASV on a turn-down; UV flash round trip; event validation | dynamic |
 | Prognosis sampling | triangular inverse CDF (limits, mode, mean = (a+b+c)/3), Latin hypercube one point per stratum, reproducible seeds, price scaling of both products | prognosis |
 | Prognosis runs | strategy at the base plateau and the uncertainty base sample reproduce a plain field-life run; facility cost scales with the 0.6 power exactly; P90 <= P50 <= P10 | prognosis |
 | Field life | tank material balance residual, p/z ∝ moles for a gas, aquifer influx, voidage replacement, IRR zeroes the NPV, deliverability root | fieldlife |
@@ -46,7 +48,9 @@ the app with your own trusted cases without putting them in the public repositor
 
 * Debottlenecking: only items with a capacity in the model are checked; limits beyond the sweep are extrapolated; surge/turndown and coolers/heaters are not covered. Gas quality is on an ideal-gas, dry basis (hypothetical cuts: 44 MJ/kg LHV + 6 %).
 * Prognosis: one reservoir tank, independent uncertain inputs (no correlation between volume and aquifer, say), facility cost by a simple power law, placeholder prices; ranges are for ranking options, not a reserves estimate.
-* Steady state only: slugging, cool-down and blowdown are transient-lite estimates.
+* Profile simulation: every time step is an independent steady-state solve (no hold-up or inventory between steps, no start-up path); cumulative quantities use a rectangle rule with each step held until the next row.
+* Dynamic simulation: lumped, well-mixed holdups, no pressure waves / momentum, no slip in pipes, ideal valve characteristics, generic default volumes and valve sizes; unit types without a dynamic model (columns, exchangers, reactors, liquid-full vessels) are refused. Compared against analytic references and balances, not against a commercial dynamic simulator.
+* Steady state (Flowsheet tab): slugging and cool-down are transient-lite estimates.
 * Multiphase flow: Beggs & Brill (1973) with Payne corrections — no mechanistic model (OLGA / LedaFlow / PIPESIM).
 * Hydrates: inhibitors applied as a temperature depression, not through the water activity.
 * Field life: one tank for all wells, lift tables with the initial reservoir fluid, quarterly steps.

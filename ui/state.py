@@ -104,7 +104,7 @@ def init_state():
 
 
 EDIT_HISTORY = 25
-_NOT_UNDONE = ("scenarios", "fieldlife_result", "prognosis_result")          # kept as they are when an edit is undone
+_NOT_UNDONE = ("scenarios", "fieldlife_result", "prognosis_result", "profile", "dynamics")          # kept as they are when an edit is undone
 
 
 def push_edit(label):
@@ -271,7 +271,7 @@ def process_canvas_value(key="pfd"):
 def model_hash(model):
     m = copy.deepcopy(model)
     for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios", "heating", "fieldlife",
-              "fieldlife_result", "waxsand", "power", "fa2", "design", "prognosis", "prognosis_result"):   # post-processing settings and results: editing them never re-solves
+              "fieldlife_result", "waxsand", "power", "fa2", "design", "prognosis", "prognosis_result", "profile", "profile_result", "dynamics"):   # post-processing settings and results: editing them never re-solves
         m.pop(k, None)
     for u in m["units"].values():
         for k in ("x", "y", "flip"):

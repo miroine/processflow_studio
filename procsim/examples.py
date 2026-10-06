@@ -596,3 +596,7 @@ EXAMPLES = {
 from .examples_topside import TOPSIDE_EXAMPLES   # noqa: E402  (v7.1: topside templates)
 
 EXAMPLES.update(TOPSIDE_EXAMPLES)
+
+from .examples_dynamic import DYNAMIC_EXAMPLES   # noqa: E402  (v7.3: dynamic-simulation examples)
+
+EXAMPLES.update(DYNAMIC_EXAMPLES)

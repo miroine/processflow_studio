@@ -147,6 +147,39 @@ try:
 except KeyError:
     c.check("scenario save button present", False, "")
 
+# profile tab (v7.2): fill the table, edit a cell in the real data editor, run, and check the results
+try:
+    widget("selectbox", "Example").set_value(next(n for n in EXAMPLES if n.startswith("Oil stabilisation")))
+    widget("button", "Load example").click()
+    at.run()
+    at.number_input(key="prof_n").set_value(3)
+    at.button(key="prof_fill").click()
+    at.run()
+    ok("profile table filled")
+    c.eq("profile table has three rows", len(at.session_state["model"]["profile"]["rows"]), 3)
+    at.button(key="prof_run").click()
+    at.run()
+    ok("profile run")
+    res = at.session_state["prof_result"]["res"]
+    c.eq("profile: every step solved on real Streamlit", [x["status"] for x in res["steps"]], ["ok"] * 3)
+except KeyError as e:
+    c.check("profile tab widgets present", False, str(e))
+
+# dynamic tab (v7.3): load a dynamic example, run in the real data editors and check the result
+try:
+    widget("selectbox", "Example").set_value(next(n for n in EXAMPLES if n.startswith("Dynamic: HP separator")))
+    widget("button", "Load example").click()
+    at.run()
+    ok("dynamic example loaded")
+    at.button(key="dyn_run").click()
+    at.run()
+    ok("dynamic run")
+    res = at.session_state["dyn_result"]["res"]
+    c.eq("dynamic: run completed on real Streamlit", res["status"], "ok")
+    c.check("dynamic: mole balance closes", abs(res["balance_error_kmol"]) / res["inventory0"] < 1e-7, "")
+except KeyError as e:
+    c.check("dynamic tab widgets present", False, str(e))
+
 # blank flowsheet
 widget("button", "New (blank)").click()
 at.run()
