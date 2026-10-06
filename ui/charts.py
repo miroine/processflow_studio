@@ -1159,3 +1159,37 @@ def uncertainty_figure(unc):
     fig.update_xaxes(title="Producing wells", dtick=1, row=1, col=1)
     fig.update_xaxes(title="Year", row=1, col=2)
     return _style_subplots(fig, "Uncertainty", f"{unc['n']} samples per well count", height=420)
+
+
+# ---- debottlenecking (v7.1) ---------------------------------------------------------------------------------
+
+def utilisation_figure(rows):
+    """Horizontal bars of the capacity utilisation of every checked item, with the 100 % limit."""
+    rr = sorted(rows, key=lambda r: r["Utilisation [%]"])
+    lab = [f"{r['Unit']}: {r['Check']}" for r in rr]
+    val = [r["Utilisation [%]"] for r in rr]
+    col = [CRITICAL if v > 100 else (ORANGE if v >= 90 else TEAL) for v in val]
+    fig = go.Figure(go.Bar(y=lab, x=val, orientation="h", marker=dict(color=col, cornerradius=3), showlegend=False,
+                           hovertemplate="%{y}: %{x:.0f} %<extra></extra>"))
+    fig.add_vline(x=100, line=dict(color=INK, width=1.5, dash="dash"))
+    _style(fig, "Capacity utilisation", "100 % is the limit of each item", height=max(280, 34 * len(rr) + 130))
+    fig.update_xaxes(title="Utilisation [% of the limit]", rangemode="tozero")
+    return fig
+
+
+def capacity_sweep_figure(sw):
+    """Utilisation of each check against the throughput factor; the 100 % line is the limit."""
+    fig = go.Figure()
+    xs = sw["factors"]
+    for k, r in enumerate(sw["series"]):
+        ys = r["util"]
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers", name=f"{r['Unit']}: {r['Check']}",
+                                 line=dict(color=SERIES[k % len(SERIES)], width=2.2 if k < 3 else 1.4),
+                                 marker=dict(size=6), connectgaps=False,
+                                 hovertemplate="%{x:.2f} × : %{y:.0f} %<extra>" + r["Unit"] + "</extra>"))
+    fig.add_hline(y=100, line=dict(color=INK, width=1.5, dash="dash"))
+    fig.add_vline(x=1.0, line=dict(color=GREY, width=1, dash="dot"))
+    _style(fig, "Throughput sweep", "The first line to cross 100 % is the bottleneck", height=440)
+    fig.update_xaxes(title="Throughput [× present rate]")
+    fig.update_yaxes(title="Utilisation [%]", rangemode="tozero")
+    return fig

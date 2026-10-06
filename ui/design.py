@@ -6,6 +6,7 @@ import math
 import pandas as pd
 import streamlit as st
 
+from procsim import debottleneck as DB
 from procsim import design as DS
 from procsim import network as NW
 from procsim.unitops import UnitError
@@ -46,8 +47,15 @@ def design_tab():
     sol = ss.sol if sol_is_current() else None
     st.markdown("#### Design tools")
     st.caption("Screening tools for sizing and allocation decisions on top of the solved flowsheet: a flowline "
-               "diameter sweep, a gas-lift allocation, an ESP sizing and a looped pipe-network solver.")
-    t_size, t_gl, t_esp, t_net = st.tabs(["Pipe sizing", "Gas-lift allocation", "ESP sizing", "Pipe network"])
+               "diameter sweep, a gas-lift allocation, an ESP sizing and a looped pipe-network solver, and a topside "
+               "debottlenecking study (utilisation of every unit and the first limit as the rate rises).")
+    t_db, t_size, t_gl, t_esp, t_net = st.tabs(["Debottlenecking", "Pipe sizing", "Gas-lift allocation", "ESP sizing",
+                                                "Pipe network"])
+    with t_db:
+        if sol is None:
+            st.info("Solve the flowsheet first.")
+        else:
+            debottleneck_panel(model, sol)
     with t_size:
         if sol is None:
             st.info("Solve the flowsheet first.")
@@ -65,6 +73,70 @@ def design_tab():
             esp_panel(model, sol)
     with t_net:
         network_panel(model, sol)
+
+
+# ------------------------------------------------------------------------------------------- debottlenecking
+def debottleneck_panel(model, sol):
+    ss = st.session_state
+    st.caption("Capacity utilisation of every unit that has a capacity in the model: gas load of scrubbers and of "
+               "separators with a vessel diameter, compressor flow against the stonewall of its curve, compressor driver "
+               "power against its rating, control-valve opening (design limit 85 %) and the erosional-velocity ratio of "
+               "lines. 100 % is the limit. Units without a capacity (coolers, heaters, a separator without a diameter) "
+               "cannot be checked: set the diameter, curve, driver rating or rated Cv in the unit's properties.")
+    rows = DB.utilisation(model, sol)
+    if not rows:
+        st.info("Nothing to check yet: give a scrubber / separator a diameter, a compressor a performance curve and a "
+                "driver rating, or a valve a rated Cv. Load the *Debottlenecking (topside)* example to see it.")
+        return
+    top = rows[0]
+    k = st.columns(4)
+    k[0].metric("Highest utilisation", f"{top['Utilisation [%]']:.0f} %", f"{top['Unit']}", delta_color="off")
+    k[1].metric("Over capacity", f"{sum(r['Utilisation [%]'] > 100 for r in rows)}")
+    k[2].metric("Near the limit (≥ 90 %)", f"{sum(90 <= r['Utilisation [%]'] <= 100 for r in rows)}")
+    k[3].metric("Items checked", f"{len(rows)}")
+    st.plotly_chart(charts.utilisation_figure(rows), width="stretch", key="db_fig")
+    tab = [{"Unit": r["Unit"], "Check": r["Check"], "Utilisation [%]": round(r["Utilisation [%]"], 1),
+            "Status": r["Status"], "Note": r["Note"]} for r in rows]
+    st.dataframe(pd.DataFrame(tab), hide_index=True, width="stretch")
+    st.markdown("##### Throughput sweep: which limit comes first?")
+    feeds = {model["units"][u]["name"]: u for u in model["units"] if model["units"][u]["type"] == "feed"}
+    valid_choice("db_feeds", feeds, multi=True)
+    c = st.columns([3, 3, 1.5])
+    f_txt = c[0].text_input("Throughput factors [× present rate]", value="0.8, 1.0, 1.2, 1.4, 1.6", key="db_f")
+    pick = c[1].multiselect("Feeds scaled", list(feeds), default=list(feeds), key="db_feeds")
+    c[2].markdown("<div style='padding-top:28px'></div>", unsafe_allow_html=True)
+    try:
+        fs = _floats(f_txt, 1e-6)
+    except ValueError as e:
+        st.error(f"Check the factors: {e}")
+        return
+    sig = (ss.sol_hash, tuple(fs), tuple(sorted(pick)))
+    if c[2].button("Run throughput sweep", key="db_run", type="primary", width="stretch"):
+        if not pick:
+            st.error("Choose at least one feed to scale")
+        else:
+            bar = st.progress(0.0, text=f"Re-solving the flowsheet at {len(fs)} rates…")
+            sw = DB.sweep(model, fs, [feeds[n] for n in pick],
+                          progress=lambda a, b: bar.progress(a / b, text=f"{a} of {b} rates solved"))
+            bar.empty()
+            ss["db_result"] = {"sig": sig, "sw": sw}
+    res = ss.get("db_result")
+    if not res:
+        st.caption(f"{len(fs)} rates; each re-solves the whole flowsheet (a few seconds). Press **Run throughput sweep**.")
+        return
+    if res["sig"] != sig:
+        st.info("The results below are for different inputs or an earlier solution - run the throughput sweep again.")
+    sw = res["sw"]
+    for line in DB.summary(sw):
+        st.markdown(line)
+    st.plotly_chart(charts.capacity_sweep_figure(sw), width="stretch", key="db_sweep_fig")
+    t = [{"Unit": r["Unit"], "Check": r["Check"],
+          "Limit reached at [× present rate]": None if r["Limit reached at (× base)"] is None
+          else round(r["Limit reached at (× base)"], 3), "How": r["How"], "Remedy": r["Remedy"]} for r in sw["series"]]
+    st.dataframe(pd.DataFrame(t), hide_index=True, width="stretch")
+    st.caption("Utilisation is not exactly proportional to the rate (pressures, densities and compressor heads change), "
+               "which is why every rate is a full flowsheet solve. A limit beyond the sweep is extrapolated from its last "
+               "two points. Surge (turndown) is not part of the debottlenecking check.")
 
 
 # ------------------------------------------------------------------------------------------- pipe sizing

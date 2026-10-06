@@ -105,6 +105,12 @@ samples of in-place volume, aquifer, water breakthrough and price) giving P90 / 
 well count, the chance of a negative NPV, and the best-on-average and the most robust well count. The deliverability
 tables of a well count are shared by all samples. A recommended development summary and a report section are included.
 
+**v7.1 additions (topside templates and debottlenecking):** six topside example flowsheets (HP compressor bypass, debottlenecking,
+two parallel trains with recycle loops, produced-water handling and reinjection, gas blending to a Wobbe-index specification,
+HP / LP flare system), gas-quality properties on gas streams (GCV, Wobbe index, relative density, CO₂), a vessel diameter on
+separators for a gas-load check, and a *Debottlenecking* panel on the Design tab (utilisation of every unit and a throughput sweep
+that ranks the limits).
+
 **Hydrate model (v6):** Motiee gas-gravity correlation or a van der Waals–Platteeuw model (sI/sII, Kihara potentials, PR
 fugacities, fitted to pure-gas data), selected on the Fluid package tab.
 

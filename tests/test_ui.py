@@ -992,6 +992,36 @@ c.check("prognosis results go stale when the field-life settings change",
 ss.model["fieldlife"]["disc"] = 8.0
 ss.model.pop("prognosis_result", None)
 
+# ---- 16o. v7.1: topside examples and the debottlenecking panel ----------------------------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Debottlenecking (topside)"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("debottlenecking example loads and renders without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("utilisation chart rendered", any("Capacity utilisation" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("sweep button present", any(k_ == "db_run" for _, _, k_ in st.HOOK["log"]), "")
+h0 = ss.sol_hash
+ss["db_f"] = "1.0, 1.3"
+st.HOOK["press"].add("db_run")
+run()
+c.check("throughput sweep stored", bool(ss.get("db_result")) and len(ss["db_result"]["sw"]["series"]) >= 6, str(ss.get("db_result", {}).keys()))
+c.check("throughput sweep chart rendered", any("Throughput sweep" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("sweep summary shows the first limit", any("headroom" in t or "Already at the limit" in t for t in st.HOOK["texts"]), str(st.HOOK["texts"][-3:]))
+c.eq("debottlenecking does not re-solve or change the flowsheet", ss.sol_hash, h0)
+c.check("debottlenecking: no UI errors after the sweep", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+for nm_ in [n for n in EXAMPLES if "(topside)" in n]:
+    st.HOOK["errors"].clear()
+    st.HOOK["values"]["selectbox:Example:"] = nm_
+    st.HOOK["press"].add("Load example")
+    run()
+    bad_ = [u for u, v in ss.sol.status.items() if v in ("error", "missing", "unsolved")]
+    c.check(f"topside example loads and solves in the app: {nm_[:30]}", not st.HOOK["errors"] and not bad_, str(st.HOOK["errors"])[:200] + str(bad_))
+    if "Gas mixing" in nm_:
+        from procsim.streams import stream_properties as _sp
+        _sid = next(k_ for k_, d_ in ss.model["streams"].items() if d_["name"] == "Sales gas")
+        _w = _sp(ss.sol.streams[_sid], ss.sol.fp)["Wobbe index [MJ/Sm³]"]
+        c.close("gas mixing: the Adjust brings the sales gas to a Wobbe index of 50.5", _w, 50.5, 0.01)
+
 # ---- 16z. remembered choices from a previous example (Streamlit Cloud KeyError in compositions_panel) -------
 st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if "Gas lift" in n)
 st.HOOK["press"].add("Load example")
@@ -999,7 +1029,7 @@ run()
 for k_, v_ in (("ch_env_stream", "No such stream"), ("an_comp_sel", ["No such stream"]), ("fa_path", ["Gone"]),
                ("dose_st", "Gone"), ("tb_fl", "Gone"), ("td_fl", "Gone"), ("surf_budget_well", "Gone"),
                ("hy_rm", "Gone"), ("sc_base", "Gone"), ("sc_chart", "Gone"), ("sc_pick", "Gone"),
-               ("fa2_emu", "Gone"), ("fa2_pvt_stream", "Gone"), ("ds_fl", "Gone"), ("esp_stream", "Gone"), ("pg_opts", ["Gone"])):
+               ("fa2_emu", "Gone"), ("fa2_pvt_stream", "Gone"), ("ds_fl", "Gone"), ("esp_stream", "Gone"), ("pg_opts", ["Gone"]), ("db_feeds", ["Gone"])):
     ss[k_] = v_
 for uid_ in list(ss.model["units"])[:6]:
     ss[f"cs_key_{uid_}"] = "no_such_param"

@@ -230,6 +230,24 @@ not the hydraulics), quarterly steps, illustrative prices.
 * **Insulation**: the thickness that gives a target no-touch time, with the Cool-down model.
 * **PVT table**: densities, viscosities, Z, Bg and enthalpy over a P-T grid of any stream, as a CSV in SI units.
 
+### Topside templates and debottlenecking (v7.1)
+
+* **Six topside examples** (Example selector, names end with *(topside)*): *HP compressor bypass* (a tee splits the gas between
+  the compressor and a let-down bypass valve; change the split fraction), *Debottlenecking*, *Two parallel trains*
+  (two compressor trains and two scrubber-liquid recycle loops from one inlet), *Water handling and reinjection*
+  (degasser, overboard split, seawater make-up, pump and injection wells), *Gas mixing* (three gases let down to a
+  header, an Adjust tunes the rich-gas flow to a Wobbe-index target) and *Flare system* (HP and LP headers, PSVs, header
+  lines, knock-out drums, flares).
+* **Gas quality** on every gas stream (vapour fraction ≥ 0.5): gross calorific value (dry, 15 °C, ideal gas, from the heats of
+  combustion of the library components), relative density, Wobbe index and CO₂ mol%. They can be Adjust targets.
+* **Separators** have an optional vessel diameter: the gas load against the Souders-Brown limit is then reported (and warned
+  about above 100 %), as scrubbers already did.
+* **Debottlenecking** (Design tab): the utilisation of every unit with a capacity - scrubber / separator gas load, compressor
+  flow against stonewall, driver power against rating, valve opening against 85 %, erosional ratio of lines - and a throughput
+  sweep that re-solves the flowsheet at several rates, finds the factor at which each reaches 100 % and ranks them. Limits within
+  3 % of the first are reported together. Units without a capacity (coolers, heaters, a separator without a diameter) are not
+  checked; surge (turndown) is not part of it.
+
 ### Prognosis (v7.0) — *Prognosis* tab
 
 Built on the Field life model; it answers "which strategy, how many wells, what recovery factor, how sure?".

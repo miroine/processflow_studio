@@ -21,7 +21,7 @@ import os                                              # noqa: E402
 import sys                                             # noqa: E402
 import traceback                                       # noqa: E402
 
-APP_VERSION = "7.0.0"
+APP_VERSION = "7.1.0"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _PKGS = ("procsim", "ui", "pfd_canvas", "fieldmap_canvas")
 if _ROOT not in sys.path:
@@ -69,7 +69,7 @@ def _import_project():
     from ui.fluid import fluid_tab, workbook_tab
     from ui import theme
     import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units, ui.surf, ui.scenarios, ui.fieldlife, ui.design, ui.prognosis   # noqa: E401,F401
-    import procsim.surf, procsim.subsea_design, procsim.subsea_ops, procsim.scenarios, procsim.fieldlife, procsim.flowassure, procsim.hydrate, procsim.envelope, procsim.dehydration, procsim.process_units, procsim.flowassure2, procsim.design, procsim.network, procsim.prognosis, procsim.fieldmap   # noqa: E401,F401
+    import procsim.surf, procsim.subsea_design, procsim.subsea_ops, procsim.scenarios, procsim.fieldlife, procsim.flowassure, procsim.hydrate, procsim.envelope, procsim.dehydration, procsim.process_units, procsim.flowassure2, procsim.design, procsim.network, procsim.prognosis, procsim.debottleneck, procsim.gasquality, procsim.examples_topside, procsim.fieldmap   # noqa: E401,F401
     import procsim, ui
     if getattr(procsim, "__version__", None) != APP_VERSION or getattr(ui, "__version__", None) != APP_VERSION:
         raise ImportError(f"version mismatch: app.py {APP_VERSION}, procsim {getattr(procsim, '__version__', '?')}, "

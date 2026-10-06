@@ -34,6 +34,9 @@ the app with your own trusted cases without putting them in the public repositor
 | Pipe sizing | Barlow wall and steel mass from their formulas; the sweep reuses the flowline model of the turndown tab | pack C |
 | Gas-lift allocation | greedy equal-marginal-gain split equals the brute-force optimum on random concave curves | pack C |
 | ESP | stage head and efficiency at the best-efficiency flow, affinity laws, TDH = ΔP/(ρg), stages and motor cover the head and the power (generic curves, not vendor data) | pack C |
+| Gas quality | GCV of methane, ethane and propane (15 °C, ideal gas) within 0.4 % of the published values; relative density = MW/28.965; Wobbe = GCV/√RD; mixtures mole-weighted | topside |
+| Debottlenecking | utilisation equals the unit's own results (stonewall, driver power, opening, gas load); the sweep reproduces the base utilisation; the predicted limit factor re-solves to 100 % within 1.5 % | topside |
+| Topside examples | split fractions, pump power = QΔP/η, injection margin, blend flow and GCV by weighting, Adjust hits the Wobbe target, flare gas = relief loads + purge, mass / energy balances of every example | topside, flowsheet |
 | Prognosis sampling | triangular inverse CDF (limits, mode, mean = (a+b+c)/3), Latin hypercube one point per stratum, reproducible seeds, price scaling of both products | prognosis |
 | Prognosis runs | strategy at the base plateau and the uncertainty base sample reproduce a plain field-life run; facility cost scales with the 0.6 power exactly; P90 <= P50 <= P10 | prognosis |
 | Field life | tank material balance residual, p/z ∝ moles for a gas, aquifer influx, voidage replacement, IRR zeroes the NPV, deliverability root | fieldlife |
@@ -41,6 +44,7 @@ the app with your own trusted cases without putting them in the public repositor
 
 ## 2. Known limits (screening)
 
+* Debottlenecking: only items with a capacity in the model are checked; limits beyond the sweep are extrapolated; surge/turndown and coolers/heaters are not covered. Gas quality is on an ideal-gas, dry basis (hypothetical cuts: 44 MJ/kg LHV + 6 %).
 * Prognosis: one reservoir tank, independent uncertain inputs (no correlation between volume and aquifer, say), facility cost by a simple power law, placeholder prices; ranges are for ranking options, not a reserves estimate.
 * Steady state only: slugging, cool-down and blowdown are transient-lite estimates.
 * Multiphase flow: Beggs & Brill (1973) with Payne corrections — no mechanistic model (OLGA / LedaFlow / PIPESIM).

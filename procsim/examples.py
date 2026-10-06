@@ -591,3 +591,8 @@ EXAMPLES = {
     "Pressure relief: PSV sizing (API 520/526) and flare radiation": relief_and_flare,
     "Steam reforming: equilibrium reactor, quench and knock-out": steam_reformer,
 }
+
+
+from .examples_topside import TOPSIDE_EXAMPLES   # noqa: E402  (v7.1: topside templates)
+
+EXAMPLES.update(TOPSIDE_EXAMPLES)
