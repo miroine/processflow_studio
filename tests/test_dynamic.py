@@ -165,4 +165,56 @@ for nm, fn in EX.EXAMPLES.items():
     s_ = DY.summary(r)
     c.check(f"example runs to the end: {nm[:48]}", r["status"] == "ok" and s_["balance_rel"] < 1e-7, f"{r['status']} {r['message']} {s_['balance_rel']:.1e}")
 
+# ---- audit fixes (v7.4.1)
+m_ = ex("Dynamic: HP separator")
+sol_ = solve(m_)
+d_ = DY.build(m_, sol_)
+r1_ = d_.run(t_end=200, dt_out=50)
+r2_ = d_.run(t_end=400, dt_out=50)
+c.check("a second run() continues with the same mass-balance baseline", abs(r2_["balance_error_kmol"]) < 1e-8 and r2_["inventory0"] == r1_["inventory0"],
+        f"{r2_['balance_error_kmol']:.2e}")
+for ev_, what in [({"t": 1, "kind": "comp_trip", "target": "PCV-100 gas outlet"}, "event on a wrong kind of target"),
+                  ({"kind": "feed_flow", "target": "Well stream", "value": 1}, "event without a time"),
+                  ({"t": 1, "kind": "feed_flow", "target": "Well stream", "value": "abc"}, "event with a text value"),
+                  ({"t": 1, "kind": "feed_flow", "target": "Well stream", "value": None}, "event without a value")]:
+    try:
+        DY.build(m_, sol_, {"events": [ev_]}).run(t_end=5, dt_out=5)
+        ok_ = False
+    except DY.DynError:
+        ok_ = True
+    c.check("clear DynError for " + what, ok_, "")
+try:
+    DY.build(m_, sol_).run(t_end=-5)
+    ok_ = False
+except DY.DynError:
+    ok_ = True
+c.check("a negative end time is refused", ok_, "")
+d_ = DY.build(m_, sol_, {"events": [{"t": 1, "kind": "valve_op", "target": "PCV-100 gas outlet", "value": 250}]})
+r_ = d_.run(t_end=40, dt_out=10)
+c.check("a valve opening above 100 % is clamped", max(r_["series"]["PCV-100 gas outlet | Opening [%]"]) <= 100.0 + 1e-9, "")
+try:
+    DY.build(m_, sol_, {"nodes": {"V-100 HP separator": {"volume": 0}}})
+    ok_ = False
+except DY.DynError:
+    ok_ = True
+c.check("a zero vessel volume is refused (not silently replaced by the default)", ok_, "")
+# bumpless manual -> auto
+ev_ = [{"t": 10, "kind": "ctrl_sp", "target": "PC-PCV-100 gas outlet", "value": 35.0},
+       {"t": 20, "kind": "ctrl_mode", "target": "PC-PCV-100 gas outlet", "value": "manual"},
+       {"t": 60, "kind": "ctrl_mode", "target": "PC-PCV-100 gas outlet", "value": "auto"}]
+r_ = DY.build(m_, sol_, {"events": ev_}).run(t_end=80, dt_out=1)
+op_ = r_["series"]["PC-PCV-100 gas outlet | OP [%]"]
+tt_ = r_["t"]
+jump_ = max(abs(op_[i + 1] - op_[i]) for i in range(len(tt_) - 1) if 55 <= tt_[i] <= 66)
+c.check("manual -> auto transfer is bumpless (output moves < 2 % per second)", jump_ < 2.0, f"{jump_:.2f}")
+# compressor: margin is not 'comfortable' when the machine is in surge with zero flow
+md_ = ex("Dynamic: compressor")
+dd_ = DY.build(md_, solve(md_))
+dd_.run(t_end=1)
+cb_ = next(b for b in dd_.branches if b.kind == "compressor")
+cb_.flow(cb_.Pu(), 42.0, cb_.sp)
+c.check("a surging compressor reports a negative margin", cb_.margin() < 0, f"{cb_.margin():.1f}")
+cb_.flow(cb_.Pu(), 1000.0, cb_.sp)
+c.check("surge margin of a stopped / blocked machine is shown as 100 (not applicable)", cb_.margin() == 100.0 or cb_.margin() < 0, f"{cb_.margin():.1f}")
+
 c.report()

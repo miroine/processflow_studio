@@ -33,7 +33,7 @@ import numpy as np
 
 from . import dyn_thermo as DT
 from .flowsheet import port_edges, feed_stream
-from .thermo import V_STD_GAS
+from .thermo import V_STD_GAS, FlashError
 
 K0 = 273.15
 NODE_TYPES = ("separator", "separator3", "scrubber", "mixer")
@@ -215,6 +215,11 @@ class Feed:
             self._H[key] = fp.pt_flash(self.z, T, P).H
         return self._H[key]
 
+    def next_break(self, t):
+        """Next time after t at which a schedule changes slope (so that a step never jumps over a ramp's end)."""
+        nb = [a for sch in (self.sF, self.sT, self.sP) for a, _ in sch if a > t + 1e-9]
+        return min(nb) if nb else None
+
     def get_state(self):
         return (self.cum_kmol, list(self.sF), list(self.sT), list(self.sP))
 
@@ -393,7 +398,8 @@ class CompBranch(Branch):
     def flow(self, Pu, Pd, sp):
         c = self.curve
         N = self.N
-        out = {"Q": 0.0, "Qs": c.surge_flow(max(N, 1e-9)), "surge": False, "head": 0.0, "eta": self.eta_ss, "w_tot": 0.0}
+        out = {"Q": 0.0, "Qs": c.surge_flow(max(N, 1e-9)), "surge": False, "head": 0.0, "eta": self.eta_ss, "w_tot": 0.0,
+               "stopped": True}
         self.last = out
         if N < 0.02 * self.N0 or (not self.running and N < 0.3 * self.N0) or Pd <= 0 or Pu <= 0:
             return 0.0                       # stopped (or coasting below 30 %: the check valve is closed)
@@ -412,7 +418,7 @@ class CompBranch(Branch):
             Q = brentq(lambda q: c.at(q, N)[0] - head_req, Qs, Qmax, xtol=1e-6 * Qs, rtol=1e-12)
         eta = max(c.at(max(Q, Qs), N)[1], 5.0) / 100.0
         w_tot = Q * sp["rho"] / sp["MW"]
-        out.update(Q=Q, head=head_req, eta=eta, w_tot=w_tot)
+        out.update(Q=Q, head=head_req, eta=eta, w_tot=w_tot, stopped=False)
         return w_tot
 
     def dH(self, sp, w, Pu, Pd):
@@ -421,7 +427,7 @@ class CompBranch(Branch):
 
     def margin(self):
         o = self.last
-        return (o["Q"] / o["Qs"] - 1.0) * 100.0 if o.get("Qs") and o.get("w_tot", 0) > 0 else 100.0
+        return (o["Q"] / o["Qs"] - 1.0) * 100.0 if o.get("Qs") and not o.get("stopped", True) else 100.0
 
     def power_kW(self, sp):
         o = self.last
@@ -531,10 +537,10 @@ class Controller:
         self.op_min, self.op_max = 0.0, 100.0
 
     def get_state(self):
-        return (self.sp, self.I, self.op, self.mode, self.op_manual, self.e_prev, self.bias)
+        return (self.sp, self.I, self.op, self.mode, self.op_manual, self.e_prev, self.bias, getattr(self, "_was_manual", False))
 
     def set_state(self, s, fp=None):
-        self.sp, self.I, self.op, self.mode, self.op_manual, self.e_prev, self.bias = s
+        self.sp, self.I, self.op, self.mode, self.op_manual, self.e_prev, self.bias, self._was_manual = s
 
     def update(self, dt):
         self.pv = self.pv_fn()
@@ -544,9 +550,15 @@ class Controller:
             self.I = 0.0
             self.bias = self.op
             self.e_prev = 0.0
+            self._was_manual = True
             return self.op
         sgn = 1.0 if self.action == "direct" else -1.0
         e = sgn * (self.pv - self.sp) / max(self.span[1] - self.span[0], 1e-12) * 100.0
+        if getattr(self, "_was_manual", False):          # bumpless: the first auto output equals the last manual output
+            self._was_manual = False
+            self.I = 0.0
+            self.bias = self.op - self.Kc * e
+            self.e_prev = e
         self.I += e * dt
         d = (e - self.e_prev) / dt if (self.Td > 0 and dt > 0) else 0.0
         self.e_prev = e
@@ -639,6 +651,7 @@ class Dyn:
             b.a = b.c = 0.0
             if sp is None:
                 b.w = 0.0
+                b.mass = 0.0
                 continue
             if b.pressure_driven:
                 Pu, Pd = b.Pu(), b.Pd()
@@ -768,10 +781,21 @@ class Dyn:
                     n.kappa = 0.6 * n.kappa + 0.4 * k_new
             worst = max(worst, abs(n.P - P0) / P0 / 0.05, abs(n.T - T0) / 10.0,
                         abs(n.level - L0) / 3.0 if n.has_level else 0.0)
+        for n in self.nodes:
+            if not (math.isfinite(n.P) and 0.0 < n.P < 2.0e4):
+                raise DynError(f"{n.name}: the pressure left the sensible range ({n.P:.3g} bar) - check volumes, valve sizes and set points")
         return worst
 
     # ------------------------------------------------------------------ events
     def apply_event(self, ev):
+        try:
+            self._apply_event(ev)
+        except DynError:
+            raise
+        except (TypeError, ValueError, KeyError, AttributeError) as e:
+            raise DynError(f"event '{ev.get('kind')}' on '{ev.get('target')}' at t = {ev.get('t')}: {type(e).__name__}: {e}")
+
+    def _apply_event(self, ev):
         k, tgt, val = ev["kind"], ev.get("target"), ev.get("value")
         ramp = float(ev.get("ramp", 0.0) or 0.0)
         t = self.t
@@ -795,10 +819,11 @@ class Dyn:
         elif k == "valve_op":
             b = self.named(tgt)
             c = getattr(b, "ctrl", None)
+            v = min(max(float(val), 0.0), 100.0)
             if c is not None:
-                c.mode, c.op_manual = "manual", float(val)
+                c.mode, c.op_manual = "manual", v
             else:
-                b.x_cmd = float(val) / 100.0
+                b.x_cmd = v / 100.0
         elif k == "comp_trip":
             b = self.named(tgt)
             b.running = False
@@ -808,13 +833,15 @@ class Dyn:
             b = self.named(tgt)
             b.running = True
             if val is not None:
-                b.N_cmd = float(val) / 100.0 * b.N0
+                b.N_cmd = min(max(float(val), 0.0), 110.0) / 100.0 * b.N0
+            if b.asc_ctrl is not None and b.asc_cfg.get("open_on_trip", True):
+                b.asc_ctrl.mode = "auto"                     # the anti-surge controller takes over again after a restart
         elif k == "comp_speed":
             b = self.named(tgt)
             c = b.ctrl
             if c is not None:
-                c.mode, c.op_manual = "manual", float(val) / 1.1
-            b.N_cmd = float(val) / 100.0 * b.N0
+                c.mode, c.op_manual = "manual", min(max(float(val), 0.0), 110.0) / 1.1
+            b.N_cmd = min(max(float(val), 0.0), 110.0) / 100.0 * b.N0
         elif k == "pump_trip":
             self.named(tgt).running = False
         elif k == "pump_start":
@@ -900,10 +927,17 @@ class Dyn:
         dt_max = float(dt_max if dt_max is not None else cfg.get("dt_max", 1.0))
         dt_out = float(dt_out if dt_out is not None else cfg.get("dt_out", 2.0))
         t0w = _time.time()
+        if not (t_end > 0 and dt_max > 0 and dt_out > 0) or not all(math.isfinite(x) for x in (t_end, dt_max, dt_out)):
+            raise DynError("the end time, the maximum step and the output interval must be positive numbers")
+        bad = check_events(self, self.events)
+        if bad:
+            raise DynError("; ".join(bad[:4]) + (f" (+{len(bad) - 4} more)" if len(bad) > 4 else ""))
         evs = sorted(self.events, key=lambda e: float(e["t"]))
-        self._ev = 0
+        if not getattr(self, "_started", False):         # baselines are set once: a second run() continues from here
+            self._started = True
+            self._ev = 0
+            self.inv0 = self.inventory()
         self.rec = {"t": [], "v": {}}
-        self.inv0 = self.inventory()
         self._evaluate(self.t, 0.0)
         for c in self.controllers:
             c.pv = c.pv_fn()
@@ -919,6 +953,10 @@ class Dyn:
             limit = min(t_end, next_out)
             if self._ev < len(evs):
                 limit = min(limit, float(evs[self._ev]["t"]))
+            for fd in self.feeds:
+                nb = fd.next_break(self.t)
+                if nb is not None:
+                    limit = min(limit, nb)
             dt = min(self.dt, limit - self.t)
             if dt < 1e-9:
                 dt = max(limit - self.t, 1e-9)
@@ -926,7 +964,8 @@ class Dyn:
             try:
                 worst = self._step(dt)
                 ok = worst <= 1.0 or dt <= dt_min * 1.0001
-            except (DynError, DT.UVError, FloatingPointError, np.linalg.LinAlgError) as e:
+            except (DynError, DT.UVError, FloatingPointError, np.linalg.LinAlgError, ZeroDivisionError, OverflowError,
+                    ValueError, ArithmeticError, FlashError) as e:
                 if dt <= dt_min * 1.0001:
                     status, message = "failed", f"t = {self.t:.2f} s: {e}"
                     self.restore(snap)
@@ -1091,7 +1130,17 @@ def unique_name(d, nm):
 
 
 def build(model, sol, settings=None):
-    """Assemble the dynamic model from a solved flowsheet.  ``settings`` overrides ``model['dynamics']``."""
+    """Assemble the dynamic model from a solved flowsheet.  ``settings`` overrides ``model['dynamics']``.
+    Every failure while assembling is reported as a DynError with a readable message."""
+    try:
+        return _build(model, sol, settings)
+    except DynError:
+        raise
+    except (TypeError, ValueError, KeyError, AttributeError, IndexError, ZeroDivisionError, FlashError, DT.UVError) as e:
+        raise DynError(f"the dynamic model could not be assembled: {type(e).__name__}: {e}")
+
+
+def _build(model, sol, settings=None):
     fp = sol.fp
     if not sol.converged or any(v in ("error", "missing", "unsolved") for v in sol.status.values()):
         raise DynError("the steady-state flowsheet must be solved without errors before a dynamic run")
@@ -1109,8 +1158,9 @@ def build(model, sol, settings=None):
         nm = u["name"]
         fr, F, T, P = _node_steady(model, sol, uid)
         nc = cfg["nodes"].get(nm, {})
-        V = float(nc.get("volume") or default_volume("mixer" if u["type"] == "mixer" else "vessel", fr, F))
-        if V <= 0:
+        V = nc.get("volume")
+        V = float(V) if V is not None and V != "" else default_volume("mixer" if u["type"] == "mixer" else "vessel", fr, F)
+        if not (V > 0 and math.isfinite(V)):
             raise DynError(f"{nm}: the volume must be positive")
         is_mixer = u["type"] == "mixer"
         node = Node(nm, "mixer" if is_mixer else "vessel", V, nc.get("orient", "Horizontal"), has_level=not is_mixer)
@@ -1572,6 +1622,10 @@ def _make_relief(d, cfg):
     for r in cfg.get("relief", []):
         node = d.named(r["node"])
         P_back = float(r.get("P_back", 1.5))
+        if r.get("type", "BDV") == "PSV" and not (r.get("P_set") and float(r["P_set"]) > 0):
+            raise DynError(f"relief '{r.get('name')}': a PSV needs a set pressure above zero")
+        if float(r.get("D_mm", 50.0)) <= 0 or P_back <= 0:
+            raise DynError(f"relief '{r.get('name')}': the orifice diameter and the back pressure must be positive")
         sk = Sink(f"Flare: {r['name']}", P_back)
         d.sinks.append(sk)
         b = ReliefBranch(r["name"], node, [Dest(sk, 1.0, 0.0, [])], kind_=r.get("type", "BDV"),
@@ -1628,14 +1682,23 @@ def check_events(d, events):
         grp = EVENT_KINDS[k][1]
         if e.get("target") not in tg[grp]:
             out.append(f"event {i} ({EVENT_KINDS[k][0]}): '{e.get('target')}' is not a {grp} of this flowsheet")
-        if e.get("t") is None or float(e["t"]) < 0:
-            out.append(f"event {i}: the time must be zero or later")
+        try:
+            if e.get("t") is None or float(e["t"]) < 0 or not math.isfinite(float(e["t"])):
+                out.append(f"event {i}: the time must be zero or later")
+        except (TypeError, ValueError):
+            out.append(f"event {i}: the time '{e.get('t')}' is not a number")
+            continue
         if EVENT_KINDS[k][2].startswith("(no value)") or k == "comp_start":
             continue
         if k == "ctrl_mode":
             continue
         if e.get("value") is None:
             out.append(f"event {i} ({EVENT_KINDS[k][0]}): a value is needed")
+        else:
+            try:
+                float(e["value"])
+            except (TypeError, ValueError):
+                out.append(f"event {i} ({EVENT_KINDS[k][0]}): the value '{e['value']}' is not a number")
     return out
 
 

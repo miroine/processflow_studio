@@ -1,0 +1,5 @@
+Unit,Parameter,Value
+VLV-100,P_out,22.5
+K-300 LP comp,eff,80
+E-300,T_out,35
+E-300,dP,0.4

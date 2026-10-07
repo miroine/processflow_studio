@@ -47,6 +47,13 @@ def new_model(components=None):
 def build_fluid(model) -> FluidPackage:
     fl = model["fluid"]
     hypos = {k: Component.from_dict(v) for k, v in fl.get("hypos", {}).items()}
+    import dataclasses
+    for k, ov in (fl.get("overrides") or {}).items():       # EOS calibration: library component with changed fields
+        if k in LIBRARY and k not in hypos:
+            ok = {f: v for f, v in ov.items() if f in Component.__dataclass_fields__ and f != "key"}
+            if "cp" in ok:
+                ok["cp"] = tuple(ok["cp"])
+            hypos[k] = dataclasses.replace(LIBRARY[k], **ok)
     keys = [k for k in fl["components"] if k in LIBRARY or k in hypos]
     if not keys:
         raise ValueError("The component list is empty")

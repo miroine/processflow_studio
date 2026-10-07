@@ -133,8 +133,8 @@ def profile_tab():
 
     u = st.columns(2)
     up = u[0].file_uploader("Upload a profile (CSV: Time, then 'Unit | parameter' columns)", type=["csv"], key="prof_up")
-    if up is not None and ss.get("_prof_file") != (up.name, up.size):
-        ss["_prof_file"] = (up.name, up.size)
+    if up is not None and ss.get("_prof_file") != (up.name, up.size, getattr(up, "file_id", None)):
+        ss["_prof_file"] = (up.name, up.size, getattr(up, "file_id", None))
         try:
             rws = TS.parse_csv(up.getvalue().decode("utf-8", "replace"))
             bad = TS.check_columns(model, rws)

@@ -159,15 +159,16 @@ def stream_worksheet(st_, fp, key):
         env_panel(st_, fp, key)
 
 
+QUALITY = (0.1, 0.25, 0.5, 0.75, 0.9)
+
+
 @st.cache_data(show_spinner=False, max_entries=16)
-def _cached_envelope(fluid_json, z_tuple, tmin, tmax, pmax):
+def _cached_envelope(fluid_json, z_tuple, tmin, tmax, pmax, quality=False):
     from procsim.thermo import FluidPackage
+    from procsim.envelope import trace_envelope
     import json
     fp = FluidPackage.from_dict(json.loads(fluid_json))
-    T, P, g = charts.phase_envelope(fp, np.array(z_tuple), tmin, tmax, pmax)
-    from procsim.envelope import trace_envelope
-    tr = trace_envelope(fp, np.array(z_tuple), pmax, tmin + 273.15, tmax + 273.15)
-    return T, P, g, tr
+    return trace_envelope(fp, np.array(z_tuple), pmax, tmin + 273.15, tmax + 273.15, quality=QUALITY if quality else ())
 
 
 def env_panel(st_, fp, key):
@@ -181,29 +182,42 @@ def env_panel(st_, fp, key):
     tmax = U.to_si("°C", c2.number_input(f"T max [{U.uT()}]", value=float(U.T(300.0)), key=f"envtmax_{key}_{sysk}"))
     pmax = U.to_si("bar(a)", c3.number_input(f"P max [{U.uP()}]", value=float(U.P(max(150.0, 1.3 * st_.P))),
                                              key=f"envpmax_{key}_{sysk}"))
-    go_ = c4.button("Compute", key=f"envgo_{key}", width="stretch")
+    q = c4.toggle("Vapour-fraction lines", value=True, key=f"envq_{key}",
+                  help="Lines of 10, 25, 50, 75 and 90 % vapour, traced the same way (a few extra seconds).")
+    go_ = st.button("Compute phase envelope", key=f"envgo_{key}", type="primary")
     k = f"env_{key}"
     if go_:
-        with st.spinner("Mapping and tracing the two-phase region (≈3 000 flashes)…"):
-            st.session_state[k] = _cached_envelope(json.dumps(fp.to_dict()), tuple(np.round(st_.z, 12)), tmin, tmax, pmax)
+        with st.spinner("Tracing the phase envelope…"):
+            st.session_state[k] = (_cached_envelope(json.dumps(fp.to_dict()), tuple(np.round(st_.z, 12)), tmin, tmax, pmax, bool(q)),
+                                   (tmin, tmax, pmax), bool(q))
     if k in st.session_state:
         val = st.session_state[k]
-        T, P, g = val[:3]
-        tr = val[3] if len(val) > 3 else None
+        if not (isinstance(val, tuple) and len(val) == 3 and isinstance(val[0], dict)):      # an envelope from an older version
+            st.session_state.pop(k, None)
+            st.caption("Press **Compute phase envelope** to trace the envelope for this composition.")
+            return
+        tr, rng, shown_q = val
         pts = [(st_.name, st_.T - 273.15, st_.P)]
-        st.plotly_chart(charts.envelope_figure(T, P, g, pts, f"Phase envelope — {st_.name}", tr), width="stretch",
+        st.plotly_chart(charts.envelope_figure(tr, pts, f"Phase envelope — {st_.name}", rng, shown_q), width="stretch",
                         key=f"envfig_{key}")
-        if tr and (tr.get("cricondenbar") or tr.get("cricondentherm")):
-            c = st.columns(2)
-            cb, ct = tr.get("cricondenbar"), tr.get("cricondentherm")
-            if cb:
-                c[0].metric("Cricondenbar", f"{U.P(cb[1]):.1f} {U.uP()} at {U.T(cb[0] - 273.15):.1f} {U.uT()}")
-            if ct:
-                c[1].metric("Cricondentherm", f"{U.T(ct[0] - 273.15):.1f} {U.uT()} at {U.P(ct[1]):.1f} {U.uP()}")
-        st.caption("Shading and contours from a grid of Peng-Robinson flashes; the markers are traced bubble and dew "
-                   "points (bisection on the phase count), with the cricondenbar refined by bisection on pressure.")
+        c = st.columns(3)
+        cb, ct, cr = tr.get("cricondenbar"), tr.get("cricondentherm"), tr.get("critical")
+        if cb:
+            c[0].metric("Cricondenbar", f"{U.P(cb[1]):.1f} {U.uP()} at {U.T(cb[0] - 273.15):.1f} {U.uT()}")
+        if ct:
+            c[1].metric("Cricondentherm", f"{U.T(ct[0] - 273.15):.1f} {U.uT()} at {U.P(ct[1]):.1f} {U.uP()}")
+        if cr:
+            c[2].metric("Critical point", f"{U.T(cr[0] - 273.15):.1f} {U.uT()} at {U.P(cr[1]):.1f} {U.uP()}")
+        if tr.get("method") == "continuation":
+            st.caption("The saturation curve is followed as one continuous path (Michelsen continuation on the equal-fugacity "
+                       "equations) from the dew point at 1 bar over the cricondentherm and the critical point to the bubble "
+                       "line, so the curve is smooth and passes exactly through the critical point. Free water and glycols "
+                       "are left out of the hydrocarbon envelope.")
+        else:
+            st.caption("The continuation could not be completed for this composition; the envelope was found by bisection "
+                       "on the phase count instead (no critical point or vapour-fraction lines).")
     else:
-        st.caption("Press **Compute** to map the envelope for this composition.")
+        st.caption("Press **Compute phase envelope** to trace the envelope for this composition.")
 
 
 def stream_view(sid):

@@ -150,7 +150,7 @@ CATALOGUE = {
                       "Outlet temperature"),
                    _f("T_out", "Outlet temperature", "°C", 80.0, {"spec": "Outlet temperature"}),
                    _f("duty", "Duty", "kW", 1000.0, {"spec": "Duty"}),
-                   _f("VF_out", "Outlet vapour fraction", "-", 1.0, {"spec": "Outlet vapour fraction"}, 0.0, 1.0),
+                   _f("VF_out", "Outlet vapour fraction", "-", 1.0, {"spec": "Outlet vapour fraction"}, None, 0.0, 1.0),
                    _f("dP", "Pressure drop", "bar", 0.5)],
     },
     "cooler": {
@@ -160,7 +160,7 @@ CATALOGUE = {
                       "Outlet temperature"),
                    _f("T_out", "Outlet temperature", "°C", 30.0, {"spec": "Outlet temperature"}),
                    _f("duty", "Duty removed", "kW", 1000.0, {"spec": "Duty"}),
-                   _f("VF_out", "Outlet vapour fraction", "-", 0.0, {"spec": "Outlet vapour fraction"}, 0.0, 1.0),
+                   _f("VF_out", "Outlet vapour fraction", "-", 0.0, {"spec": "Outlet vapour fraction"}, None, 0.0, 1.0),
                    _f("dP", "Pressure drop", "bar", 0.5)],
     },
     "hx": {

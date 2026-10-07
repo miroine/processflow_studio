@@ -147,7 +147,27 @@ def load_model(m, fit=True):
     st.session_state.sol_hash = None
     st.session_state.edit_hist = []
     st.session_state.fm_svg = None
+    reset_tab_state()
     bump(fit)
+
+
+_TAB_PREFIXES = ("dyn_", "prof_", "_dynbase_", "_prof_", "_datbase_", "dat_ed", "dat_tbl", "dat_comp", "dat_prof_", "dat_ev_", "dat_bval",
+                 "dat_bparam", "dat_bpat", "dat_btypes", "dat_bop", "dat_bmode")
+_TAB_KEYS = ("_data_run", "data_edited", "dyn_result", "prof_result", "_dyn_builds")
+
+
+def reset_tab_state():
+    """A new flowsheet was loaded: forget every value the Profile / Dynamic / Data tabs keep in widgets or caches, so that
+    nothing typed for the previous flowsheet (a unit with the same name, a time unit, a run length ...) leaks into this one."""
+    ss = st.session_state
+    for k in list(ss.keys()):
+        if isinstance(k, str) and (k.startswith(_TAB_PREFIXES) or k in _TAB_KEYS) and k not in ("dyn_ver", "dat_ver", "prof_ver"):
+            try:
+                del ss[k]
+            except Exception:
+                pass
+    for k in ("dyn_ver", "dat_ver", "prof_ver"):
+        ss[k] = ss.get(k, 0) + 1
 
 
 def canvas_structure(model):

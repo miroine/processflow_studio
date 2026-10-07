@@ -75,8 +75,10 @@ c.check("cricondenbar: two phases just below, one just above", two(cbT, cbP - 0.
 c.check("cricondentherm is the warmest dew point", e["cricondentherm"][0] >= max(T for T, _ in e["dew"]) - 1e-9, "")
 ok = all(two(T + 0.3, P) != two(T - 0.3, P) for T, P in e["dew"][:5] + e["bubble"][:5])
 c.check("traced points sit on the phase boundary (±0.3 K)", ok, "")
+_lowdew = sorted(e["dew"][:len(e["dew"]) // 3], key=lambda p: p[1])         # the dew line below the cricondentherm
 c.check("dew points are warmer than bubble points at the same pressure",
-        all(any(abs(Pd - Pb) < 1e-9 and Td > Tb for Td, Pd in e["dew"]) for Tb, Pb in e["bubble"][:3]), "")
+        all(Tb < float(np.interp(Pb, [p[1] for p in _lowdew], [p[0] for p in _lowdew])) for Tb, Pb in e["bubble"][-3:]
+            if _lowdew[0][1] <= Pb <= _lowdew[-1][1]), "")
 
 # ---- column free-water draw -------------------------------------------------------------------------------------
 wet = {k: v for k, v in WELL_FLUID.items()}

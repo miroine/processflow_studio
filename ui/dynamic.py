@@ -47,6 +47,24 @@ def _frozen(name, make):
     return ss[k][1], f"dyn_{name}_{abs(hash(tag)) % 10**8}"
 
 
+def _cached_build(model, sol, cfg):
+    """DY.build is the slow part of every rerun: keep the last few assemblies (read-only use) keyed on flowsheet + settings."""
+    import json
+    ss = st.session_state
+    try:
+        if ss.get("sol_hash") is None:
+            return DY.build(model, sol, cfg)
+        key = (ss.get("sol_hash"), json.dumps(cfg, sort_keys=True, default=str))
+    except Exception:
+        return DY.build(model, sol, cfg)
+    cache = ss.setdefault("_dyn_builds", {})
+    if key not in cache:
+        if len(cache) > 6:
+            cache.clear()
+        cache[key] = DY.build(model, sol, cfg)
+    return cache[key]
+
+
 def dynamic_tab():
     ss = st.session_state
     model = ss.model
@@ -68,7 +86,7 @@ def dynamic_tab():
 
     try:
         base = DY.default_settings(model, sol)
-        d = DY.build(model, sol, {k: v for k, v in cfg.items() if k != "time_unit"})
+        d = _cached_build(model, sol, {k: v for k, v in cfg.items() if k != "time_unit"})
     except DY.DynError as e:
         st.warning(f"This flowsheet cannot be run dynamically yet: {e}")
         return
@@ -77,7 +95,7 @@ def dynamic_tab():
 
     # ---- run settings --------------------------------------------------------------------------------------------
     c = st.columns(3)
-    t_end = c[0].number_input(f"Run length [{unit}]", min_value=1e-3, value=float(cfg.get("t_end", base["t_end"])) / f,
+    t_end = c[0].number_input(f"Run length [{unit}]", min_value=1e-6, value=max(float(cfg.get("t_end", base["t_end"])) / f, 1e-6),
                               key="dyn_tend") * f
     dt_max = c[1].number_input("Largest time step [s]", min_value=0.01, value=float(cfg.get("dt_max", base["dt_max"])),
                                key="dyn_dtmax", help="The step shrinks by itself when things change fast. Use 1 s or less "
@@ -102,15 +120,19 @@ def dynamic_tab():
             nodes = {}
             for r in ed.to_dict("records"):
                 dct = {}
+                bd = base["nodes"].get(r["Holdup"], {})          # only what differs from the defaults is stored
                 v = _num(r["Volume [m³]"])
-                if v and v > 0:
+                if v and v > 0 and not (bd.get("volume") and abs(v - bd["volume"]) <= 1e-9 * max(1.0, bd["volume"])):
                     dct["volume"] = v
-                if r["Orientation"] in ORIENT:
+                if r["Orientation"] in ORIENT and r["Orientation"] != bd.get("orient"):
                     dct["orient"] = r["Orientation"]
                 lv = _num(r["Initial level [%]"])
                 if lv is not None:
-                    dct["level0"] = min(max(lv, 0.0), 95.0)
-                nodes[r["Holdup"]] = dct
+                    lv = min(max(lv, 0.0), 95.0)
+                    if bd.get("level0") is None or abs(lv - bd["level0"]) > 1e-9:
+                        dct["level0"] = lv
+                if dct:
+                    nodes[r["Holdup"]] = dct
             cfg["nodes"] = nodes
             st.caption("Default volumes give about 3 minutes of liquid residence at 50 % level. A holdup with no liquid "
                        "starts empty. Liquid-full vessels are not supported.")
@@ -121,7 +143,7 @@ def dynamic_tab():
                                                        value=int(pc.get(nm, {}).get("cells", len(cells))), key=f"dyn_cells_{nm}"))}
 
     # ---- controllers ---------------------------------------------------------------------------------------------
-    ctrl_all = DY.build(model, sol, {k: v for k, v in cfg.items() if k not in ("time_unit", "controllers")})   # defaults
+    ctrl_all = _cached_build(model, sol, {k: v for k, v in cfg.items() if k not in ("time_unit", "controllers")})   # defaults
     off = [k for k, v in cfg.get("controllers", {}).items() if v.get("enabled") is False]
     with st.expander(f"Controllers ({len(ctrl_all.controllers)})", expanded=False):
         if ctrl_all.controllers:

@@ -135,6 +135,41 @@ Valve, compressor and pump coefficients are calibrated at the steady state, so a
 its steady point; vessel volumes and valve sizes default to generic values - change them for a real design. Not a replacement for
 a validated dynamic simulator (HYSYS Dynamics, UniSim, OLGA, K-Spice).
 
+**v7.4 additions (data exchange, *Data* tab):** *Import* parameters, feed compositions, profile tables and dynamic events from **CSV, Excel
+or YAML** (or open a complete flowsheet in YAML). The layout of every sheet is recognised from its columns (one row per parameter, one row per
+unit, compositions long or wide, `Time` + `Unit | parameter` profile, events); nothing is written until a **change plan** (old value, new value,
+status, reason) has been checked - unknown units or parameters (with "did you mean"), values outside the catalogue limits, bad select options and
+parameters hidden by the unit's specification are flagged, and *Undo edit* reverts an import. *Batch edit*: set / multiply / add / reset a
+parameter on all units of a type or name pattern, edit a table of one unit type, or edit all feed compositions in one grid. *Export* the result
+tables (streams, stream compositions, unit results, energy, overall KPIs, parameters, feed compositions, plus the last Profile and Dynamic
+results) to a formatted **Excel** workbook, **CSV** (one table or a zip), or the flowsheet / parameters as **YAML** / JSON; the *Parameters* and
+*Feed compositions* sheets of an export can be edited in Excel and imported again. A **Python editor** lets you adjust the export tables with a
+short script before exporting (and apply an edited Parameters table back to the flowsheet). The editor runs code, so it is **off unless the
+host enables it** (environment variable `PFS_PYTHON_EDITOR=on` or the Streamlit secret `python_editor = "on"`, optionally with a password
+`python_editor_password`); scripts run in a separate process with CPU, memory and no-file-write limits, no file or network access and a
+short allow-list of imports; modules are handed over through read-only views (no `pd.io` / `np.os` doors), private attributes are blocked and file / process / network calls are audited (v7.4.1) - defence in depth, still not a certified sandbox. Examples: `docs/example_import_parameters.csv`,
+`docs/example_import_changes.yaml`. Needs `pyyaml` (added to `requirements.txt`).
+
+**v7.4.1 (audit and bug-fix release):** closed a hole in the Python editor (`pd.io.common.os` gave a script access to the operating system) with
+read-only module views, a stricter AST check and an audit hook. Dynamics: bumpless manual → auto transfer, surge margin in surge, anti-surge
+controller back to auto after a restart, a second `run()` continues with the same mass-balance baseline, events and settings are validated with
+readable messages (bad target, missing time, text value, negative run length, zero volume, PSV without set pressure), valve openings are clamped,
+and steps never jump over a feed ramp's breakpoint. UI: loading a flowsheet clears the Profile / Dynamic / Data widget state and caches, untouched
+default vessel volumes are no longer pinned into the settings, the dynamic model assembly is cached between reruns and the default Python script
+works on an empty flowsheet.
+
+**v7.5 additions (fluid package, *Fluid package* tab and *Phase envelope*):** the component library grows from 13 to **163** (n-alkanes to C20, branched
+alkanes, cyclics, aromatics, olefins, sulfur compounds, alcohols, glycols, amines, light and noble gases) with CAS number and formula, searchable and
+filterable; data from the ChemSep pure-component database (Artistic License 2.0). **EOS calibration** fits the Peng-Robinson *m* and the Peneloux
+volume shift (optionally ω, Tc, Pc, with weak priors) of any component to vapour-pressure and liquid-density data, or a pair's kij to bubble
+pressures, shows before/after deviations and stores the result in the flowsheet. **Plus-fraction splitting** (Pedersen distribution, Søreide density,
+equal-mass pseudo-components). The **phase envelope** is now traced by continuation through the critical point (smooth, 1-3 s) with optional
+vapour-fraction lines; the old grid method remains as a fallback. Tests: `tests/test_fluid75.py`.
+Limits: extended-library kij are generic family rules; Cp is a cubic fit; calibrations are only as good as the data and extrapolate poorly when
+ω/Tc/Pc are fitted together with m.
+
+
+
 **Hydrate model (v6):** Motiee gas-gravity correlation or a van der Waals–Platteeuw model (sI/sII, Kihara potentials, PR
 fugacities, fitted to pure-gas data), selected on the Fluid package tab.
 

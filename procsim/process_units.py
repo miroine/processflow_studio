@@ -36,6 +36,11 @@ FORMULA = {"N2": (0, 0, 0), "O2": (0, 0, 0), "H2": (0, 2, 0), "CO2": (0, 0, 0), 
            "C1": (1, 4, 0), "C2": (2, 6, 0), "C3": (3, 8, 0), "iC4": (4, 10, 0), "nC4": (4, 10, 0), "iC5": (5, 12, 0),
            "nC5": (5, 12, 0), "nC6": (6, 14, 0), "nC7": (7, 16, 0), "nC8": (8, 18, 0), "nC9": (9, 20, 0),
            "nC10": (10, 22, 0), "MeOH": (1, 4, 0), "MEG": (2, 6, 0)}
+from .components_ext import THERMO as _EXT_THERMO          # noqa: E402  (extended library: C, H, S atoms and ΔHf)
+for _k, (_nc, _nh, _ns, _df) in _EXT_THERMO.items():
+    FORMULA.setdefault(_k, (_nc, _nh, _ns))
+    DHF.setdefault(_k, _df)
+del _k, _nc, _nh, _ns, _df
 SO2_HF = -296.84e3
 STD_VOL = 23.645              # m³/kmol at 15 °C, 1.01325 bar (the app's standard conditions)
 

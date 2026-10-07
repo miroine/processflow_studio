@@ -21,7 +21,7 @@ import os                                              # noqa: E402
 import sys                                             # noqa: E402
 import traceback                                       # noqa: E402
 
-APP_VERSION = "7.3.0"
+APP_VERSION = "7.5.0"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _PKGS = ("procsim", "ui", "pfd_canvas", "fieldmap_canvas")
 if _ROOT not in sys.path:
@@ -68,8 +68,8 @@ def _import_project():
     from ui import panels
     from ui.fluid import fluid_tab, workbook_tab
     from ui import theme
-    import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units, ui.surf, ui.scenarios, ui.fieldlife, ui.design, ui.prognosis, ui.timeseries, ui.dynamic   # noqa: E401,F401
-    import procsim.surf, procsim.subsea_design, procsim.subsea_ops, procsim.scenarios, procsim.fieldlife, procsim.flowassure, procsim.hydrate, procsim.envelope, procsim.dehydration, procsim.process_units, procsim.flowassure2, procsim.design, procsim.network, procsim.prognosis, procsim.debottleneck, procsim.gasquality, procsim.examples_topside, procsim.fieldmap, procsim.timeseries, procsim.dynamics, procsim.dyn_thermo, procsim.examples_dynamic   # noqa: E401,F401
+    import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units, ui.surf, ui.scenarios, ui.fieldlife, ui.design, ui.prognosis, ui.timeseries, ui.dynamic, ui.data   # noqa: E401,F401
+    import procsim.surf, procsim.subsea_design, procsim.subsea_ops, procsim.scenarios, procsim.fieldlife, procsim.flowassure, procsim.hydrate, procsim.envelope, procsim.dehydration, procsim.process_units, procsim.flowassure2, procsim.design, procsim.network, procsim.prognosis, procsim.debottleneck, procsim.gasquality, procsim.examples_topside, procsim.fieldmap, procsim.timeseries, procsim.dynamics, procsim.dyn_thermo, procsim.examples_dynamic, procsim.datatools   # noqa: E401,F401
     import procsim, ui
     if getattr(procsim, "__version__", None) != APP_VERSION or getattr(ui, "__version__", None) != APP_VERSION:
         raise ImportError(f"version mismatch: app.py {APP_VERSION}, procsim {getattr(procsim, '__version__', '?')}, "
@@ -169,9 +169,9 @@ S.ensure_solved()
 theme.header()
 
 # ------------------------------------------------------------------ main
-tab_pfd, tab_an, tab_wb, tab_case, tab_sc, tab_surf, tab_design, tab_life, tab_prog, tab_prof, tab_dyn, tab_fluid, tab_help = st.tabs(
+tab_pfd, tab_an, tab_wb, tab_case, tab_sc, tab_surf, tab_design, tab_life, tab_prog, tab_prof, tab_dyn, tab_data, tab_fluid, tab_help = st.tabs(
     ["🧩 Flowsheet", "📈 Analysis", "📋 Workbook", "🔬 Case study", "⚖️ Scenarios", "🌊 Subsea (SURF)",
-     "🛠️ Design", "📅 Field life", "🎯 Prognosis", "⏱️ Profile", "🌀 Dynamic", "🧪 Fluid package", "ℹ️ Help & methods"])
+     "🛠️ Design", "📅 Field life", "🎯 Prognosis", "⏱️ Profile", "🌀 Dynamic", "🔁 Data", "🧪 Fluid package", "ℹ️ Help & methods"])
 
 with tab_pfd:
     if ss.solve_error:
@@ -218,6 +218,9 @@ with tab_prof:
 
 with tab_dyn:
     ui.dynamic.dynamic_tab()
+
+with tab_data:
+    ui.data.data_tab()
 
 with tab_fluid:
     fluid_tab()

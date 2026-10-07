@@ -111,13 +111,13 @@ def flow_assurance(model, sol):
     c1, c2 = st.columns([3, 1])
     with c2:
         want_env = st.toggle("Overlay phase envelope", value=False, key="fa_env",
-                             help="Envelope of the first stream in the path (≈1 500 flashes, a few seconds)")
+                             help="Envelope of the first stream in the path (traced, about a second)")
     if want_env and sel:
         from .panels import _cached_envelope
         s0 = sol.streams[names[sel[0]]]
         with st.spinner("Mapping the phase envelope…"):
             env = _cached_envelope(json.dumps(fp.to_dict()), tuple(np.round(s0.z, 12)), -60.0, 200.0,
-                                   float(min(max(Pmax * 1.3, 50.0), 300.0)))
+                                   float(min(max(Pmax * 1.3, 50.0), 300.0)), False)
     if not sel:
         st.caption("Pick the streams that make up the path.")
     else:

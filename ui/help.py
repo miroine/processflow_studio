@@ -267,6 +267,35 @@ Runs the flowsheet for a **time profile** instead of one operating point.
 * The single-step solution on the *Flowsheet* tab is unchanged; the profile never alters the flowsheet or triggers a re-solve.
   Each step is a full solve (about as long as one normal solve), so 100 steps take 100 solves.
 
+### Data - import, batch edit, export (v7.4) — *Data* tab
+
+* **Import** (CSV, Excel, YAML, or a complete flowsheet): the file's layout is recognised from its columns - *Unit / Parameter / Value* rows, one
+  row per unit with parameter columns, feed compositions (long or one column per component), a *Time* + `Unit | parameter` profile table, or dynamic
+  events (*Time [s], Event, Target, Value, Ramp [s]*). An Excel workbook is read sheet by sheet; a sheet it does not recognise (for example a
+  results sheet) is ignored, and you can override how a sheet is treated. Values are in the catalogue units shown beside each parameter (bar(a),
+  °C, kW …) whatever your display units. Parameters can be named by key (`P_out`) or label (`Outlet pressure`); select options are matched
+  without regard to capitals; decimal commas and `;` / tab delimiters are accepted.
+* **Change plan**: every value is listed with old and new value and a status - *ok*, *warning* (applied; e.g. the parameter is not used with the unit's
+  current specification, or a cell is repeated), *unchanged*, *skipped* (blank cell) or *error* (unknown unit, parameter or option, text instead of a
+  number, outside the minimum / maximum, two units with the same name). Errors are never applied; you can apply the valid rows. One **Undo edit**
+  reverts the whole import.
+* **Batch edit**: *One operation on many units* (choose unit types and / or a name pattern such as `K-*; Cooler`, a parameter, and Set / Multiply /
+  Add / Reset to default), *A table of one unit type* (edit cells like a spreadsheet), *Feed compositions* (grid of all feeds). The same plan and
+  undo apply.
+* **Export**: Excel workbook (one formatted sheet per table), CSV (one table, or a zip of all), the flowsheet or only the parameters as YAML, the
+  flowsheet as JSON. Tables: Parameters, Feed compositions, Streams, Stream compositions, Unit results, Energy streams, Overall, Messages, and -
+  when you have run them - Profile results and Dynamic results. Stream properties are in the metric units named in the headers. The *Parameters*
+  and *Feed compositions* sheets round-trip: edit them in Excel and import the workbook again.
+* **Python editor**: a short script gets `tables` (dict of DataFrames), `pandas` as `pd`, `numpy` as `np` and `math`; edit the tables in place,
+  replace, add or drop them, `print()` to see values. The edited tables replace the export tables (switch on the Export tab). If the script edits the
+  *Parameters* or *Feed compositions* table, the changes can be applied back to the flowsheet through the same checked plan. Scripts run on a copy in a
+  separate process, are stopped after 30 s, have no file or network access, and may import only math, statistics, numpy, pandas, re, datetime, json,
+  itertools, collections, functools, decimal, fractions, textwrap and random; private (`_x`) attributes, file writers (`to_csv` ...), `read_*` and sub-modules such as `pd.io` are
+  hidden, and the child process audits file, process and network calls. This is defence in depth, **not** a certified sandbox, so the editor is off unless the host enables it: environment variable `PFS_PYTHON_EDITOR=on`, or the Streamlit secret `python_editor = "on"`
+  with, strongly recommended on a public app, `python_editor_password`.
+* Limits: structured parameters (curves, reaction tables) are not editable in tables - use the property view or YAML with the same shape as the current
+  value; the Profile table's times use the Profile tab's time unit; dynamic event targets are checked on the Dynamic tab, not at import.
+
 ### Dynamic simulation (v7.3) — *Dynamic* tab
 
 A **lumped, time-domain** model built from the solved steady-state flowsheet (seconds to hours).
@@ -338,8 +367,18 @@ Built on the Field life model; it answers "which strategy, how many wells, what 
   equilibrium dew-point chart), Kremser absorption with the circulation rate (L TEG per kg water), the water dew point
   of the dried gas from the EOS, rich-glycol purity and the regenerator reboiler duty (charged as heating). An
   optional dew-point specification warns when missed. Example: *Gas dehydration: TEG contactor*.
-* **Traced phase envelope**: the stream *Phase envelope* tab adds traced bubble and dew points (bisection on the
-  phase count) with the **cricondenbar** (refined by bisection on pressure) and **cricondentherm**.
+* **Phase envelope (v7.5)**: the stream *Phase envelope* tab follows the saturation curve as one smooth path by
+  continuation (Michelsen): dew line, cricondentherm, cricondenbar and the **critical point** to the bubble line, with
+  optional lines of constant vapour fraction (10–90 %). Smooth by construction rather than contoured from a grid; if the
+  continuation fails the older grid method is used and the panel says so. Free water is left out of the envelope.
+* **Fluid package (v7.5)**: 163 library components (alkanes to C20, isomers, cyclics, aromatics, olefins, sulfur
+  compounds, alcohols, glycols, amines, light gases; data from ChemSep, Artistic License 2.0) with family filter and
+  search by name, formula or CAS. *Plus fraction* splits a C7+ (or Cn+) lump into single carbon numbers (Pedersen
+  exponential distribution, Søreide densities) and lumps them into equal-mass pseudo-components, conserving mole
+  fraction, molar mass and density. *EOS calibration* fits the Peng-Robinson alpha parameter *m* and the volume shift
+  (and optionally ω, Tc, Pc) of one component to vapour-pressure and liquid-density data, or the kij of a pair to
+  bubble pressures; the before/after deviations are shown before you apply the result. Calibrated parameters are
+  stored in the flowsheet file.
 * **Column free water**: *Free water* = decant from the feeds (feed knock-out) or also from the condenser (reflux-drum
   water boot) to the column's optional *water* outlet; the stage model stays VLE-only.
 * **↶ Undo edit** (sidebar) reverses the last change made in a property view (the canvas keeps Ctrl+Z).
@@ -464,8 +503,9 @@ compressors and maps, heat curves, column and pipe profiles, convergence) and gr
 * Hydrate temperatures come from a gas-gravity correlation; salts and H₂S/CO₂ effects are ignored, and the
   inhibitor correlations are screening tools (check high MEG concentrations with a rigorous hydrate model).
 * Columns are VLE-only (no free-water draw or liquid–liquid split on the trays); no side draws or pump-arounds yet.
-* The phase envelope is contoured from a P–T grid of flashes rather than traced, so the critical region is
-  approximate.
+* Phase envelope: the continuation can stall on strongly liquid-liquid-prone mixtures (the grid method is then used);
+  the hydrocarbon envelope ignores free water. Extended-library kij are generic family rules (set or fit them for
+  polar systems); ideal-gas Cp is a cubic fit, within about 3 % of the source over 200–1000 K.
 * SURF: the well model is steady-state nodal analysis (no transient, no gas lift yet); the choke uses a gas-based
   critical ratio; the slugging check is a screening criterion, not a transient simulation. Boosters have no
   performance map (fixed efficiency); CAPEX, umbilical and cable data are generic allowances (class 5). Slugging and

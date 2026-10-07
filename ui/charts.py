@@ -80,51 +80,72 @@ def phase_envelope(fp, z, T_min_C=-120.0, T_max_C=300.0, P_max=200.0, nT=56, nP=
     return Ts - 273.15, Ps, grid
 
 
-def _envelope_traces(fig, T_C, P, grid, quality=True):
-    T_C, P = _arr("°C", T_C), _arr("bar(a)", P)
-    g = np.nan_to_num(grid, nan=1.0)
-    two = np.where((g > 1e-6) & (g < 1 - 1e-6), 1.0, np.nan)
-    fig.add_trace(go.Heatmap(x=T_C, y=P, z=two, colorscale=[[0, _alpha(TEAL, .10)], [1, _alpha(TEAL, .10)]],
-                             showscale=False, hoverinfo="skip", name="Two-phase region"))
+def _envelope_traces(fig, tr, quality=True, label_quality=True):
+    """Draw a traced envelope: shaded two-phase region, dew (orange) and bubble (blue) lines as smooth curves, the critical
+    point, cricondenbar / cricondentherm and (optional) lines of constant vapour fraction."""
+    uT, uP = U.uT(), U.uP()
+    hov = f"%{{x:.1f}} {uT} · %{{y:.2f}} {uP}<extra></extra>"
+    path = tr.get("path") or []
+    if len(path) > 3:
+        xs = [U.T(t - 273.15) for t, _ in path]
+        ys = [U.P(p) for _, p in path]
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode="none", fill="toself", fillcolor=_alpha(TEAL, .10), hoverinfo="skip",
+                                 name="Two-phase region", showlegend=True))
     if quality:
-        fig.add_trace(go.Contour(x=T_C, y=P, z=g, contours=dict(start=0.25, end=0.75, size=0.25, coloring="none",
-                                                                showlabels=True, labelfont=dict(size=10, color=GREY)),
-                                 line=dict(color=GREY, width=1, dash="dot"), showscale=False,
-                                 name="Vapour fraction 0.25 / 0.5 / 0.75", hoverinfo="skip", showlegend=True))
-    fig.add_trace(go.Contour(x=T_C, y=P, z=g, contours=dict(start=1e-4, end=1e-4, size=1, coloring="none"),
-                             line=dict(color=BLUE, width=2.5), showscale=False, name="Bubble-point line",
-                             hoverinfo="skip", showlegend=True))
-    fig.add_trace(go.Contour(x=T_C, y=P, z=g, contours=dict(start=0.9999, end=0.9999, size=1, coloring="none"),
-                             line=dict(color=ORANGE, width=2.5), showscale=False, name="Dew-point line",
-                             hoverinfo="skip", showlegend=True))
+        first = True
+        for b, line in sorted((tr.get("isopleths") or {}).items()):
+            fig.add_trace(go.Scatter(x=[U.T(t - 273.15) for t, _ in line], y=[U.P(p) for _, p in line], mode="lines",
+                                     line=dict(color=GREY, width=1, dash="dot"), name="Vapour fraction",
+                                     legendgroup="vf", showlegend=first, hovertemplate=f"vapour fraction {b:.2f}<br>" + hov))
+            first = False
+            if label_quality and len(line) > 8:
+                pc = (tr.get("critical") or tr.get("cricondenbar") or (0.0, max(p_ for _, p_ in line)))[1]
+                k = min(range(len(line)), key=lambda i_: abs(line[i_][1] - {0.1: 0.18, 0.25: 0.34, 0.5: 0.42, 0.75: 0.5, 0.9: 0.58}.get(round(b, 2), 0.4) * pc))
+                fig.add_trace(go.Scatter(x=[U.T(line[k][0] - 273.15)], y=[U.P(line[k][1])], mode="text", text=[f"{b * 100:.0f} %"],
+                                         textfont=dict(size=10, color=GREY), showlegend=False, hoverinfo="skip"))
+    for key, col, lab in (("bubble", BLUE, "Bubble-point line"), ("dew", ORANGE, "Dew-point line")):
+        pts = tr.get(key) or []
+        if len(pts) > 1:
+            fig.add_trace(go.Scatter(x=[U.T(t - 273.15) for t, _ in pts], y=[U.P(p) for _, p in pts], mode="lines", name=lab,
+                                     line=dict(color=col, width=2.6), hovertemplate=lab + "<br>" + hov))
+    cr = tr.get("critical")
+    if cr:
+        fig.add_trace(go.Scatter(x=[U.T(cr[0] - 273.15)], y=[U.P(cr[1])], mode="markers", name="Critical point",
+                                 marker=dict(size=11, symbol="diamond", color="#FFFFFF", line=dict(color=INK, width=2)),
+                                 hovertemplate="Critical point<br>" + hov))
 
 
-def envelope_figure(T_C, P, grid, points=(), title="Phase envelope", trace=None):
+def envelope_figure(tr, points=(), title="Phase envelope", ranges=None, quality=True):
+    """Envelope from a traced dict (``procsim.envelope.trace_envelope``).  ``ranges`` = (Tmin, Tmax, Pmax) in °C / bar(a)."""
     fig = go.Figure()
-    _envelope_traces(fig, T_C, P, grid)
-    if trace:
-        for key, col, lab in (("bubble", BLUE, "Bubble points (traced)"), ("dew", ORANGE, "Dew points (traced)")):
-            pts = trace.get(key) or []
-            if pts:
-                fig.add_trace(go.Scatter(x=[U.T(t - 273.15) for t, _ in pts], y=[U.P(p) for _, p in pts],
-                                         mode="markers", name=lab, marker=dict(size=6, color=col),
-                                         hovertemplate=f"%{{x:.1f}} {U.uT()} · %{{y:.1f}} {U.uP()}<extra></extra>"))
-        for key, sym, lab in (("cricondenbar", "triangle-up", "Cricondenbar"), ("cricondentherm", "triangle-right",
-                                                                                  "Cricondentherm")):
-            v = trace.get(key)
-            if v:
-                fig.add_trace(go.Scatter(x=[U.T(v[0] - 273.15)], y=[U.P(v[1])], mode="markers+text", text=[lab],
-                                         textposition="top right", name=lab,
-                                         marker=dict(size=13, symbol=sym, color=INK, line=dict(color="#FFFFFF", width=1.5)),
-                                         hovertemplate=f"{lab}: %{{x:.1f}} {U.uT()} · %{{y:.1f}} {U.uP()}<extra></extra>"))
+    _envelope_traces(fig, tr, quality)
+    for key, sym, lab in (("cricondenbar", "triangle-up", "Cricondenbar"), ("cricondentherm", "triangle-right", "Cricondentherm")):
+        v = tr.get(key)
+        if v:
+            fig.add_trace(go.Scatter(x=[U.T(v[0] - 273.15)], y=[U.P(v[1])], mode="markers+text", text=[lab],
+                                     textposition="top left" if key == "cricondentherm" else "top right", name=lab,
+                                     marker=dict(size=13, symbol=sym, color=INK, line=dict(color="#FFFFFF", width=1.5)),
+                                     hovertemplate=f"{lab}: %{{x:.1f}} {U.uT()} · %{{y:.1f}} {U.uP()}<extra></extra>"))
     if points:
         fig.add_trace(go.Scatter(x=[U.T(p[1]) for p in points], y=[U.P(p[2]) for p in points], mode="markers+text",
                                  text=[p[0] for p in points], textposition="top center",
                                  marker=dict(size=10, color=INK, line=dict(color="#FFFFFF", width=2)),
                                  name="Stream", hovertemplate=f"%{{text}}<br>%{{x:.1f}} {U.uT()} · %{{y:.1f}} {U.uP()}"
                                                               "<extra></extra>"))
-    return _style(fig, title, "Peng-Robinson; shaded = two-phase region", xaxis=dict(_AXIS, title=f"Temperature [{U.uT()}]"),
-                  yaxis=dict(_AXIS, title=f"Pressure [{U.uP()}]"))
+    xa, ya = dict(_AXIS, title=f"Temperature [{U.uT()}]"), dict(_AXIS, title=f"Pressure [{U.uP()}]")
+    if ranges:                                   # the window requested, trimmed to the envelope (and the stream point)
+        path = tr.get("path") or []
+        Ts = [t - 273.15 for t, _ in path] + [p_[1] for p_ in points]
+        Ps = [p for _, p in path] + [p_[2] for p_ in points]
+        t_lo, t_hi, p_hi = ranges[0], ranges[1], ranges[2]
+        if Ts:
+            t_lo, t_hi = max(t_lo, min(Ts) - 12.0), min(t_hi, max(Ts) + 25.0)
+            p_hi = min(p_hi, 1.12 * max(Ps))
+        if t_hi > t_lo and p_hi > 0:
+            xa["range"] = [U.T(t_lo), U.T(t_hi)]
+            ya["range"] = [0, U.P(p_hi)]
+    meth = "traced by continuation" if tr.get("method") == "continuation" else "bisection on the phase count"
+    return _style(fig, title, f"Peng-Robinson, hydrocarbon phases ({meth}); shaded = two-phase region", xaxis=xa, yaxis=ya)
 
 
 def flow_assurance_figure(env, trajectory, hydrate_curves, title="Flow assurance: P–T trajectory"):
@@ -134,7 +155,7 @@ def flow_assurance_figure(env, trajectory, hydrate_curves, title="Flow assurance
     hydrate_curves: list of (label, P array, T array, dashed)."""
     fig = go.Figure()
     if env is not None:
-        _envelope_traces(fig, *env, quality=False)
+        _envelope_traces(fig, env, quality=False)
     uT, uP = U.uT(), U.uP()
     for k, (label, Ph, Th, dashed) in enumerate(hydrate_curves):
         fig.add_trace(go.Scatter(x=_arr("°C", Th), y=_arr("bar(a)", Ph), mode="lines", name=label,
@@ -802,6 +823,18 @@ COMP_GROUPS = [("N₂ + CO₂ + H₂S", ("N2", "CO2", "H2S", "O2", "H2")), ("C1"
                ("C7+", ("nC7", "nC8", "nC9", "nC10")), ("Water + inhibitors", ("H2O", "MEG", "MeOH"))]
 
 
+def _group_of(c):
+    """Group label of a fluid component for the stacked composition bars (library keys first, then by family / size)."""
+    for label, members in COMP_GROUPS:
+        if c.key in members:
+            return label
+    if c.family == "hypo" or (c.family == "hydrocarbon" and c.MW >= 98.0):
+        return "C7+"
+    if c.family in ("hydrocarbon",) and c.MW < 98.0:
+        return "C5–C6" if c.MW >= 70.0 else "C3–C4"
+    return "Other"
+
+
 def composition_figure(model, sol, sids, basis="mole"):
     """Stacked horizontal bars: grouped composition of selected streams (fixed group order and colours)."""
     fp = sol.fp
@@ -813,19 +846,15 @@ def composition_figure(model, sol, sids, basis="mole"):
         z = st_.z * (fp.MW if basis == "mass" else 1.0)
         z = z / z.sum()
         fracs.append(z)
+    labels = [g for g, _ in COMP_GROUPS] + ["Other"]
+    of = [_group_of(c) for c in fp.comps]
     fig = go.Figure()
-    for g, (label, members) in enumerate(COMP_GROUPS):
-        vals = []
-        for z in fracs:
-            v = sum(z[fp.index(k)] for k in members if k in fp.keys)
-            # hypothetical cuts join C7+
-            if label == "C7+":
-                v += sum(z[i] for i, c in enumerate(fp.comps) if c.family == "hypo")
-            vals.append(100 * v)
+    for g, label in enumerate(labels):
+        vals = [100 * sum(float(z[i]) for i in range(fp.n) if of[i] == label) for z in fracs]
         if max(vals) <= 1e-9:
             continue
         fig.add_trace(go.Bar(y=names, x=vals, orientation="h", name=label,
-                             marker=dict(color=colors[g], line=dict(color="#FFFFFF", width=2)),
+                             marker=dict(color=(_alpha(INK, .55) if label == "Other" else colors[g % len(colors)]), line=dict(color="#FFFFFF", width=2)),
                              hovertemplate="%{y} · " + label + ": %{x:.2f} %<extra></extra>"))
     return _style(fig, "Stream compositions", f"Grouped, {basis} %", barmode="stack", bargap=0.35,
                   height=max(320, 110 + 42 * len(sids)),

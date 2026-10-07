@@ -239,7 +239,7 @@ st.HOOK["press"].add("envgo_charts")
 t = time.time()
 run()
 c.check("phase envelope computed and plotted", "env_charts" in ss and
-        any(any(type(tr).__name__ == "Contour" for tr in f.data) for f in st.HOOK["charts"]), "")
+        any(any(str(tr.kw.get("name", "")) == "Dew-point line" for tr in f.data) for f in st.HOOK["charts"]), "")
 print(f"  envelope {time.time() - t:.1f} s")
 
 # ---- 10. paste from the canvas copies specifications ----------------------------------------------
@@ -1093,6 +1093,98 @@ st.HOOK["press"].add("New (blank)")
 run()
 c.check("dynamic tab on a blank flowsheet shows a hint, not an error", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
 
+# ---- 16s. v7.4: Data tab (import, batch edit, export, Python editor) ----------------------------------------------------
+os.environ["PFS_PYTHON_EDITOR"] = "on"
+
+
+class _Up:
+    def __init__(self, name, data):
+        self.name, self._d, self.size = name, data, len(data)
+
+    def getvalue(self):
+        return self._d
+
+
+def _uid(name):
+    return next(k_ for k_, u_ in ss.model["units"].items() if u_["name"] == name)
+
+
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Oil stabilisation"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("data tab renders without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+keys_ = {k_ for _, _, k_ in st.HOOK["log"]}
+c.check("data tab offers the uploader, the downloads and the editor", {"dat_up", "dat_run", "dat_dl_xl", "dat_dl_zip", "dat_exp_csv"} <= keys_, str(sorted(k for k in keys_ if k and k.startswith("dat_"))))
+h0 = ss.sol_hash
+p0 = ss.model["units"][_uid("VLV-100")]["params"]["P_out"]
+n0 = len(ss.get("edit_hist") or [])
+st.HOOK["values"]["dat_up"] = _Up("changes.csv", b"Unit,Parameter,Value\nVLV-100,P_out,22.5\nE-300,T_out,35\n")
+st.HOOK["errors"].clear()
+run()
+c.check("importing a CSV shows the plan without changing the flowsheet", not st.HOOK["errors"] and ss.model["units"][_uid("VLV-100")]["params"]["P_out"] == p0, str(st.HOOK["errors"])[:300])
+c.check("the apply button is offered", "dat_imp_apply" in {k_ for _, _, k_ in st.HOOK["log"]}, "")
+st.HOOK["press"].add("dat_imp_apply")
+run()
+c.close("applying the import writes the value", ss.model["units"][_uid("VLV-100")]["params"]["P_out"], 22.5, 0)
+c.eq("and records one undo step", len(ss.get("edit_hist") or []), n0 + 1)
+c.check("the flowsheet was re-solved", ss.sol_hash != h0 and ss.sol is not None, "")
+S_ = __import__("ui.state", fromlist=["x"])
+S_.undo_edit()
+c.close("undo restores the value", ss.model["units"][_uid("VLV-100")]["params"]["P_out"], p0, 0)
+st.HOOK["values"]["dat_up"] = _Up("bad.csv", b"Unit,Parameter,Value\nNOPE,P_out,1\n")
+st.HOOK["errors"].clear()
+run()
+c.check("a file with an error is shown as a message, not raised", any("cannot be applied" in e_ for e_ in st.HOOK["errors"]), str(st.HOOK["errors"])[:300])
+st.HOOK["errors"].clear()
+st.HOOK["values"]["dat_up"] = _Up("c.yaml", b"units:\n  K-300 LP comp: {eff: 82}\n")
+run()
+st.HOOK["press"].add("dat_imp_apply")
+run()
+c.close("a YAML import applies", ss.model["units"][_uid("K-300 LP comp")]["params"]["eff"], 82.0, 0)
+st.HOOK["values"].pop("dat_up", None)
+# batch operation
+ss["dat_btypes"] = ["cooler"]
+ss["dat_bparam"] = "dP"
+ss["dat_bop"] = "Multiply by"
+ss["dat_bval"] = "2"
+st.HOOK["values"]["radio:Edit:"] = "One operation on many units"
+ss["dat_bmode"] = "One operation on many units"
+d0 = ss.model["units"][_uid("E-300")]["params"]["dP"]
+run()
+c.check("batch operation offers its apply button", "dat_bop_plan_apply" in {k_ for _, _, k_ in st.HOOK["log"]}, str(sorted(k for _, _, k in st.HOOK["log"] if k and "dat_b" in k)))
+st.HOOK["press"].add("dat_bop_plan_apply")
+run()
+c.close("batch multiply applied to the cooler", ss.model["units"][_uid("E-300")]["params"]["dP"], d0 * 2, 1e-12)
+ss["dat_bmode"] = "A table of one unit type"
+ss["dat_ttype"] = "cooler"
+st.HOOK["errors"].clear()
+run()
+c.check("the unit-type table editor renders", not st.HOOK["errors"] and any((k_ or "").startswith("dat_tbl_") for _, _, k_ in st.HOOK["log"]), str(st.HOOK["errors"])[:300])
+ss["dat_bmode"] = "Feed compositions"
+run()
+c.check("the composition editor renders", not st.HOOK["errors"] and any((k_ or "").startswith("dat_comp_") for _, _, k_ in st.HOOK["log"]), str(st.HOOK["errors"])[:300])
+# python editor
+ss["dat_code"] = "df = tables['Unit results']\ntables['Power only'] = df[df['Quantity'].str.contains('Power')]\nprint('ok', len(tables))\n"
+st.HOOK["press"].add("dat_run")
+run()
+ed_ = ss.get("data_edited")
+c.check("the script ran and its tables are kept", bool(ed_) and "Power only" in ed_["tables"], str(ss.get("_data_run", {}).get("error")))
+c.check("print output is available", "ok" in (ss.get("_data_run") or {}).get("stdout", ""), "")
+c.check("no UI errors after the script", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+ss["dat_code"] = "import os\n"
+st.HOOK["press"].add("dat_run")
+run()
+c.check("a forbidden script is refused with a message", not (ss.get("_data_run") or {}).get("ok", True) and "not allowed" in (ss.get("_data_run") or {}).get("error", ""), str((ss.get("_data_run") or {}).get("error")))
+st.HOOK["errors"].clear()
+os.environ.pop("PFS_PYTHON_EDITOR", None)
+run()
+c.check("with the editor switched off the tab explains how to enable it", not st.HOOK["errors"] and "dat_run" not in {k_ for _, _, k_ in st.HOOK["log"]}, "")
+st.HOOK["errors"].clear()
+st.HOOK["press"].add("New (blank)")
+run()
+c.check("data tab on a blank flowsheet shows hints, not errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+
 # ---- 16z. remembered choices from a previous example (Streamlit Cloud KeyError in compositions_panel) -------
 st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if "Gas lift" in n)
 st.HOOK["press"].add("Load example")
@@ -1128,6 +1220,21 @@ sys._pfs_code_fp = -1                                 # files changed on disk si
 old_sol = ss.sol
 run()
 c.check("a code change invalidates the cached solution and re-solves", ss.sol is not old_sol and ss.sol is not None, "")
+
+# ---- 16t. v7.4.1: loading a flowsheet forgets the Profile / Dynamic / Data tab state -------------------------------------
+ss["dyn_unit"] = "h"
+ss["dyn_tend"] = 7.0
+ss["_data_run"] = {"ok": True, "tables": {}, "stdout": "", "error": ""}
+ss["data_edited"] = {"tables": {}}
+ss["dyn_result"] = {"sig": "x", "res": {}, "unit": "h"}
+v0_ = (ss.get("dyn_ver", 0), ss.get("dat_ver", 0))
+S_.load_model(EXAMPLES[next(n for n in EXAMPLES if n.startswith("Dynamic: HP separator"))]())
+c.check("load_model clears dynamic / data widget state", all(k_ not in ss for k_ in ("dyn_unit", "dyn_tend", "_data_run", "data_edited", "dyn_result")), "")
+c.check("load_model bumps the frozen-table versions", ss.get("dyn_ver", 0) > v0_[0] and ss.get("dat_ver", 0) > v0_[1], "")
+st.HOOK["errors"].clear()
+run()
+c.check("the app still renders after a load", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("dynamic: untouched vessel volumes are not pinned into the saved settings", not any("volume" in v_ for v_ in (ss.model.get("dynamics", {}).get("nodes") or {}).values()), str(ss.model.get("dynamics", {}).get("nodes"))[:200])
 
 # ---- 18. blank flowsheet -----------------------------------------------------------------------
 st.HOOK["press"].add("New (blank)")

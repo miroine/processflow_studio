@@ -180,6 +180,34 @@ try:
 except KeyError as e:
     c.check("dynamic tab widgets present", False, str(e))
 
+# data tab (v7.4): Python editor and a batch operation on real Streamlit widgets
+os.environ["PFS_PYTHON_EDITOR"] = "on"
+try:
+    widget("selectbox", "Example").set_value(next(n for n in EXAMPLES if n.startswith("Oil stabilisation")))
+    widget("button", "Load example").click()
+    at.run()
+    ok("data tab: example loaded")
+    at.text_area(key="dat_code").set_value("df = tables['Overall']\ntables['Copy'] = df.head(2)\nprint(len(tables))\n")
+    at.button(key="dat_run").click()
+    at.run()
+    ok("data tab: python script run")
+    c.check("data tab: edited tables kept", "Copy" in at.session_state["data_edited"]["tables"], str(at.session_state["_data_run"]["error"]))
+    uid_ = next(k for k, u in at.session_state["model"]["units"].items() if u["name"] == "E-300")
+    d0 = at.session_state["model"]["units"][uid_]["params"]["dP"]
+    at.multiselect(key="dat_btypes").set_value(["cooler"])
+    at.run()
+    at.selectbox(key="dat_bparam").set_value("dP")
+    at.selectbox(key="dat_bop").set_value("Multiply by")
+    at.run()
+    at.text_input(key="dat_bval").set_value("2")
+    at.run()
+    at.button(key="dat_bop_plan_apply").click()
+    at.run()
+    ok("data tab: batch edit applied")
+    c.close("data tab: batch multiply on real Streamlit", at.session_state["model"]["units"][uid_]["params"]["dP"], 2 * d0, 1e-12)
+except KeyError as e:
+    c.check("data tab widgets present", False, str(e))
+
 # blank flowsheet
 widget("button", "New (blank)").click()
 at.run()

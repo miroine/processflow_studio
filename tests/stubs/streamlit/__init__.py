@@ -304,8 +304,8 @@ def slider(label, min_value=None, max_value=None, value=None, step=None, key=Non
 
 
 def file_uploader(label, type=None, key=None, **kw):
-    _register("file_uploader", label, key)
-    return None
+    ident = _register("file_uploader", label, key)
+    return HOOK["values"].get(ident)
 
 
 def data_editor(data, key=None, **kw):
