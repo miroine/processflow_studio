@@ -11,11 +11,12 @@ from procsim.flowsheet import new_model, normalize, build_fluid, solve, port_edg
 from procsim.unitops import CATALOGUE, default_params, energy_name
 from procsim.streams import stream_properties, hydrate_risk
 from procsim.examples import EXAMPLES, WET_GAS
+from procsim import phasing as PH
 
-ENERGY_DIR = {"compressor": "in", "pump": "in", "heater": "in", "expander": "out", "cooler": "out",
+ENERGY_DIR = {"gas_turbine": "out", "compressor": "in", "pump": "in", "heater": "in", "expander": "out", "cooler": "out",
               "aircooler": "out", "subsea_booster": "in", "subsea_pump": "in", "subsea_compressor": "in",
               "intensifier": "in"}
-WORK_TYPES = ("compressor", "pump", "expander", "subsea_booster", "subsea_pump", "subsea_compressor", "intensifier")
+WORK_TYPES = ("gas_turbine", "compressor", "pump", "expander", "subsea_booster", "subsea_pump", "subsea_compressor", "intensifier")
 
 
 # --------------------------------------------------------------- formatting
@@ -170,12 +171,47 @@ def reset_tab_state():
         ss[k] = ss.get(k, 0) + 1
 
 
+_DEFAULT_ORIENT = {"separator": "v", "scrubber": "v", "separator3": "h"}
+
+
+def _norm_structure(units, streams, from_model):
+    """The part of the model the canvas owns (positions, connections, look, project phase), in one comparable form.
+    ``from_model``: units carry ``params`` (platform size) - otherwise they come straight from the canvas."""
+    out_u, out_s = {}, {}
+    for k, u in units.items():
+        if u.get("type") not in CATALOGUE:
+            continue
+        d = {"type": u["type"], "name": u["name"], "x": u["x"], "y": u["y"], "flip": bool(u.get("flip"))}
+        o = u.get("orient")
+        if o and o != _DEFAULT_ORIENT.get(u["type"]) and u["type"] in _DEFAULT_ORIENT:
+            d["orient"] = o
+        sc = u.get("scale")
+        if sc and abs(float(sc) - 1.0) > 1e-6:
+            d["scale"] = round(float(sc), 3)
+        for f in ("phase", "change", "color"):
+            if u.get(f):
+                d[f] = u[f]
+        if u["type"] == "platform":
+            p = u.get("params", {}) if from_model else u
+            d["w"], d["h"] = int(round(float(p.get("w", 520) or 520))), int(round(float(p.get("h", 320) or 320)))
+        out_u[k] = d
+    for k, t in streams.items():
+        d = {"name": t["name"], "src": list(t["src"]), "dst": list(t["dst"])}
+        for f in ("phase", "change", "color"):
+            if t.get(f):
+                d[f] = t[f]
+        out_s[k] = d
+    return {"units": out_u, "streams": out_s}
+
+
 def canvas_structure(model):
-    units = {k: {"type": u["type"], "name": u["name"], "x": u["x"], "y": u["y"], "flip": bool(u.get("flip"))}
-             for k, u in model["units"].items()}
-    streams = {k: {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
-               for k, s in model["streams"].items()}
-    return {"units": units, "streams": streams}
+    d = _norm_structure(model["units"], model["streams"], True)
+    for k, u in model["units"].items():
+        if u["type"] == "platform" and k in d["units"]:
+            d["units"][k]["kind"], d["units"][k]["note"] = u["params"].get("kind", ""), u["params"].get("note", "")
+    d["phases"] = [dict(p) for p in PH.phase_list(model)]
+    d["stage"] = int(model.get("stage", -1))
+    return d
 
 
 SHORT = {"column": "Column", "hx": "Heat exchanger", "separator": "2-phase separator",
@@ -183,7 +219,8 @@ SHORT = {"column": "Column", "hx": "Heat exchanger", "separator": "2-phase separ
          "teg_contactor": "TEG contactor", "amine_contactor": "Amine contactor", "relief_valve": "Relief valve (PSV)", "flare": "Flare", "comp_splitter": "Component splitter", "conv_reactor": "Conversion reactor", "eq_reactor": "Equilibrium reactor", "well": "Well", "injection_well": "Injection well", "xmas_tree": "Xmas tree", "template": "Template", "jumper": "Jumper / PLET",
          "flowline": "Flowline", "riser": "Riser", "subsea_valve": "SSIV / HIPPS", "subsea_booster": "Subsea booster",
          "subsea_pump": "Subsea pump", "subsea_compressor": "Subsea compressor", "subsea_separator": "Subsea separator",
-         "subsea_cooler": "Subsea cooler", "intensifier": "Intensifier", "cimv": "Chemical injection"}
+         "subsea_cooler": "Subsea cooler", "intensifier": "Intensifier", "cimv": "Chemical injection",
+         "platform": "Offshore platform", "gas_turbine": "Gas turbine", "phase_splitter": "Phase splitter"}
 
 
 def catalogue_payload():
@@ -205,6 +242,20 @@ def default_feed_comp(model):
     return comp
 
 
+def _take_look(mu, u):
+    """Copy the canvas-owned appearance of a unit (orientation, element zoom, project phase, colour, platform size)."""
+    for f in ("orient", "scale", "phase", "change", "color"):
+        if u.get(f):
+            mu[f] = u[f]
+        else:
+            mu.pop(f, None)
+    if mu.get("type") == "platform":
+        if u.get("w"):
+            mu["params"]["w"] = float(u["w"])
+        if u.get("h"):
+            mu["params"]["h"] = float(u["h"])
+
+
 def merge_canvas_event(ev):
     """Apply a canvas event to the session model. Returns True if the canvas must resync."""
     ss = st.session_state
@@ -220,6 +271,7 @@ def merge_canvas_event(ev):
         if uid in model["units"]:
             mu = model["units"][uid]
             mu["x"], mu["y"], mu["flip"] = u["x"], u["y"], bool(u.get("flip"))
+            _take_look(mu, u)
         else:
             src = (ev.get("copies") or {}).get(uid)
             if src in model["units"] and model["units"][src]["type"] == u["type"]:
@@ -232,6 +284,7 @@ def merge_canvas_event(ev):
                 p["composition"] = default_feed_comp(model)
             model["units"][uid] = {"type": u["type"], "name": u["name"], "x": u["x"], "y": u["y"],
                                    "flip": bool(u.get("flip")), "params": p}
+            _take_look(model["units"][uid], u)
     # unique unit names (canvas proposes names; Python has the last word)
     seen = set()
     for uid, u in model["units"].items():
@@ -241,8 +294,13 @@ def merge_canvas_event(ev):
                 n += 1
             u["name"] = f"{base} ({n})"
         seen.add(u["name"])
-    model["streams"] = {sid: {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
-                        for sid, s in jst.items()}
+    model["streams"] = {}
+    for sid, s in jst.items():
+        t = {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
+        for f in ("phase", "change", "color"):
+            if s.get(f):
+                t[f] = s[f]
+        model["streams"][sid] = t
     # unique stream names
     used = {u["name"] for u in model["units"].values()}
     for sid, s in model["streams"].items():
@@ -259,15 +317,12 @@ def merge_canvas_event(ev):
     ss.selected = [i for i in ev.get("selected", []) if i in model["units"] or i in model["streams"]]
     if ev.get("event") == "export_svg" and ev.get("svg"):
         ss.svg = ev["svg"]
-    return canvas_structure(model) != _js_normal(js)
+    return _norm_structure(model["units"], model["streams"], True) != _js_normal(js)
 
 
 def _js_normal(js):
-    units = {k: {"type": u["type"], "name": u["name"], "x": u["x"], "y": u["y"], "flip": bool(u.get("flip"))}
-             for k, u in js.get("units", {}).items() if u.get("type") in CATALOGUE}
-    streams = {k: {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
-               for k, s in js.get("streams", {}).items()}
-    return {"units": units, "streams": streams}
+    return _norm_structure({k: u for k, u in js.get("units", {}).items() if u.get("type") in CATALOGUE},
+                           js.get("streams", {}), False)
 
 
 def process_canvas_value(key="pfd"):
@@ -293,9 +348,13 @@ def model_hash(model):
     for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios", "heating", "fieldlife",
               "fieldlife_result", "waxsand", "power", "fa2", "design", "prognosis", "prognosis_result", "profile", "profile_result", "dynamics"):   # post-processing settings and results: editing them never re-solves
         m.pop(k, None)
+    m["units"] = {k: u for k, u in m["units"].items() if u["type"] != "platform"}      # drawing areas never change the solution
     for u in m["units"].values():
-        for k in ("x", "y", "flip"):
+        for k in ("x", "y", "flip", "orient", "scale", "color"):
             u.pop(k, None)
+    for t in m["streams"].values():
+        t.pop("color", None)
+    m["phases"] = [p["id"] for p in PH.phase_list(m)]                                    # names and colours are cosmetic
     return hashlib.sha1(json.dumps(m, sort_keys=True, default=str).encode()).hexdigest()
 
 
@@ -425,7 +484,10 @@ def _unit_label(u, res):
     if t == "scrubber" and res.get("Gas load [% of max]") is not None:
         return (f"{qfmt('Selected diameter [mm]', res['Selected diameter [mm]'], 0 if 'SI' in _sys() else 1)} · "
                 f"load {res['Gas load [% of max]']:.0f} %")
-    if t in ("separator", "separator3") and res.get("Vessel T [°C]") is not None:
+    if t == "gas_turbine" and res.get("Shaft power [kW]") is not None:
+        k_ = "Electric power [kW]" if res.get("Electric power [kW]") is not None else "Shaft power [kW]"
+        return f"{qfmt(k_, res[k_], 0)} · {res['Net efficiency (LHV) [%]']:.0f} %"
+    if t in ("separator", "separator3", "phase_splitter") and res.get("Vessel T [°C]") is not None:
         return f"{qfmt('Vessel T [°C]', res['Vessel T [°C]'], 1)} · {qfmt('Vessel P [bar(a)]', res['Vessel P [bar(a)]'], 1)}"
     if t == "recycle":
         return f"{res.get('Iterations', '')} it" if res.get("Converged") == "Yes" else "not converged"
@@ -459,9 +521,12 @@ def results_payload():
                                          + ([f"⚠ Below hydrate T ({qfmt('T [°C]', p['Hydrate T (inhibited) [°C]'], 1)} incl. inhibitor)"]
                                             if entry.get("warn") else []))
         out["streams"][sid] = entry
+    solved_stage = PH.resolve_stage(model)
     for uid, u in model["units"].items():
         e = {}
-        if sol and current:
+        if sol and current and not PH.present(u, model, solved_stage):
+            e["status"] = "inactive"                           # not in place in the stage that was solved
+        elif sol and current:
             e["status"] = sol.status.get(uid, "unsolved")
             res = sol.results.get(uid) or {}
             e["label"] = _unit_label(u, res)
@@ -475,7 +540,7 @@ def results_payload():
         t = u["type"]
         dirn = ENERGY_DIR.get(t)
         duty_val = None
-        if t in ("separator", "separator3") and abs(float(u["params"].get("duty", 0) or 0)) > 0:
+        if t in ("separator", "separator3", "phase_splitter") and abs(float(u["params"].get("duty", 0) or 0)) > 0:
             dirn = "in" if u["params"]["duty"] > 0 else "out"
         if t == "pipe" and u["params"].get("heat") == "Overall U to ambient" and float(u["params"].get("U", 0)) > 0:
             dirn = "out"

@@ -158,6 +158,12 @@ and steps never jump over a feed ramp's breakpoint. UI: loading a flowsheet clea
 default vessel volumes are no longer pinned into the settings, the dynamic model assembly is cached between reruns and the default Python script
 works on an empty flowsheet.
 
+**v7.6 additions (phasing and symbols):** elements and streams can be tagged *new in phase n* / *removed in phase n* and coloured freely; a stage selector
+shows the design, today, or the situation after any phase, with the calculation following the stage (absent items are dropped and shown as ghosts), plus a
+*Before / after* comparison tab. Separators and scrubbers can be vertical or horizontal, every element has its own zoom, and the new elements are an
+offshore platform frame (fixed, floating, FPSO, subsea, onshore), a gas turbine (LHV-based power, derating, exhaust heat, CO₂, plant power balance) and
+a phase splitter. A phased example flowsheet is included.
+
 **v7.5 additions (fluid package, *Fluid package* tab and *Phase envelope*):** the component library grows from 13 to **163** (n-alkanes to C20, branched
 alkanes, cyclics, aromatics, olefins, sulfur compounds, alcohols, glycols, amines, light and noble gases) with CAS number and formula, searchable and
 filterable; data from the ChemSep pure-component database (Artistic License 2.0). **EOS calibration** fits the Peng-Robinson *m* and the Peneloux

@@ -503,6 +503,8 @@ def selection_view():
         unit_view(obj)
     else:
         stream_view(obj)
+    from .phasing import appearance_panel
+    appearance_panel(obj)
 
 
 # ------------------------------------------------------------------ compressor curve

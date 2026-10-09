@@ -206,6 +206,20 @@ def toggle(label, value=False, key=None, on_change=None, args=None, **kw):
     return v
 
 
+checkbox = toggle
+
+
+def color_picker(label, value="#000000", key=None, on_change=None, args=None, **kw):
+    ident = _register("color_picker", label, key)
+    _cb(ident, on_change, args)
+    if key is not None and key in session_state:
+        return session_state[key]
+    v = _value(ident, value)
+    if key is not None:
+        session_state[key] = v
+    return v
+
+
 def selectbox(label, options, index=0, key=None, format_func=str, on_change=None, args=None, **kw):
     options = list(options)
     ident = _register("selectbox", label, key)

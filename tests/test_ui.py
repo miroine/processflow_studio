@@ -1236,6 +1236,45 @@ run()
 c.check("the app still renders after a load", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
 c.check("dynamic: untouched vessel volumes are not pinned into the saved settings", not any("volume" in v_ for v_ in (ss.model.get("dynamics", {}).get("nodes") or {}).values()), str(ss.model.get("dynamics", {}).get("nodes"))[:200])
 
+# ---- 17b. v7.6: phasing - phase bar, stage views, canvas payload, before/after tab ------------------------------------
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Phasing (v7.6)"))
+st.HOOK["press"].add("Load example")
+st.HOOK["errors"].clear()
+run()
+a = canvas_args()
+c.check("phased example loads without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("canvas receives the phases and the design-view stage", len(a["model"].get("phases", [])) == 1 and a["model"].get("stage") == -1,
+        str({k_: a["model"].get(k_) for k_ in ("phases", "stage")}))
+c.check("canvas receives the phase tags on units and streams", any(u_.get("phase") for u_ in a["model"]["units"].values()) and
+        any(t_.get("phase") for t_ in a["model"]["streams"].values()), "")
+c.check("platform, turbine and phase splitter are in the catalogue payload", all(t_ in a["catalogue"] for t_ in ("platform", "gas_turbine", "phase_splitter")), "")
+k2_ = uid_by_name("K-101 HP compressor")
+c.check("design view solves the future compressor", ss.sol.status.get(k2_) == "ok", str(ss.sol.status.get(k2_)))
+ss[f"stage_sel_{ss.widget_ver}"] = 0
+run()
+c.eq("today: stage stored in the model", ss.model.get("stage"), 0)
+c.check("today: the future compressor is not solved", k2_ not in ss.sol.status or ss.sol.status.get(k2_) in ("inactive", None), str(ss.sol.status.get(k2_)))
+c.check("stage change is sent to the canvas", canvas_args()["model"].get("stage") == 0, "")
+ss[f"stage_sel_{ss.widget_ver}"] = 1
+run()
+c.check("after phase 1: the compressor is solved again", ss.sol.status.get(k2_) == "ok", str(ss.sol.status.get(k2_)))
+# colour / orientation / scale from the canvas survive a round trip and do not trigger a re-solve
+sep_ = uid_by_name("PS-100 Inlet phase splitter")
+sol_before = ss.sol
+struct_ = canvas_args()["model"]
+struct_ = {"units": {k_: dict(v_) for k_, v_ in struct_["units"].items()}, "streams": struct_["streams"]}
+struct_["units"][sep_]["scale"] = 1.6
+struct_["units"][sep_]["color"] = "#aa3377"
+canvas_event("move", struct_)
+run()
+c.check("zoom and colour are stored from the canvas", ss.model["units"][sep_].get("scale") == 1.6 and ss.model["units"][sep_].get("color") == "#aa3377", "")
+c.check("zoom / colour changes do not re-solve", ss.sol is sol_before, "")
+ss[f"stage_sel_{ss.widget_ver}"] = -1
+run()
+st.HOOK["press"].add("Solve and compare")
+run()
+c.check("before / after tab renders", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+
 # ---- 18. blank flowsheet -----------------------------------------------------------------------
 st.HOOK["press"].add("New (blank)")
 run()

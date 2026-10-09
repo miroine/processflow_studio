@@ -360,6 +360,22 @@ Built on the Field life model; it answers "which strategy, how many wells, what 
   horizontal) or liquid (with elevation); Churchill friction at each pipe's Reynolds number; flows, node pressures,
   velocities and the erosional ratio. The text is saved with the flowsheet. Multiphase lines belong in the flowsheet.
 
+### Phasing, orientation and zoom (v7.6)
+
+* **Future installations.** Use the phase bar above the diagram to add phases ("Phase 1: HP compression" …). With the elements or streams
+  selected, choose *new in phase n* (＋, dashed frame in the phase colour) or *removed in phase n* (−, struck through) in the toolbar, or
+  set a free colour in the *Appearance* panel. New elements drawn while a phase is active in the toolbar are tagged automatically.
+* **Before / after.** The stage selector shows *Design* (everything, final stage solved), *Today*, or *After phase n*. Elements that are not in
+  place at the chosen stage are removed from the calculation and drawn as faint ghosts (toggle). The *Before / after* analysis tab compares the stages
+  side by side. Two streams may share a single-connection port when they are never in place together (bypass today, new line later).
+  Specs are not re-tuned between stages.
+* **Orientation and zoom.** Separators and scrubbers can be vertical or horizontal (key **O**, or the Appearance panel); every element has its own zoom
+  (keys **+** / **−**, Alt+wheel over an element, or the scale in the Appearance panel). Ports and routing follow.
+* **New elements.** *Offshore platform* (a resizable drawing frame; dragging the header carries the equipment inside, Alt = frame only; fixed, floating,
+  FPSO, subsea, onshore pictograms; never part of the calculation), *Gas turbine* (fuel from a stream: shaft and electric power from the LHV, rating derated
+  above 15 °C, exhaust heat, CO₂; shows in the plant power balance) and *Phase splitter* (flash, then ideal split into gas, oil and water legs with optional
+  carry-over fractions).
+
 ### Process additions (v6.3)
 
 * **TEG dehydration contactor** (*Separation* palette): inlet scrubber + N theoretical stages of lean triethylene
@@ -495,6 +511,8 @@ compressors and maps, heat curves, column and pipe profiles, convergence) and gr
 
 ### Limitations
 
+* Phasing (v7.6): stage views solve the same specs; the gas turbine is a screening model (constant efficiency, no part-load curve; fuel flow is set by the
+  connected stream); the phase splitter is an ideal split; the platform is a drawing area only.
 * Steady state only; no reactions, no electrolytes, no hydrate or wax prediction.
 * PR water solubility and aqueous-phase density are approximate (liquid water ≈ 3 % light at 100 °C);
   glycol/amine systems are not modelled.

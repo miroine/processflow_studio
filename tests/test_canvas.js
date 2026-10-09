@@ -58,6 +58,29 @@ const P = require(SRC);
   }
 }
 
+// ------------------------------------------------------------ v7.6: orientation, zoom, phasing
+{
+  const v = { type: "separator", x: 100, y: 100 }, h = { type: "separator", x: 100, y: 100, orient: "h" };
+  check("separator defaults to vertical", P.orientOf(v) === "v" && P.hasOrient("separator") && !P.hasOrient("valve"));
+  const pv = P.portPos(v, "vapour"), ph = P.portPos(h, "vapour");
+  check("horizontal separator moves the vapour port off the top", pv.dir === "U" && ph.dir !== pv.dir || ph.x !== pv.x, JSON.stringify([pv, ph]));
+  check("horizontal separator is wider than tall", P.extentOf(h).w > P.extentOf(h).h && P.extentOf(v).h > P.extentOf(v).w);
+  const z = { type: "separator", x: 100, y: 100, scale: 2 };
+  const pz = P.portPos(z, "vapour");
+  check("zoom scales the port offset about the centre", pz.y === 100 + (pv.y - 100) * 2 && pz.x === 100, JSON.stringify(pz));
+  check("zoom is clamped", P.scaleOf({ scale: 99 }) === 4 && P.scaleOf({ scale: 0.01 }) === 0.4 && P.scaleOf({}) === 1);
+  check("platform size comes from the unit", P.extentOf({ type: "platform", w: 700, h: 400 }).w === 700);
+  const phs = [{ id: "p1", name: "Tie-in" }, { id: "p2", name: "Boost" }];
+  const add1 = { phase: "p1", change: "add" }, rem2 = { phase: "p2", change: "remove" };
+  check("presentAt: untagged always", [0, 1, 2].every((s) => P.presentAt(phs, {}, s)));
+  check("presentAt: added in p1 appears from stage 1", !P.presentAt(phs, add1, 0) && P.presentAt(phs, add1, 1) && P.presentAt(phs, add1, 2));
+  check("presentAt: removed in p2 disappears at stage 2", P.presentAt(phs, rem2, 1) && !P.presentAt(phs, rem2, 2));
+  check("presenceOf lists stages", [...P.presenceOf(phs, rem2)].join() === "0,1");
+  check("phaseColor: explicit beats phase default", P.phaseColor(phs, { color: "#123456", phase: "p1" }) === "#123456" && /^#/.test(P.phaseColor(phs, add1)) && P.phaseColor(phs, {}) === null);
+  for (const t of ["platform", "gas_turbine", "phase_splitter"])
+    check(`new type ${t} is in the catalogue`, !!fixture.catalogue[t]);
+}
+
 // ------------------------------------------------------------ DOM shim
 class ClassList {
   constructor(el) { this.el = el; this.s = new Set(); }

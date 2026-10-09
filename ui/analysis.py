@@ -207,7 +207,11 @@ def analysis_tab():
     cols = st.columns(4)
     for i, (lab, val) in enumerate(k):
         cols[i % 4].metric(lab, val)
-    t1, t2, t3, t4, t5 = st.tabs(["Mass balance", "Flow assurance", "Equipment", "Economics & CO₂", "Compositions"])
+    t1, t2, t3, t4, t5, t6 = st.tabs(["Mass balance", "Flow assurance", "Equipment", "Economics & CO₂", "Compositions",
+                                      "Before / after"])
+    with t6:
+        from .phasing import compare_panel
+        compare_panel()
     with t5:
         compositions_panel(model, sol)
     with t4:

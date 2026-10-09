@@ -28,7 +28,9 @@ from .streams import MaterialStream, EnergyStream, make_stream, zero_stream, str
 from .unitops import CATALOGUE, CALC, UnitError, default_params, hx_post, K0, PROFILE_TYPES
 from . import surf
 
-LOGICAL = ("feed", "product", "recycle", "adjust")
+from .phasing import stage_model, presence, ANNOTATION_TYPES      # noqa: E402
+
+LOGICAL = ("feed", "product", "recycle", "adjust") + ANNOTATION_TYPES
 EXTRAS = ("_post", "_profile", "_map", "_column", "_inlet_F")     # per-unit post-processing data kept with cached results
 
 
@@ -41,6 +43,7 @@ def new_model(components=None):
             "fluid": {"components": components or ["N2", "CO2", "C1", "C2", "C3", "iC4", "nC4",
                                                    "iC5", "nC5", "nC6", "nC7", "nC8", "H2O"],
                       "hypos": {}, "kij": {}},
+            "phases": [], "stage": -1,
             "units": {}, "streams": {}, "counter": 1}
 
 
@@ -119,6 +122,15 @@ def port_edges(model, uid, direction):
     return out
 
 
+def _clash(others, pres):
+    """Is any earlier user of the port in place at the same time as this one? (pres None = no phasing: always)"""
+    if not others:
+        return False
+    if pres is None:
+        return True
+    return any(o is None or (o & pres) for o in others)
+
+
 def normalize(model):
     """Drop dangling / invalid connections and keep terminal-stream names in sync."""
     units = model["units"]
@@ -136,15 +148,19 @@ def normalize(model):
         if sp not in cs or dp not in cd:
             bad.append(sid)
             continue
+        # two streams may share a single-connection port only if they are never in place together
+        # (the old bypass and the new route of a modification)
+        pres = presence(s, model) & presence(units[su], model) & presence(units[du], model) if model.get("phases") \
+            else None
         ko, ki = (su, sp), (du, dp)
-        if ko in used_out and not cs[sp]["multi"]:
+        if not cs[sp]["multi"] and _clash(used_out.get(ko), pres):
             bad.append(sid)
             continue
-        if ki in used_in and not cd[dp]["multi"]:
+        if not cd[dp]["multi"] and _clash(used_in.get(ki), pres):
             bad.append(sid)
             continue
-        used_out[ko] = sid
-        used_in[ki] = sid
+        used_out.setdefault(ko, []).append(pres)
+        used_in.setdefault(ki, []).append(pres)
     for sid in bad:
         model["streams"].pop(sid, None)
     for sid, s in model["streams"].items():
@@ -473,7 +489,7 @@ def target_value(model, sol, adj_params):
 
 def solve(model_in, fp: FluidPackage | None = None) -> Solution:
     t0 = time.time()
-    model = copy.deepcopy(model_in)
+    model = copy.deepcopy(stage_model(model_in))          # the stage selected for the study (phasing); same model if unused
     normalize(model)
     surf.activate(model.get("surf_catalogue"))
     fp = fp or build_fluid(model)
@@ -618,5 +634,13 @@ def solve(model_in, fp: FluidPackage | None = None) -> Solution:
         if u["type"] == "adjust" and uid not in sol.status:
             sol.status[uid] = "missing"
             sol.errors[uid] = "Adjust variable/target not set (or inactive)"
+    for uid, u in units.items():
+        if u["type"] in ANNOTATION_TYPES:
+            sol.status[uid], sol.results[uid] = "ok", {}
+    try:
+        from .facilities import post_gas_turbines
+        post_gas_turbines(model, sol)
+    except Exception as e:      # a reporting extra must never break the solve
+        sol.messages.append(f"power balance failed ({e})")
     sol.seconds = time.time() - t0
     return sol

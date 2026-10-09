@@ -600,3 +600,7 @@ EXAMPLES.update(TOPSIDE_EXAMPLES)
 from .examples_dynamic import DYNAMIC_EXAMPLES   # noqa: E402  (v7.3: dynamic-simulation examples)
 
 EXAMPLES.update(DYNAMIC_EXAMPLES)
+
+from .examples_phased import PHASED_EXAMPLES   # noqa: E402  (v7.6: phasing example)
+
+EXAMPLES.update(PHASED_EXAMPLES)

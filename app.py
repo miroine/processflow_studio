@@ -21,7 +21,7 @@ import os                                              # noqa: E402
 import sys                                             # noqa: E402
 import traceback                                       # noqa: E402
 
-APP_VERSION = "7.5.0"
+APP_VERSION = "7.6.0"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _PKGS = ("procsim", "ui", "pfd_canvas", "fieldmap_canvas")
 if _ROOT not in sys.path:
@@ -68,8 +68,8 @@ def _import_project():
     from ui import panels
     from ui.fluid import fluid_tab, workbook_tab
     from ui import theme
-    import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units, ui.surf, ui.scenarios, ui.fieldlife, ui.design, ui.prognosis, ui.timeseries, ui.dynamic, ui.data   # noqa: E401,F401
-    import procsim.surf, procsim.subsea_design, procsim.subsea_ops, procsim.scenarios, procsim.fieldlife, procsim.flowassure, procsim.hydrate, procsim.envelope, procsim.dehydration, procsim.process_units, procsim.flowassure2, procsim.design, procsim.network, procsim.prognosis, procsim.debottleneck, procsim.gasquality, procsim.examples_topside, procsim.fieldmap, procsim.timeseries, procsim.dynamics, procsim.dyn_thermo, procsim.examples_dynamic, procsim.datatools   # noqa: E401,F401
+    import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units, ui.surf, ui.scenarios, ui.fieldlife, ui.design, ui.prognosis, ui.timeseries, ui.dynamic, ui.data, ui.phasing   # noqa: E401,F401
+    import procsim.surf, procsim.subsea_design, procsim.subsea_ops, procsim.scenarios, procsim.fieldlife, procsim.flowassure, procsim.hydrate, procsim.envelope, procsim.dehydration, procsim.process_units, procsim.flowassure2, procsim.design, procsim.network, procsim.prognosis, procsim.debottleneck, procsim.gasquality, procsim.examples_topside, procsim.fieldmap, procsim.timeseries, procsim.dynamics, procsim.dyn_thermo, procsim.examples_dynamic, procsim.datatools, procsim.phasing, procsim.facilities, procsim.eoscal   # noqa: E401,F401
     import procsim, ui
     if getattr(procsim, "__version__", None) != APP_VERSION or getattr(ui, "__version__", None) != APP_VERSION:
         raise ImportError(f"version mismatch: app.py {APP_VERSION}, procsim {getattr(procsim, '__version__', '?')}, "
@@ -162,7 +162,7 @@ with st.sidebar:
     height = st.slider("Diagram height", 420, 1000, 620, 20)
     st.caption("Tips: wheel = zoom · drag background = pan · Shift-drag = box select · "
                "Del = delete · F = flip · Ctrl+D / Ctrl+C·V = duplicate with specs · Ctrl+Z = undo · "
-               "double-click = property view")
+               "double-click = property view · O = rotate separator · + / − = element zoom")
     theme.sidebar_credit()
 
 S.ensure_solved()
@@ -179,6 +179,7 @@ with tab_pfd:
     if ss.get("auto_paused") and ss.sol is not None:
         st.info(f"Auto-solve is paused: the last solve took {ss.sol.seconds:.1f} s (limit {ss.get('auto_limit', 10):g} s). "
                 "Edit freely, then press **▶ Solve** — or raise the limit in the sidebar.")
+    ui.phasing.phase_bar()
     pfd_canvas(S.canvas_structure(ss.model), S.catalogue_payload(), S.results_payload(), ss.nonce,
                selected=ss.selected, height=height, status=S.status_line(), fit=ss.fit, key="pfd")
     ss.fit = False

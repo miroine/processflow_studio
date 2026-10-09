@@ -69,3 +69,4 @@ the app with your own trusted cases without putting them in the public repositor
 
 The script solves each flowsheet once, prints app value, reference and pass/fail per row, and writes the report.
 Reference cases from company tools or field data therefore never enter the public code base.
+* Phasing and facilities (v7.6): stage views solve the same specifications (nothing is re-tuned between stages); the gas turbine is a screening model (constant efficiency, rating derated 0.7 %/K above 15 °C, no part-load curve); the phase splitter is an ideal split with optional carry-over; the platform is a drawing area only.

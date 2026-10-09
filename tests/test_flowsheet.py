@@ -44,7 +44,7 @@ def unit_balances(model, sol, label):
         en_by_unit[e.unit] = en_by_unit.get(e.unit, 0.0) + (0.0 if "fan" in e.name else e.duty_kW)
     worst_m, worst_e = 0.0, 0.0
     for uid, u in model["units"].items():
-        if u["type"] in ("feed", "product", "adjust", "flare") or sol.status.get(uid) not in ("ok", "warning"):
+        if u["type"] in ("feed", "product", "adjust", "flare", "gas_turbine", "platform") or sol.status.get(uid) not in ("ok", "warning"):
             continue                              # (a flare burns its gas: nothing leaves as a stream)
         if u["type"] == "recycle":
             # tear stream: inlet and outlet agree to the recycle tolerance, not exactly
@@ -53,8 +53,8 @@ def unit_balances(model, sol, label):
             err = float(np.max(np.abs(i_.F * i_.z - o_.F * o_.z))) / max(i_.F, 1e-9)
             c.check(f"{label}: recycle {u['name']} closed within its tolerance", err <= u["params"]["tol"], f"{err:.2e}")
             continue
-        ins = [sol.streams[s] for lst in port_edges(model, uid, "in").values() for s in lst]
-        outs = [sol.streams[s] for lst in port_edges(model, uid, "out").values() for s in lst]
+        ins = [sol.streams[s] for lst in port_edges(model, uid, "in").values() for s in lst if s in sol.streams]   # (v7.6: streams of other phases are not solved)
+        outs = [sol.streams[s] for lst in port_edges(model, uid, "out").values() for s in lst if s in sol.streams]
         nin = sum((s.F * s.z for s in ins if not s.empty), np.zeros(fp.n))
         nout = sum((s.F * s.z for s in outs if not s.empty), np.zeros(fp.n))
         scale = max(nin.sum(), 1e-9)
@@ -95,7 +95,9 @@ def unit_balances(model, sol, label):
 def overall_balance(model, sol, label):
     fp = sol.fp
     feeds = [sid for sid, s in model["streams"].items() if model["units"][s["src"][0]]["type"] == "feed"]
-    prods = [sid for sid, s in model["streams"].items() if model["units"][s["dst"][0]]["type"] in ("product", "flare")]
+    prods = [sid for sid, s in model["streams"].items() if model["units"][s["dst"][0]]["type"] in ("product", "flare", "gas_turbine")]
+    feeds = [x for x in feeds if x in sol.streams]
+    prods = [x for x in prods if x in sol.streams]
     nin = sum(sol.streams[s].F * sol.streams[s].z for s in feeds)
     nout = sum(sol.streams[s].F * sol.streams[s].z for s in prods if not sol.streams[s].empty)
     A = atoms(fp.keys)                            # element balance (reactors change the moles, not the atoms)

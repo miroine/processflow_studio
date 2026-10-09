@@ -1363,3 +1363,4 @@ PROFILE_TYPES = ("pipe", "well", "jumper", "flowline", "riser", "injection_well"
 from . import surf as _surf   # noqa: E402,F401  (needs the helpers above; works whichever module loads first)
 from . import dehydration as _dehy   # noqa: E402,F401  (TEG contactor registers itself)
 from . import process_units as _pu   # noqa: E402,F401  (HYSYS-style units register themselves)
+from . import facilities as _fac   # noqa: E402,F401  (platform area, gas turbine, phase splitter)
