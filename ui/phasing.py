@@ -98,17 +98,17 @@ def appearance_panel(obj_id):
             if pid and el.get("phase") == pid and el.get("change", "add") == ch:
                 cur = k
         c1, c2 = st.columns(2)
-        pick = c1.selectbox("Project phase", opts, index=opts.index(cur), key=f"ap_ph_{obj_id}_{ss.widget_ver}",
+        pick = c1.selectbox("Project phase", opts, index=opts.index(cur), key=f"ap_ph_{obj_id}_{ss.widget_ver}_{len(opts)}_{opts.index(cur)}",
                             help="New items are drawn in the phase colour and are missing in the stages before that phase; "
                                  "removed items are in place until that phase.")
         if pick != cur:
             pid, ch = keymap[pick]
             PH.set_phase(m, [obj_id], pid, ch)
             changed = True
-        auto = c2.checkbox("Automatic colour", value=not el.get("color"), key=f"ap_auto_{obj_id}_{ss.widget_ver}")
+        auto = c2.checkbox("Automatic colour", value=not el.get("color"), key=f"ap_auto_{obj_id}_{ss.widget_ver}_{bool(el.get('color'))}")
         if not auto:
             base = el.get("color") or PH.effective_color(el, m) or "#e8590c"
-            col = c2.color_picker("Colour", value=base, key=f"ap_col_{obj_id}_{ss.widget_ver}")
+            col = c2.color_picker("Colour", value=base, key=f"ap_col_{obj_id}_{ss.widget_ver}_{base}")
             if col != el.get("color"):
                 el["color"] = col
                 changed = True
@@ -118,7 +118,7 @@ def appearance_panel(obj_id):
         if is_unit:
             d1, d2 = st.columns(2)
             k = float(el.get("scale", 1.0) or 1.0)
-            z = d1.slider("Element zoom [%]", 40, 400, int(round(k * 100)), 5, key=f"ap_zoom_{obj_id}_{ss.widget_ver}",
+            z = d1.slider("Element zoom [%]", 40, 400, int(round(k * 100)), 5, key=f"ap_zoom_{obj_id}_{ss.widget_ver}_{int(round(k * 100))}",
                           help="Enlarges or shrinks this symbol (and its label) on the diagram. Alt + mouse wheel on the "
                                "diagram does the same.")
             if abs(z / 100.0 - k) > 1e-6:
@@ -132,7 +132,7 @@ def appearance_panel(obj_id):
                 names = HAS_ORIENT[t]
                 cur_o = names[0] if not el.get("orient") else {"v": "Vertical", "h": "Horizontal"}[el["orient"]]
                 o = d2.radio("Vessel orientation", list(HAS_ORIENT[t]), index=list(HAS_ORIENT[t]).index(cur_o), horizontal=True,
-                             key=f"ap_or_{obj_id}_{ss.widget_ver}")
+                             key=f"ap_or_{obj_id}_{ss.widget_ver}_{cur_o}")
                 if o != cur_o:
                     code = "v" if o == "Vertical" else "h"
                     default_code = "v" if names[0] == "Vertical" else "h"

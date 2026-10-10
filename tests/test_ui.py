@@ -1275,6 +1275,25 @@ st.HOOK["press"].add("Solve and compare")
 run()
 c.check("before / after tab renders", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
 
+# orientation set on the canvas must survive the Appearance panel (a stale widget value used to revert it after a rerun)
+from procsim.flowsheet import add_unit as _au   # noqa: E402
+sepv_ = _au(ss.model, "separator", 400, 420, "V-ORI")
+S_.bump()
+run()
+for want_ in ("h", "v", "h"):
+    st_ = canvas_args()["model"]
+    st_ = {"units": {k_: dict(v_) for k_, v_ in st_["units"].items()}, "streams": st_["streams"]}
+    if want_ == "v":
+        st_["units"][sepv_].pop("orient", None)
+    else:
+        st_["units"][sepv_]["orient"] = want_
+    canvas_event("move", st_, selected=[sepv_])
+    run()
+    run()
+    run()
+    c.check(f"orientation '{want_}' set on the canvas is kept after reruns with the panel open",
+            (ss.model["units"][sepv_].get("orient") or "v") == want_, str(ss.model["units"][sepv_].get("orient")))
+
 # ---- 18. blank flowsheet -----------------------------------------------------------------------
 st.HOOK["press"].add("New (blank)")
 run()

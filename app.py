@@ -21,7 +21,7 @@ import os                                              # noqa: E402
 import sys                                             # noqa: E402
 import traceback                                       # noqa: E402
 
-APP_VERSION = "7.6.0"
+APP_VERSION = "7.6.1"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _PKGS = ("procsim", "ui", "pfd_canvas", "fieldmap_canvas")
 if _ROOT not in sys.path:
