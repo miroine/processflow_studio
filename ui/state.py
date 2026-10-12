@@ -14,8 +14,8 @@ from procsim.examples import EXAMPLES, WET_GAS
 from procsim import phasing as PH
 
 ENERGY_DIR = {"gas_turbine": "out", "compressor": "in", "pump": "in", "heater": "in", "expander": "out", "cooler": "out",
-              "aircooler": "out", "subsea_booster": "in", "subsea_pump": "in", "subsea_compressor": "in",
-              "intensifier": "in"}
+              "aircooler": "out", "chiller": "out", "subsea_booster": "in", "subsea_pump": "in", "subsea_compressor": "in",
+              "intensifier": "in", "subsea_heater": "in"}
 WORK_TYPES = ("gas_turbine", "compressor", "pump", "expander", "subsea_booster", "subsea_pump", "subsea_compressor", "intensifier")
 
 
@@ -152,9 +152,9 @@ def load_model(m, fit=True):
     bump(fit)
 
 
-_TAB_PREFIXES = ("dyn_", "prof_", "_dynbase_", "_prof_", "_datbase_", "dat_ed", "dat_tbl", "dat_comp", "dat_prof_", "dat_ev_", "dat_bval",
+_TAB_PREFIXES = ("pc_", "pcp_", "opv_", "opo_", "opc_", "dyn_", "prof_", "_dynbase_", "_prof_", "_datbase_", "dat_ed", "dat_tbl", "dat_comp", "dat_prof_", "dat_ev_", "dat_bval",
                  "dat_bparam", "dat_bpat", "dat_btypes", "dat_bop", "dat_bmode")
-_TAB_KEYS = ("_data_run", "data_edited", "dyn_result", "prof_result", "_dyn_builds")
+_TAB_KEYS = ("_calib_result", "_opt_result", "_phasecost", "_cal_msg", "_data_run", "data_edited", "dyn_result", "prof_result", "_dyn_builds")
 
 
 def reset_tab_state():
@@ -219,8 +219,8 @@ SHORT = {"column": "Column", "hx": "Heat exchanger", "separator": "2-phase separ
          "teg_contactor": "TEG contactor", "amine_contactor": "Amine contactor", "relief_valve": "Relief valve (PSV)", "flare": "Flare", "comp_splitter": "Component splitter", "conv_reactor": "Conversion reactor", "eq_reactor": "Equilibrium reactor", "well": "Well", "injection_well": "Injection well", "xmas_tree": "Xmas tree", "template": "Template", "jumper": "Jumper / PLET",
          "flowline": "Flowline", "riser": "Riser", "subsea_valve": "SSIV / HIPPS", "subsea_booster": "Subsea booster",
          "subsea_pump": "Subsea pump", "subsea_compressor": "Subsea compressor", "subsea_separator": "Subsea separator",
-         "subsea_cooler": "Subsea cooler", "intensifier": "Intensifier", "cimv": "Chemical injection",
-         "platform": "Offshore platform", "gas_turbine": "Gas turbine", "phase_splitter": "Phase splitter"}
+         "subsea_cooler": "Subsea cooler", "intensifier": "Intensifier", "cimv": "Chemical injection", "subsea_choke": "Subsea choke", "subsea_manifold": "Subsea manifold", "mpfm": "Multiphase flow meter", "pig_station": "Pig launcher / receiver", "subsea_hydrocyclone": "Subsea hydrocyclone", "subsea_heater": "Subsea heater",
+         "chiller": "Chiller", "membrane": "Membrane", "mol_sieve": "Mol. sieve dryer", "platform": "Offshore platform", "gas_turbine": "Gas turbine", "phase_splitter": "Phase splitter"}
 
 
 def catalogue_payload():
@@ -346,7 +346,7 @@ def process_canvas_value(key="pfd"):
 def model_hash(model):
     m = copy.deepcopy(model)
     for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios", "heating", "fieldlife",
-              "fieldlife_result", "waxsand", "power", "fa2", "design", "prognosis", "prognosis_result", "profile", "profile_result", "dynamics"):   # post-processing settings and results: editing them never re-solves
+              "fieldlife_result", "waxsand", "power", "fa2", "design", "prognosis", "prognosis_result", "profile", "profile_result", "dynamics", "calibration", "calibration_applied", "calibration_summary", "phasecost", "phasecost_result"):   # post-processing settings and results: editing them never re-solves
         m.pop(k, None)
     m["units"] = {k: u for k, u in m["units"].items() if u["type"] != "platform"}      # drawing areas never change the solution
     for u in m["units"].values():
@@ -454,6 +454,18 @@ def _unit_label(u, res):
         return f"ID {qfmt('ID [mm]', res['Vessel ID [mm]'], 0)} · {qfmt('Vessel P [bar(a)]', res['Vessel P [bar(a)]'], 0)}"
     if t == "subsea_cooler" and res.get("Outlet T [°C]") is not None:
         return f"→ {qfmt('Outlet T [°C]', res['Outlet T [°C]'], 0)} · {qfmt('Duty [kW]', res['Duty rejected to sea [kW]'], 0)}"
+    if t == "subsea_choke" and res.get("ΔP [bar]") is not None:
+        return f"ΔP {qfmt('ΔP [bar]', res['ΔP [bar]'], 1)} · {qfmt('Outlet P [bar(a)]', res['Outlet P [bar(a)]'], 0)}"
+    if t == "subsea_manifold" and res.get("Header velocity [m/s]") is not None:
+        return f"{res['Branches flowing']} branches · {res['Header velocity [m/s]']:.1f} m/s"
+    if t == "mpfm" and res.get("GVF at line conditions [%]") is not None:
+        return f"GVF {res['GVF at line conditions [%]']:.0f} % · WLR {res['Water-liquid ratio [%]']:.0f} %"
+    if t == "pig_station" and res.get("Transit time [h]") is not None:
+        return f"{res['Transit time [h]']:.1f} h · slug {res['Liquid swept ahead of the pig [m³]']:.0f} m³"
+    if t == "subsea_hydrocyclone" and res.get("Oil in clean water [ppm vol]") is not None:
+        return f"oil in water {res['Oil in clean water [ppm vol]']:.0f} ppm"
+    if t == "subsea_heater" and res.get("Heat duty [kW]") is not None:
+        return f"→ {qfmt('Outlet T [°C]', res['Outlet T [°C]'], 0)} · {qfmt('Duty [kW]', res['Heat duty [kW]'], 0)}"
     if t == "intensifier" and res.get("Outlet P [bar(a)]") is not None:
         return f"→ {qfmt('Outlet P [bar(a)]', res['Outlet P [bar(a)]'], 0)} · 1:{res['Area ratio [-]']:.1f}"
     if t == "cimv" and res.get("Chemical rate [L/h]") is not None:
@@ -487,6 +499,12 @@ def _unit_label(u, res):
     if t == "gas_turbine" and res.get("Shaft power [kW]") is not None:
         k_ = "Electric power [kW]" if res.get("Electric power [kW]") is not None else "Shaft power [kW]"
         return f"{qfmt(k_, res[k_], 0)} · {res['Net efficiency (LHV) [%]']:.0f} %"
+    if t == "chiller" and res.get("Refrigeration power [kW]") is not None:
+        return f"{qfmt('Duty removed [kW]', res['Duty removed [kW]'], 0)} · COP {res['COP [-]']:.1f}"
+    if t == "membrane" and res.get("CO₂ in the retentate [mol%]") is not None:
+        return f"CO₂ {res['CO₂ in the feed [mol%]']:.1f} → {res['CO₂ in the retentate [mol%]']:.2f} %"
+    if t == "mol_sieve" and res.get("Water out [ppmv]") is not None:
+        return f"{res['Water out [ppmv]']:.1f} ppmv"
     if t in ("separator", "separator3", "phase_splitter") and res.get("Vessel T [°C]") is not None:
         return f"{qfmt('Vessel T [°C]', res['Vessel T [°C]'], 1)} · {qfmt('Vessel P [bar(a)]', res['Vessel P [bar(a)]'], 1)}"
     if t == "recycle":

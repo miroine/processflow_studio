@@ -158,6 +158,12 @@ def build_report(model, sol, svg=None, title="Process simulation report", projec
         parts.append(_scenario_section(model, sol))
     except Exception as e:       # optional section: note the failure instead of breaking the report
         parts.append(f"<p class='note'>Scenario comparison unavailable ({_e(type(e).__name__)}: {_e(e)})</p>")
+    for fn, args, label in ((_process_section, (model, sol), "Process advisor / heat integration"),
+                            (_phase_section, (model,), "Phase economics"), (_calibration_section, (model,), "Calibration")):
+        try:
+            parts.append(fn(*args))
+        except Exception as e:       # optional section
+            parts.append(f"<p class='note'>{label} unavailable ({_e(type(e).__name__)}: {_e(e)})</p>")
     fl = [[c.key, c.name, fmt(c.MW), fmt(c.Tc - 273.15), fmt(c.Pc), fmt(c.omega)] for c in fp.comps]
     parts.append("<h2>Fluid package</h2><p>Peng-Robinson (1978), Peneloux volume shift, LBC viscosity; "
                  "standard conditions 15 °C / 1.01325 bar.</p>" +
@@ -168,6 +174,65 @@ def build_report(model, sol, svg=None, title="Process simulation report", projec
     parts.append(f"<div class='credit'>Made by <b>{_e(AUTHOR)}</b> · {_e(DISCLAIMER)}</div>")
     parts.append("</body></html>")
     return "".join(parts)
+
+
+def _process_section(model, sol):
+    """Heat integration (pinch) and the process advisor findings."""
+    from procsim import pinch as PI, advisor as AD, economics as EC
+    out = []
+    rows = PI.collect(model, sol)
+    if rows:
+        res = PI.analyse(rows, 10.0, 15.0)
+        if res["hot_curve"] and res["recovery"] > 1.0:
+            sv = PI.savings(res, EC.params(model))
+            out.append("<h2 class='break'>Heat integration (pinch screening, ΔTmin 10 K)</h2>" + _table(
+                ["Quantity", "Now", "Target"],
+                [["Heating [kW]", fmt(res["QH_now"]), fmt(res["QH_min"])], ["Cooling [kW]", fmt(res["QC_now"]), fmt(res["QC_min"])],
+                 ["Heat-recovery potential [kW]", fmt(res["recovery"]), ""],
+                 [f"Energy + CO₂ saved [{sv['currency']}/y]", fmt(sv["total_saved"]), ""],
+                 ["CO₂ avoided [t/y]", fmt(sv["co2_saved_t_y"]), ""],
+                 ["Exchanger area, rough [m²]", fmt(sv["area_m2"]), ""]]) +
+                "<p class='note'>Utility prices as in the economics section; the exchanger area assumes U = 500 W/m²K and a mean "
+                "temperature difference of 2 × ΔTmin.</p>")
+    items = AD.advise(model, sol)
+    if items:
+        out.append("<h2>Process advisor (rule-based screening)</h2>" + _table(
+            ["Level", "Unit", "Finding", "Why / what to do"],
+            [[i["Level"], i["Unit"], i["Finding"], i["Why / what to do"]] for i in items]))
+    return "".join(out)
+
+
+def _calibration_section(model):
+    ca = model.get("calibration_applied")
+    if not ca:
+        return ""
+    sm = model.get("calibration_summary") or {}
+    out = ["<h2>Calibration to plant data</h2>",
+           _table(["Unit", "Parameter", "Before", "Calibrated", "± 95 %"],
+                  [[c["unit"], c["key"], fmt(c.get("before")) if c.get("before") is not None else "", fmt(c["value"]),
+                    fmt(c["ci95"]) if c.get("ci95") is not None else ""] for c in ca])]
+    if sm.get("rms_fit_after") is not None:
+        txt = f"RMS residual in the fit {sm['rms_fit_before']:.2f} → {sm['rms_fit_after']:.2f} σ"
+        if sm.get("rms_val_after") is not None:
+            txt += f"; validation cases {sm['rms_val_before']:.2f} → {sm['rms_val_after']:.2f} σ"
+        out.append(f"<p class='note'>{_e(txt)} ({sm.get('n_cases', 0)} operating case(s)).</p>")
+    for n in sm.get("notes") or []:
+        out.append(f"<p class='warn'>{_e(n)}</p>")
+    return "".join(out)
+
+
+def _phase_section(model):
+    r = model.get("phasecost_result")
+    if not r or not r.get("phases"):
+        return ""
+    cur = r.get("currency", "")
+    rows = [[x["phase"], x["items"], fmt(x["capex_Mcur"]), fmt(x["d_boe_d"]), fmt(x["net_Mcur_y"]),
+             "never" if x["payback_y"] is None else fmt(x["payback_y"]), fmt(x["npv_Mcur"])] for x in r["phases"]]
+    pr = r.get("params") or {}
+    return ("<h2 class='break'>Project phases: cost and payback (screening)</h2>" + _table(
+        ["Phase", "Items", f"CAPEX [M {cur}]", "Δ production [boe/d]", f"Net benefit [M {cur}/y]", "Payback [y]", f"NPV [M {cur}]"], rows) +
+        f"<p class='note'>Price {pr.get('price_boe', '')} {cur}/boe, discount {pr.get('discount', '')} %, life {pr.get('life', '')} y, installation factor "
+        f"{pr.get('install', '')}, contingency {pr.get('contingency', '')} %. Equipment costs are generic power-law placeholders unless overridden.</p>")
 
 
 def _surf_section(model, sol):

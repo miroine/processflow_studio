@@ -34,6 +34,9 @@
     pump:       { w: 48, h: 50, ports: { in: [-24, 4, "L"], out: [24, -14, "R"] }, energy: [0, 25, "D"] },
     heater:     { w: 44, h: 44, ports: { in: [-22, 0, "L"], out: [22, 0, "R"] }, energy: [0, -22, "U"] },
     cooler:     { w: 44, h: 44, ports: { in: [-22, 0, "L"], out: [22, 0, "R"] }, energy: [0, -22, "U"] },
+    chiller:    { w: 44, h: 44, ports: { in: [-22, 0, "L"], out: [22, 0, "R"] }, energy: [0, -22, "U"] },
+    membrane:   { w: 96, h: 44, ports: { feed: [-48, 0, "L"], retentate: [48, 0, "R"], permeate: [0, 22, "D"] } },
+    mol_sieve:  { w: 76, h: 84, ports: { feed: [-38, -14, "L"], dry: [38, -14, "R"], water: [0, 42, "D"] } },
     aircooler:  { w: 78, h: 46, ports: { in: [-39, -8, "L"], out: [39, -8, "R"] }, energy: [0, -20, "U"] },
     hx:         { w: 104, h: 44, ports: { tube_in: [-52, 0, "L"], tube_out: [52, 0, "R"],
                                           shell_in: [26, -18, "U"], shell_out: [-26, 18, "D"] } },
@@ -68,6 +71,13 @@
     subsea_cooler:     { w: 70, h: 56, ports: { in: [-35, -16, "L"], out: [35, 16, "R"] } },
     intensifier:       { w: 64, h: 40, ports: { in: [-32, 6, "L"], out: [32, 6, "R"] }, energy: [-8, -20, "U"] },
     cimv:              { w: 44, h: 44, ports: { in: [-22, 8, "L"], chem: [0, -22, "U"], out: [22, 8, "R"] } },
+    // v7.8: more subsea equipment
+    subsea_choke:        { w: 46, h: 46, ports: { in: [-23, 8, "L"], out: [23, 8, "R"] } },
+    subsea_manifold:     { w: 90, h: 50, ports: { in: [-45, 0, "L"], out: [45, 0, "R"] } },
+    mpfm:                { w: 50, h: 44, ports: { in: [-25, 6, "L"], out: [25, 6, "R"] } },
+    pig_station:         { w: 74, h: 36, ports: { in: [-37, 6, "L"], out: [37, 6, "R"] } },
+    subsea_hydrocyclone: { w: 54, h: 96, ports: { feed: [-27, -20, "L"], water: [0, 48, "D"], reject: [0, -48, "U"] } },
+    subsea_heater:       { w: 70, h: 50, ports: { in: [-35, 6, "L"], out: [35, 6, "R"] }, energy: [0, 25, "D"] },
     // v7.6: installation area (size comes from the unit), gas turbine, ideal phase splitter
     platform:       { w: 96, h: 60, ports: {} },
     gas_turbine:    { w: 76, h: 50, ports: { fuel: [-8, -25, "U"] }, energy: [30, 25, "D"] },
@@ -551,6 +561,41 @@
       <rect x="-3" y="-50" width="6" height="5" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
       <rect x="-3" y="44" width="6" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
       <line x1="-25" y1="50" x2="25" y2="50" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    subsea_choke: () => `
+      <path d="M-18,8 L-18,-6 L0,2 L18,-6 L18,8 L0,16 Z" fill="url(#gV)" ${STK}/>
+      <line x1="0" y1="2" x2="0" y2="-14" stroke="#2f3a46" stroke-width="1.4"/>
+      <rect x="-7" y="-19" width="14" height="6" rx="1.5" fill="#f2b33d" ${STK}/>
+      <line x1="-23" y1="8" x2="-18" y2="8" stroke="#2f3a46" stroke-width="2"/><line x1="18" y1="8" x2="23" y2="8" stroke="#2f3a46" stroke-width="2"/>`,
+    subsea_manifold: () => `
+      <rect x="-40" y="-20" width="80" height="40" rx="4" fill="#eef5fb" ${STK}/>
+      <line x1="-45" y1="0" x2="45" y2="0" stroke="#2f3a46" stroke-width="5"/>
+      <line x1="-45" y1="0" x2="45" y2="0" stroke="#7fb3e0" stroke-width="2.4"/>
+      <path d="M-28,-18 L-28,0 M-10,-18 L-10,0 M8,-18 L8,0 M26,-18 L26,0" stroke="#2f3a46" stroke-width="3" fill="none"/>
+      <path d="M-28,18 L-28,0 M-10,18 L-10,0" stroke="#2f3a46" stroke-width="3" fill="none"/>
+      <rect x="-32" y="-22" width="8" height="5" fill="#f2b33d" ${STK}/><rect x="-14" y="-22" width="8" height="5" fill="#f2b33d" ${STK}/>
+      <rect x="4" y="-22" width="8" height="5" fill="#f2b33d" ${STK}/><rect x="22" y="-22" width="8" height="5" fill="#f2b33d" ${STK}/>`,
+    mpfm: () => `
+      <path d="M-25,6 L-12,6 L-5,-2 L5,-2 L12,6 L25,6" fill="none" stroke="#2f3a46" stroke-width="5" stroke-linejoin="round"/>
+      <path d="M-25,6 L-12,6 L-5,-2 L5,-2 L12,6 L25,6" fill="none" stroke="#7fb3e0" stroke-width="2.2" stroke-linejoin="round"/>
+      <rect x="-12" y="-20" width="24" height="14" rx="3" fill="#e9eef3" ${STK}/>
+      <text x="0" y="-9.5" text-anchor="middle" font-size="8" font-weight="700" fill="#2f3a46">MPFM</text>`,
+    pig_station: () => `
+      <rect x="-34" y="-4" width="52" height="20" rx="4" fill="url(#gV)" ${STK}/>
+      <rect x="18" y="-1" width="19" height="14" fill="#eef5fb" ${STK}/>
+      <ellipse cx="-12" cy="6" rx="4" ry="8" fill="#f2b33d" ${STK}/>
+      <line x1="-34" y1="-10" x2="-34" y2="-4" stroke="#2f3a46" stroke-width="2"/>
+      <rect x="-40" y="-16" width="12" height="6" rx="2" fill="#9aa6b3" ${STK}/>`,
+    subsea_hydrocyclone: () => `
+      <rect x="-24" y="-38" width="48" height="8" rx="3" fill="url(#gV)" ${STK}/>
+      <path d="M-17,-30 L17,-30 L17,-6 L5,40 L-5,40 L-17,-6 Z" fill="url(#gV)" ${STK}/>
+      <path d="M-27,-20 L-17,-20" stroke="#2f3a46" stroke-width="3"/>
+      <path d="M-11,-22 C4,-22 10,-14 -9,-10 C8,-6 6,2 -6,4" fill="none" stroke="#2d6db5" stroke-width="1.2"/>
+      <rect x="-3" y="40" width="6" height="8" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-3" y="-48" width="6" height="10" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
+    subsea_heater: () => `
+      <rect x="-30" y="-16" width="60" height="32" rx="6" fill="#fbeee6" ${STK}/>
+      <path d="M-35,6 L-22,6 L-22,-8 L-12,-8 L-12,8 L-2,8 L-2,-8 L8,-8 L8,8 L18,8 L18,6 L35,6" fill="none" stroke="#c0392b" stroke-width="2.4" stroke-linejoin="round"/>
+      <path d="M2,-22 L-3,-16 L3,-16 L-2,-9" fill="none" stroke="#f2b33d" stroke-width="2"/>`,
     subsea_cooler: () => `
       <rect x="-30" y="-24" width="60" height="44" rx="3" fill="#eef5fb" ${STK}/>
       <path d="M-35,-16 L-22,-16 L-22,10 L-12,10 L-12,-16 L-2,-16 L-2,10 L8,10 L8,-16 L18,-16 L18,16 L35,16" fill="none"
@@ -581,6 +626,26 @@
   };
   // ---- v7.6 symbols ------------------------------------------------------------------------------------------
   Object.assign(ICON, {
+    chiller: () => `
+      <circle cx="0" cy="0" r="18" fill="url(#gC)" ${STK}/>
+      <g stroke="#123f70" stroke-width="1.6" stroke-linecap="round">
+        <line x1="0" y1="-12" x2="0" y2="12"/><line x1="-10.4" y1="-6" x2="10.4" y2="6"/><line x1="-10.4" y1="6" x2="10.4" y2="-6"/>
+        <polyline points="-3,-10 0,-7 3,-10" fill="none" stroke-width="1.1"/><polyline points="-3,10 0,7 3,10" fill="none" stroke-width="1.1"/>
+      </g>`,
+    membrane: () => `
+      <path d="M-40,-16 L40,-16 A8,16 0 0 1 40,16 L-40,16 A8,16 0 0 1 -40,-16 Z" fill="url(#gH)" ${STK}/>
+      <line x1="-40" y1="0" x2="42" y2="0" stroke="#7a2e8c" stroke-width="2.2" stroke-dasharray="5 2"/>
+      <path d="M-34,-12 L34,-12 M-34,-6 L34,-6 M-34,6 L34,6 M-34,12 L34,12" stroke="#4d5a68" stroke-width=".7" stroke-dasharray="2 3"/>
+      <path d="M-8,0 L-8,6 M6,0 L6,6 M20,0 L20,6" stroke="#7a2e8c" stroke-width="1.2"/>
+      <rect x="-3" y="16" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <text x="-30" y="-19" font-size="7" fill="#4d5a68">feed</text>`,
+    mol_sieve: () => `
+      <path d="M-30,-36 A12,7 0 0 1 -6,-36 L-6,32 A12,7 0 0 1 -30,32 Z" fill="url(#gV)" ${STK}/>
+      <path d="M6,-36 A12,7 0 0 1 30,-36 L30,32 A12,7 0 0 1 6,32 Z" fill="url(#gV)" ${STK}/>
+      <rect x="-28" y="-24" width="20" height="46" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".7"/>
+      <rect x="8" y="-24" width="20" height="46" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".7"/>
+      <path d="M-18,-42 L18,-42 M-18,38 L18,38" stroke="#2f3a46" stroke-width="1.4"/>
+      <rect x="-3" y="36" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
     gas_turbine: () => `
       <line x1="-36" y1="0" x2="26" y2="0" stroke="#2f3a46" stroke-width="2.2"/>
       <path d="M-36,-14 L-14,-6 L-14,6 L-36,14 Z" fill="url(#gB)" ${STK}/>

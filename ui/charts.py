@@ -1264,3 +1264,68 @@ def dynamic_figure(times, series, time_unit, events=()):
                     height=max(360, 190 * n + 90))
     fig.update_xaxes(title_text=f"Time [{time_unit}]", row=n, col=1)
     return fig
+
+
+def composite_figure(res):
+    """Hot and cold composite curves (actual temperatures) and the grand composite curve (shifted temperatures)."""
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("Composite curves", "Grand composite curve (shifted)"),
+                        horizontal_spacing=0.12)
+    uq, ut = U.unit("kW", power=False), U.uT()
+    hc, cc, gr = res.get("hot_curve"), res.get("cold_curve"), res.get("grand")
+    if hc:
+        fig.add_trace(go.Scatter(x=[U.value("kW", q, power=False) for q in hc["Q"]], y=[U.T(t) for t in hc["T"]],
+                                 mode="lines+markers", name="Hot streams (to cool)", line=dict(color=ORANGE, width=2.4),
+                                 marker=dict(size=6)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=[U.value("kW", q, power=False) for q in cc["Q"]], y=[U.T(t) for t in cc["T"]],
+                                 mode="lines+markers", name="Cold streams (to heat)", line=dict(color=BLUE, width=2.4),
+                                 marker=dict(size=6)), row=1, col=1)
+    if gr:
+        fig.add_trace(go.Scatter(x=[U.value("kW", q, power=False) for q in gr["Q"]], y=[U.T(t) for t in gr["T"]],
+                                 mode="lines", name="Grand composite", line=dict(color=TEAL, width=2.4), showlegend=False),
+                      row=1, col=2)
+    fig.update_xaxes(title_text="Heat flow [" + uq + "]", row=1, col=1, **{k: v for k, v in _AXIS.items() if k != "title"})
+    fig.update_xaxes(title_text="Net heat flow [" + uq + "]", row=1, col=2, **{k: v for k, v in _AXIS.items() if k != "title"})
+    fig.update_yaxes(title_text="T [" + ut + "]", **{k: v for k, v in _AXIS.items() if k != "title"})
+    return _style_subplots(fig, "Heat integration targets",
+                           f"ΔTmin {res['dTmin']:.0f} K — pinch at {res['pinch']:.0f} °C (shifted)" if res.get("pinch") is not None else "No pinch (one-sided problem)",
+                           height=430)
+
+
+def calibration_figure(res):
+    """Standardised residuals before / after calibration (error divided by the measurement σ), fit and validation rows."""
+    rows = [r for r in res["rows"] if r["z before"] is not None and r["z after"] is not None]
+    labels = [f"{r['Case']} · {r['Object']} · {r['Quantity']}" + (" (val.)" if r["Use"] == "validation" else "") for r in rows]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(y=labels, x=[r["z before"] for r in rows], orientation="h", name="Before", marker=dict(color=GREY, cornerradius=3)))
+    fig.add_trace(go.Bar(y=labels, x=[r["z after"] for r in rows], orientation="h", name="After", marker=dict(color=TEAL, cornerradius=3)))
+    fig.add_vline(x=2, line=dict(color=AXIS, dash="dot"))
+    fig.add_vline(x=-2, line=dict(color=AXIS, dash="dot"))
+    return _style(fig, "Model − plant, in measurement σ", "Within ±2 σ the model agrees with the plant (dotted lines)",
+                  height=max(320, 90 + 26 * len(rows)), barmode="group", bargap=0.3,
+                  xaxis=dict(_AXIS, title="(model − measured) / σ"), yaxis=dict(_AXIS, autorange="reversed", title=""))
+
+
+def parity_figure(res, quantity):
+    """Model against measurement for one quantity (before and after)."""
+    rows = [r for r in res["rows"] if r["Quantity"] == quantity and r["Before"] is not None and r["After"] is not None]
+    fig = go.Figure()
+    allv = [r["Measured"] for r in rows] + [r["Before"] for r in rows] + [r["After"] for r in rows]
+    if allv:
+        lo, hi = min(allv), max(allv)
+        pad = 0.05 * (hi - lo or abs(hi) or 1.0)
+        fig.add_trace(go.Scatter(x=[lo - pad, hi + pad], y=[lo - pad, hi + pad], mode="lines", name="model = plant",
+                                 line=dict(color=AXIS, dash="dash")))
+    fig.add_trace(go.Scatter(x=[r["Measured"] for r in rows], y=[r["Before"] for r in rows], mode="markers", name="Before",
+                             marker=dict(color=GREY, size=9, symbol="circle-open")))
+    fig.add_trace(go.Scatter(x=[r["Measured"] for r in rows], y=[r["After"] for r in rows], mode="markers", name="After",
+                             marker=dict(color=TEAL, size=9)))
+    return _style(fig, quantity, "Model against plant", height=330, xaxis=dict(_AXIS, title="Measured"), yaxis=dict(_AXIS, title="Model"))
+
+
+def optimiser_figure(res):
+    h = [x for x in res["history"] if x["objective"] is not None]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=list(range(1, len(h) + 1)), y=[x["objective"] for x in h], mode="lines+markers", name="Objective",
+                             line=dict(color=TEAL, width=2.4), marker=dict(size=6)))
+    return _style(fig, "Optimiser history", "Every point is one flowsheet solve", height=300,
+                  xaxis=dict(_AXIS, title="Evaluation"), yaxis=dict(_AXIS, title="Objective"))

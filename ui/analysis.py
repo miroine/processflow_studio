@@ -207,11 +207,21 @@ def analysis_tab():
     cols = st.columns(4)
     for i, (lab, val) in enumerate(k):
         cols[i % 4].metric(lab, val)
-    t1, t2, t3, t4, t5, t6 = st.tabs(["Mass balance", "Flow assurance", "Equipment", "Economics & CO₂", "Compositions",
-                                      "Before / after"])
+    t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["Mass balance", "Flow assurance", "Equipment", "Economics & CO₂", "Compositions",
+                                              "Before / after", "Heat integration", "Process advisor"])
+    with t7:
+        from .advisor import heat_integration_panel
+        heat_integration_panel(model, sol)
+    with t8:
+        from .advisor import advisor_panel
+        advisor_panel(model, sol)
     with t6:
-        from .phasing import compare_panel
+        from .phasing import compare_panel, phase_economics_panel
         compare_panel()
+        if ss.model.get("phases"):
+            st.divider()
+            st.markdown("#### Cost and payback of the phases")
+            phase_economics_panel()
     with t5:
         compositions_panel(model, sol)
     with t4:

@@ -158,6 +158,20 @@ and steps never jump over a feed ramp's breakpoint. UI: loading a flowsheet clea
 default vessel volumes are no longer pinned into the settings, the dynamic model assembly is cached between reruns and the default Python script
 works on an empty flowsheet.
 
+**v7.8 additions (calibration, more SURF, phase economics):** a **Calibrate** tab that tunes any numeric unit parameter (efficiencies, pressure drops,
+heat-transfer coefficients, permeances …) to plant measurements over several operating cases, with parameter confidence intervals, an identifiability
+warning, held-out validation cases, parity plots and *apply to flowsheet*, plus an **optimiser** (decision variables, constraints, objective from the
+economics) that runs on the calibrated model; six subsea units (**choke module, manifold, multiphase flow meter, pig launcher/receiver, de-oiling
+hydrocyclone, electric heater**) and a subsea-equipment example; **cost and payback of every project phase** (CAPEX, change in energy/CO₂ cost and
+production, payback, NPV); utility cost, CO₂ and a rough payback in the **heat-integration** tab; the advisor, pinch, calibration and phase findings in the
+**printable report**; a **refrigeration-cycle model** for the chiller (propane, propylene, ethylene, ammonia, i-butane, ethane; optional economiser) on the
+PR equation of state; a **two-stage membrane** with permeate recompression and recycle; and a vendor-neutral **typical-values** preset list in every unit's
+property view.
+
+**v7.7 additions (process units and analysis):** a **chiller** (refrigeration loop with COP and compressor power), a **membrane separator** for CO₂ / H₂S
+removal (cross-flow, area or CO₂-specification mode, methane loss), a **molecular-sieve dryer** (bed sizing, regeneration heat), a **Heat integration** tab
+(pinch targets, composite curves) and a **Process advisor** tab (rule-based improvement opportunities). A gas-conditioning example ties them together.
+
 **v7.6 additions (phasing and symbols):** elements and streams can be tagged *new in phase n* / *removed in phase n* and coloured freely; a stage selector
 shows the design, today, or the situation after any phase, with the calculation following the stage (absent items are dropped and shown as ghosts), plus a
 *Before / after* comparison tab. Separators and scrubbers can be vertical or horizontal, every element has its own zoom, and the new elements are an

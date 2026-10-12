@@ -451,7 +451,7 @@ c.check("SURF example solved, every subsea unit ok",
         ss.sol is not None and all(ss.sol.status.get(k) == "ok" for k in surf_ids),
         str({ss.model["units"][k]["name"]: ss.sol.errors.get(k) for k in surf_ids if ss.sol.status.get(k) != "ok"}))
 c.check("canvas palette offers the SURF group",
-        sum(1 for v in a["catalogue"].values() if v["category"] == "Subsea (SURF)") == 15, "")
+        sum(1 for v in a["catalogue"].values() if v["category"] == "Subsea (SURF)") == 21, "")
 w1, tmp = uid_by_name("W-1"), uid_by_name("TMP-100 Template")
 c.check("well label shows wellhead P and T", a["results"]["units"][w1]["label"].startswith("WH"),
         a["results"]["units"][w1]["label"])
@@ -1293,6 +1293,95 @@ for want_ in ("h", "v", "h"):
     run()
     c.check(f"orientation '{want_}' set on the canvas is kept after reruns with the panel open",
             (ss.model["units"][sepv_].get("orient") or "v") == want_, str(ss.model["units"][sepv_].get("orient")))
+
+# ---- 17c. v7.7: gas-conditioning example, heat integration and process advisor tabs -------------------------------------
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Gas conditioning (v7.7)"))
+st.HOOK["press"].add("Load example")
+st.HOOK["errors"].clear()
+st.HOOK["charts"].clear()
+run()
+c.check("gas conditioning example loads and solves", not st.HOOK["errors"] and ss.sol is not None and ss.sol.converged, str(st.HOOK["errors"])[:300])
+c.check("heat-integration tab draws the composite curves", any("Heat integration" in str(f_.layout.get("title", "")) for f_ in st.HOOK["charts"]), "")
+a = canvas_args()
+mb_ = uid_by_name("MB-100 CO2 membrane")
+c.check("membrane label shows the CO2 before / after", "CO₂" in a["results"]["units"][mb_]["label"], a["results"]["units"][mb_]["label"])
+ch_ = uid_by_name("CH-100 Chiller")
+c.check("chiller label shows duty and COP", "COP" in a["results"]["units"][ch_]["label"], a["results"]["units"][ch_]["label"])
+c.check("new types are in the catalogue payload", all(t_ in a["catalogue"] for t_ in ("chiller", "membrane", "mol_sieve")), "")
+
+# ---- 17d. v7.8: Calibrate tab - small compressor line, plant data rows, calibrate, apply ---------------------------------
+import copy as _copy
+from procsim import tuning as _TU
+from procsim.examples import WET_GAS as _WG
+from procsim.flowsheet import new_model as _nm, add_unit as _au, connect as _cn, solve as _sv
+_m = _nm()
+_f = _au(_m, "feed", 0, 0, "Gas", {"T_C": 30.0, "P_bar": 20.0, "flow_basis": "MSm³/d", "flow": 2.0, "composition": dict(_WG)})
+_k = _au(_m, "compressor", 100, 0, "K-1", {"spec": "Outlet pressure", "P_out": 60.0, "eff": 80.0})
+_o = _au(_m, "product", 200, 0, "Out")
+_cn(_m, _f, "out", _k, "in", "1")
+_cn(_m, _k, "out", _o, "in", "2")
+_tr = _copy.deepcopy(_m)
+_TU.set_param(_tr, "K-1", "eff", 70.0)
+_rows = []
+for _i, _fl in enumerate((1.5, 2.0, 2.5)):
+    _TU.set_param(_tr, "Gas", "flow", _fl)
+    _w = _sv(_tr).results[_TU.unit_id(_tr, "K-1")]["Power [kW]"]
+    _rows.append({"Case": f"day {_i + 1}", "Use": "validation" if _i == 2 else "fit", "Row": "set", "Kind": "unit", "Object": "Gas", "Quantity": "flow", "Value": _fl, "σ": None})
+    _rows.append({"Case": f"day {_i + 1}", "Use": "validation" if _i == 2 else "fit", "Row": "measure", "Kind": "unit", "Object": "K-1", "Quantity": "Power [kW]", "Value": _w, "σ": 0.01 * _w})
+S_.load_model(_m)
+ss.model["calibration"] = {"rows": _rows, "params": [{"unit": "K-1", "key": "eff", "lo": 50.0, "hi": 90.0}], "opt": {"vars": [], "constraints": [], "objective": {"kind": "economics", "obj": "", "q": "Power demand [kW]", "sense": "min"}}}
+st.HOOK["errors"].clear()
+run()
+c.check("calibrate tab renders", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+st.HOOK["press"].add("▶ Calibrate")
+run()
+c.check("calibration runs from the tab", ss.get("_calib_result") is not None and not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+if ss.get("_calib_result"):
+    _e = ss["_calib_result"]["params"][0]
+    c.check("calibrated efficiency is close to the plant value", abs(_e["after"] - 70.0) < 1.0, str(_e["after"]))
+    st.HOOK["press"].add("✅ Apply the calibrated values to the flowsheet")
+    run()
+    c.check("apply writes the value to the model", abs(_TU.get_param(ss.model, "K-1", "eff") - 70.0) < 1.0, str(_TU.get_param(ss.model, "K-1", "eff")))
+    c.check("apply can be undone", bool(ss.get("edit_hist")), "")
+
+# ---- 17e. v7.8: subsea equipment example, typical values, phase economics, report sections ---------------------------------
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Subsea equipment (v7.8)"))
+st.HOOK["press"].add("Load example")
+st.HOOK["errors"].clear()
+run()
+c.check("subsea equipment example loads and solves", not st.HOOK["errors"] and ss.sol is not None and ss.sol.converged and not ss.sol.errors, str(ss.sol.errors if ss.sol else ""))
+a = canvas_args()
+for _t, _n in (("subsea_manifold", "MF-100 Manifold"), ("mpfm", "FT-100 Multiphase meter"), ("subsea_heater", "H-100 Electric heater"),
+               ("pig_station", "PG-100 Pig receiver"), ("subsea_choke", "CK-100 Choke module")):
+    c.check(f"{_t} has a canvas label", bool(a["results"]["units"][uid_by_name(_n)].get("label")), _n)
+_pg = uid_by_name("PG-100 Pig receiver")
+ss.selected = [_pg]
+run()
+c.check("typical-values panel renders for a pipe-like unit without error", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+_cp = [u_ for u_, d_ in ss.model["units"].items() if d_["type"] == "subsea_heater"][0]
+ss.selected = [_cp]
+run()
+c.check("typical-values presets exist for the electric heater", bool(__import__("procsim.typical", fromlist=["x"]).presets("subsea_heater")), "")
+st.HOOK["press"].add("Apply this preset")
+run()
+c.check("applying a preset keeps the model solvable", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Phasing (v7.6)"))
+st.HOOK["press"].add("Load example")
+run()
+st.HOOK["press"].add("Compute the economics of the phases")
+st.HOOK["errors"].clear()
+run()
+c.check("phase economics computed in the Before / after tab", ss.get("_phasecost") is not None and not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+c.check("phase economics result is stored with the model for the report", bool(ss.model.get("phasecost_result")), "")
+from ui.report import build_report as _br   # noqa: E402
+_html = _br(ss.model, ss.sol, ss.svg, "v7.8 report")
+c.check("report carries the phase economics section", "Project phases: cost and payback" in _html, "")
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Gas conditioning (v7.7)"))
+st.HOOK["press"].add("Load example")
+run()
+_html = _br(ss.model, ss.sol, ss.svg, "v7.8 report")
+c.check("report builds its process sections without failure", "unavailable" not in _html, "")
 
 # ---- 18. blank flowsheet -----------------------------------------------------------------------
 st.HOOK["press"].add("New (blank)")

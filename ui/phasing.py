@@ -216,3 +216,84 @@ def compare_panel():
     st.dataframe(tot.map(S.fmt), width="stretch")
     st.caption("Same operating specifications in both stages; equipment that is not yet in place is simply absent, so check that the "
                "remaining units still have a sensible duty (a pump or compressor with a fixed outlet pressure will hold it).")
+
+
+# --------------------------------------------------------------- phase economics (v7.8)
+
+def phase_economics_panel():
+    """CAPEX, change in cost and production, payback and NPV of each project phase."""
+    import plotly.graph_objects as go
+    from procsim import phasecost as PCo
+    ss = st.session_state
+    m = ss.model
+    if not PH.phase_list(m):
+        st.info("Add a project phase on the Flowsheet tab and tag the equipment it brings; the economics of each phase are computed here.")
+        return
+    p = PCo.cost_params(m)
+    st.caption("Equipment cost = reference cost × (size / reference size)^exponent from the solved sizes (generic illustrative values - "
+               "override single items below), × installation factor, + contingency. Costs and prices are in millions of the model currency.")
+    with st.expander("Cost and price assumptions", expanded=False):
+        c = st.columns(3)
+        new = {
+            "price_boe": c[0].number_input("Price of the production gain [cur/boe]", value=float(p["price_boe"]), min_value=0.0, key="pc_price"),
+            "discount": c[1].number_input("Discount rate [%/y]", value=float(p["discount"]), min_value=0.0, max_value=50.0, key="pc_disc"),
+            "life": c[2].number_input("Economic life after start-up [years]", value=float(p["life"]), min_value=1.0, max_value=60.0, key="pc_life"),
+            "install": c[0].number_input("Installation factor", value=float(p["install"]), min_value=1.0, max_value=6.0, key="pc_inst"),
+            "contingency": c[1].number_input("Contingency [%]", value=float(p["contingency"]), min_value=0.0, max_value=100.0, key="pc_cont"),
+            "maint": c[2].number_input("Maintenance [% of CAPEX per year]", value=float(p["maint"]), min_value=0.0, max_value=20.0, key="pc_maint"),
+        }
+        ov_names = sorted(u["name"] for u in m["units"].values() if u.get("phase") and u["type"] not in PCo.NO_COST and u["type"] not in PH.ANNOTATION_TYPES)
+        ov = dict(p["overrides"])
+        if ov_names:
+            st.markdown("**Installed cost override per added unit** (0 = use the cost model)")
+            cols = st.columns(3)
+            for i, nm in enumerate(ov_names):
+                v = cols[i % 3].number_input(nm, value=float(ov.get(nm, 0.0)), min_value=0.0, key=f"pc_ov_{i}_{nm}")
+                if v > 0:
+                    ov[nm] = v
+                else:
+                    ov.pop(nm, None)
+        new["overrides"] = ov
+        if new != {k: p[k] for k in new}:
+            m["phasecost"] = new
+            p = PCo.cost_params(m)
+    if not st.button("Compute the economics of the phases", key="pc_go", type="primary"):
+        res = ss.get("_phasecost")
+        if not res:
+            st.caption("Solves the flowsheet in every stage (one solve per stage).")
+            return
+    else:
+        try:
+            with st.spinner("Solving every stage…"):
+                ss["_phasecost"] = PCo.rollup(m, build_fluid(m), p)
+                m["phasecost_result"] = {k_: v_ for k_, v_ in ss["_phasecost"].items() if k_ != "elements"}
+        except Exception as e:                       # noqa: BLE001
+            st.error(str(e))
+            return
+        res = ss["_phasecost"]
+    for stg in res["stages"]:
+        if stg["problems"]:
+            st.warning(f"{stg['name']}: unsolved items {', '.join(stg['problems'][:6])} - the numbers for that stage are incomplete.")
+    cur = res["currency"]
+    df = pd.DataFrame([{"Phase": x["phase"], "Items": x["items"], "CAPEX [M]": x["capex_Mcur"], "Δ production [boe/d]": x["d_boe_d"],
+                        "Δ revenue [M/y]": x["d_revenue_Mcur_y"], "Δ energy + CO₂ [M/y]": -x["d_energy_Mcur_y"], "Maintenance [M/y]": -x["maint_Mcur_y"],
+                        "Net benefit [M/y]": x["net_Mcur_y"], "Payback [y]": x["payback_y"], "NPV [M]": x["npv_Mcur"]} for x in res["phases"]])
+    st.dataframe(df.set_index("Phase").map(lambda v: S.fmt(v) if isinstance(v, float) else ("never" if v is None else v)), width="stretch")
+    t = res["total"]
+    k = st.columns(3)
+    k[0].metric(f"Total CAPEX [M {cur}]", f"{t['capex_Mcur']:,.1f}")
+    k[1].metric(f"Net benefit [M {cur}/y]", f"{t['net_Mcur_y']:,.1f}")
+    k[2].metric(f"NPV [M {cur}]", f"{t['npv_Mcur']:,.1f}")
+    fig = go.Figure(go.Bar(x=[x["phase"] for x in res["phases"]], y=[x["npv_Mcur"] for x in res["phases"]],
+                           marker_color=["#1b9e77" if x["npv_Mcur"] >= 0 else "#c0392b" for x in res["phases"]]))
+    fig.update_layout(title="NPV of each phase", yaxis_title=f"M {cur}", height=300, margin=dict(l=10, r=10, t=40, b=10))
+    st.plotly_chart(fig, width="stretch", key="pc_npv")
+    with st.expander("Cost of each added element"):
+        el = pd.DataFrame([e for e in res["elements"] if e["Phase"]])
+        if len(el):
+            st.dataframe(el.set_index("Unit").map(lambda v: S.fmt(v) if isinstance(v, float) else v), width="stretch")
+        else:
+            st.caption("No element is tagged with a phase.")
+    st.caption("A phase that only adds compression often shows no production gain in a steady-state flowsheet whose product rates are "
+               "fixed by the feed: tie the benefit to a higher feed rate or a lower well-head pressure in the 'after' stage "
+               "(e.g. with a stage-specific feed unit) to see it.")

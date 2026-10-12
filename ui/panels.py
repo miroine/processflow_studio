@@ -278,6 +278,24 @@ def comp_editor(uid, u):
 
 # ------------------------------------------------------------------ units
 
+def _typical_panel(uid, u):
+    """Typical-value presets (procsim.typical) for the unit type, applied on request."""
+    from procsim import typical as TY
+    pre = TY.presets(u["type"])
+    if not pre:
+        return
+    ss = st.session_state
+    with st.expander("Typical values", expanded=False):
+        name = st.selectbox("Preset", list(pre), key=f"typ_{ss.widget_ver}_{uid}_{u['type']}",
+                            help="Generic textbook ranges, not vendor data - they only fill the parameters named below")
+        st.caption("Sets: " + ", ".join(f"{k} = {v}" for k, v in pre[name].items()))
+        if st.button("Apply this preset", key=f"typ_apply_{ss.widget_ver}_{uid}"):
+            S.push_edit(f"{u['name']}: typical values")
+            TY.apply(u, name)
+            S.bump()
+            st.rerun()
+
+
 def unit_view(uid):
     ss = st.session_state
     u = ss.model["units"][uid]
@@ -317,6 +335,7 @@ def unit_view(uid):
     with tb[0]:
         st.markdown("**Connections**")
         st.dataframe(pd.DataFrame(connections(ss.model, uid)), hide_index=True, width="stretch")
+        _typical_panel(uid, u)
         st.markdown("**Parameters**")
         param_widgets(uid, CATALOGUE[t]["params"], u["params"])
         if t == "splitter":

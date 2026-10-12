@@ -94,8 +94,10 @@ def heating_power_kW(model, sol):
     """Electrical power drawn by flowline heating (DEH, heat-traced PiP) in the solution."""
     if sol is None:
         return 0.0
-    return sum(float((sol.results.get(uid) or {}).get("Electrical heating power [kW]") or 0.0)
-               for uid, u in model["units"].items() if u["type"] == "flowline")
+    tot = sum(float((sol.results.get(uid) or {}).get("Electrical heating power [kW]") or 0.0)
+              for uid, u in model["units"].items() if u["type"] == "flowline")
+    return tot + sum(float((sol.results.get(uid) or {}).get("Electrical power [kW]") or 0.0)
+                     for uid, u in model["units"].items() if u["type"] == "subsea_heater")
 
 
 def upstream_wells(model, uid):
@@ -131,7 +133,10 @@ def equipment_list(model, sol=None):
               "subsea_separator": ("separator", "sep_type"),
               "flowline": ("flowline", "design"), "riser": ("riser", "rtype")}
     fixed = {"subsea_cooler": "Passive subsea cooler", "intensifier": "Pressure intensifier",
-             "cimv": "Chemical injection metering valve"}
+             "cimv": "Chemical injection metering valve", "subsea_choke": "Subsea choke module",
+             "subsea_manifold": "Subsea production manifold", "mpfm": "Multiphase flow meter",
+             "pig_station": "Pig launcher / receiver", "subsea_hydrocyclone": "Subsea hydrocyclone",
+             "subsea_heater": "Subsea electric heater"}
     for uid, u in sorted(model["units"].items(), key=lambda kv: (surf.SURF_TYPES.index(kv[1]["type"])
                                                                  if kv[1]["type"] in surf.SURF_TYPES else 99,
                                                                  kv[1]["name"])):
@@ -163,7 +168,7 @@ def equipment_list(model, sol=None):
         else:
             qty = upstream_wells(model, uid) if t == "xmas_tree" else 1      # one tree per well of a cluster
             add(u["name"], row["item"], "Subsea boosting" if t in surf.BOOSTER_TYPES
-                else ("Subsea processing" if t in ("subsea_separator", "subsea_cooler") else "Subsea equipment"), qty,
+                else ("Subsea processing" if t in ("subsea_separator", "subsea_cooler", "subsea_hydrocyclone", "subsea_heater") else "Subsea equipment"), qty,
                 "ea", c, basis)
     units = model["units"].values()
     if any(u["type"] in surf.SURF_TYPES for u in units):

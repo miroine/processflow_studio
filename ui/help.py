@@ -360,6 +360,46 @@ Built on the Field life model; it answers "which strategy, how many wells, what 
   horizontal) or liquid (with elevation); Churchill friction at each pipe's Reynolds number; flows, node pressures,
   velocities and the erosional ratio. The text is saved with the flowsheet. Multiphase lines belong in the flowsheet.
 
+### Calibration, more SURF equipment and phase economics (v7.8)
+
+* **Calibrate tab.** Plant data enter as rows: for each *case* (an operating condition) add *set* rows for what you impose (feed rate, inlet
+  temperature, a set-point) and *measure* rows for what was measured - a unit result, a stream property, a composition or an economics total - with its
+  uncertainty σ. Mark some cases *validation*: they are held out of the fit. Pick the parameters to tune (with bounds) and press **Calibrate**: the
+  result shows the parameters before and after with 95 % intervals, the residuals in σ, a parity plot per quantity and notes on parameters the data could not
+  determine. **Apply** writes the values into the flowsheet (one undo step, recorded in the report). Keep the parameters fewer than the independent
+  measurements; every iteration solves the flowsheet once per case and parameter.
+* **Optimise.** On the same tab, choose decision variables with bounds, constraints and an objective (an economics total or a result) and let the solver
+  search the calibrated flowsheet.
+* **Subsea equipment.** *Choke module* (Cv/opening, outlet pressure or ΔP, choked-flow and hydrate check), *manifold* (branches into a header, erosional
+  velocity), *multiphase flow meter* (rates, GVF, WLR and uncertainty, window check), *pig launcher / receiver* (transit time, liquid swept ahead of the
+  pig against the receiver capacity), *hydrocyclone* (oil removal, reject ratio, oil in the clean water) and *electric heater* (duty or outlet temperature,
+  electrical power into the subsea power demand).
+* **Phase economics.** In *Analysis → Before / after*, the phase table gives the CAPEX of the equipment tagged *new in phase n* (power-law cost × installation
+  factor + contingency; override single items), the change in energy + CO₂ cost, the production gain at your price per boe, the net annual benefit, simple payback
+  and NPV. Cost-table values are generic placeholders read as millions of the model currency.
+* **Heat integration** now prices the recovery potential with the utility and CO₂ assumptions of the Economics tab and gives a rough exchanger area and payback.
+* **Chiller cycle model.** Choose *Cycle (PR equation of state)* for a real refrigerant cycle (refrigerant, evaporator superheat, condenser sub-cooling,
+  isentropic efficiency, optional two-stage economiser): refrigerant flow, discharge temperature, compressor power and the resulting fraction of Carnot.
+* **Two-stage membrane.** *Configuration* → two stages: the stage 1 permeate is recompressed to the feed pressure and fed to stage 2, whose retentate
+  returns to the inlet. Methane loss falls at the price of the recompressor power (a work stream in the plant power balance).
+* **Typical values.** Open *Typical values* at the top of a unit's Design tab to fill the efficiencies, pressure drops, roughness, permeances … from a generic
+  textbook preset (not vendor data).
+
+### Process units and analysis added in v7.7
+
+* **Chiller** (Heat transfer): a process cooler served by a refrigeration loop. Give the outlet temperature, the evaporator approach, the condensing
+  temperature and the cycle efficiency as a fraction of Carnot; the unit reports COP, compressor power and the heat rejected at the condenser (the power
+  joins the plant power balance).
+* **Membrane separator** (Separation): CO₂ / H₂S / H₂O removal in a cross-flow model with component permeances, a feed pressure and a permeate pressure.
+  Specify the area, or a CO₂ specification and let the unit find the area. It reports stage cut, CO₂ removal and methane loss; the pressure ratio often
+  limits the separation before the selectivity does.
+* **Molecular-sieve dryer** (Separation): dries the gas to a ppmv specification, sizes the sieve mass and bed volume from the dynamic loading and the
+  cycle time, and estimates the regeneration gas and heat.
+* **Heat integration** (Analysis tab): pinch targets for the heaters, coolers and air coolers. Choose ΔTmin; see the composite curves, the grand
+  composite curve, the minimum heating and cooling and the heat-recovery potential. Heat exchangers are left out (already integrated).
+* **Process advisor** (Analysis tab): rule-based review of the solved flowsheet - gas letdown across a valve (expander candidate), compression ratio and
+  discharge temperature, unused turbine exhaust heat, flaring, equipment near its limit, heat-integration potential, CO₂ and water in product gas.
+
 ### Phasing, orientation and zoom (v7.6)
 
 * **Future installations.** Use the phase bar above the diagram to add phases ("Phase 1: HP compression" …). With the elements or streams
@@ -511,6 +551,12 @@ compressors and maps, heat curves, column and pipe profiles, convergence) and gr
 
 ### Limitations
 
+* v7.8: calibration is a least-squares fit of unit parameters to steady-state measurements - no data reconciliation of measured *inputs*, no transient data, and
+  the result is only as good as the model structure; the optimiser is local (gradient-free, bounded) and each evaluation is a full flowsheet solve; phase
+  economics use generic power-law costs; the refrigerant cycle is a single-component PR model (ammonia and ethylene have the largest equation-of-state error);
+  the pig, hydrocyclone and flow-meter units are screening models; typical values are illustrative.
+* v7.7: the membrane has constant permeances (no pressure, temperature or plasticisation effects) and an isothermal outlet; the chiller
+  assumes a fixed Carnot fraction and no refrigerant model; the sieve uses a dynamic loading you set; the advisor and the pinch targets are screening.
 * Phasing (v7.6): stage views solve the same specs; the gas turbine is a screening model (constant efficiency, no part-load curve; fuel flow is set by the
   connected stream); the phase splitter is an ideal split; the platform is a drawing area only.
 * Steady state only; no reactions, no electrolytes, no hydrate or wax prediction.

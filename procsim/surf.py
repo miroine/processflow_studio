@@ -1620,7 +1620,8 @@ def calc_injection_well(unit, ins, fp):
 
 BOOSTER_TYPES = ("subsea_booster", "subsea_pump", "subsea_compressor")
 SURF_TYPES = ("well", "xmas_tree", "template", "jumper", "flowline", "riser", "subsea_valve") + BOOSTER_TYPES + (
-    "subsea_separator", "subsea_cooler", "intensifier", "cimv", "injection_well")
+    "subsea_separator", "subsea_cooler", "intensifier", "cimv", "injection_well",
+    "subsea_choke", "subsea_manifold", "mpfm", "pig_station", "subsea_hydrocyclone", "subsea_heater")
 PROFILE_TYPES = ("well", "jumper", "flowline", "riser", "injection_well")
 
 
