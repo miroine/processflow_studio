@@ -220,7 +220,7 @@ SHORT = {"column": "Column", "hx": "Heat exchanger", "separator": "2-phase separ
          "flowline": "Flowline", "riser": "Riser", "subsea_valve": "SSIV / HIPPS", "subsea_booster": "Subsea booster",
          "subsea_pump": "Subsea pump", "subsea_compressor": "Subsea compressor", "subsea_separator": "Subsea separator",
          "subsea_cooler": "Subsea cooler", "intensifier": "Intensifier", "cimv": "Chemical injection", "subsea_choke": "Subsea choke", "subsea_manifold": "Subsea manifold", "mpfm": "Multiphase flow meter", "pig_station": "Pig launcher / receiver", "subsea_hydrocyclone": "Subsea hydrocyclone", "subsea_heater": "Subsea heater",
-         "chiller": "Chiller", "membrane": "Membrane", "mol_sieve": "Mol. sieve dryer", "platform": "Offshore platform", "gas_turbine": "Gas turbine", "phase_splitter": "Phase splitter"}
+         "chiller": "Chiller", "membrane": "Membrane", "mol_sieve": "Mol. sieve dryer", "platform": "Offshore platform", "gas_turbine": "Gas turbine", "phase_splitter": "Phase splitter", "deliquifier": "Deliquifier"}
 
 
 def catalogue_payload():
@@ -505,6 +505,8 @@ def _unit_label(u, res):
         return f"CO₂ {res['CO₂ in the feed [mol%]']:.1f} → {res['CO₂ in the retentate [mol%]']:.2f} %"
     if t == "mol_sieve" and res.get("Water out [ppmv]") is not None:
         return f"{res['Water out [ppmv]']:.1f} ppmv"
+    if t == "deliquifier" and res.get("Liquid left in the gas [mg/Sm³]") is not None:
+        return f"{res['Liquid left in the gas [mg/Sm³]']:.1f} mg/Sm³ left · ID {res['Required vessel / element diameter [mm]']:.0f} mm"
     if t in ("separator", "separator3", "phase_splitter") and res.get("Vessel T [°C]") is not None:
         return f"{qfmt('Vessel T [°C]', res['Vessel T [°C]'], 1)} · {qfmt('Vessel P [bar(a)]', res['Vessel P [bar(a)]'], 1)}"
     if t == "recycle":

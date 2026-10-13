@@ -83,6 +83,7 @@
     gas_turbine:    { w: 76, h: 50, ports: { fuel: [-8, -25, "U"] }, energy: [30, 25, "D"] },
     phase_splitter: { w: 56, h: 56, ports: { feed: [-28, 0, "L"], vapour: [0, -28, "U"], oil: [28, 8, "R"], water: [0, 28, "D"] },
                       energy: [22, 22, "R"] },
+    deliquifier: { w: 54, h: 90, ports: { feed: [-27, -8, "L"], gas: [0, -45, "U"], liquid: [0, 45, "D"] } },
     // alternative orientations (key "type:orientation"; the orientation named in DEFAULT_ORIENT is the base geometry)
     "separator:h":  { w: 96, h: 46, ports: { feed: [-48, 0, "L"], vapour: [14, -23, "U"], liquid: [32, 23, "D"] },
                       energy: [48, 8, "R"] },
@@ -660,6 +661,15 @@
       <text x="30" y="3.6" text-anchor="middle" font-size="10" font-weight="700" fill="#17492c">G</text>
       <rect x="-12" y="-25" width="8" height="12" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
       <rect x="-40" y="14" width="76" height="5" rx="1" fill="url(#gMot)" stroke="#2f3a46" stroke-width="1"/>`,
+    deliquifier: () => `
+      <path d="M-18,-34 A18,10 0 0 1 18,-34 L18,30 A18,10 0 0 1 -18,30 Z" fill="url(#gV)" ${STK}/>
+      <rect x="-14" y="-26" width="28" height="8" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".8"/>
+      <g stroke="#4d5a68" stroke-width="1.6"><line x1="-9" y1="-12" x2="-9" y2="8"/><line x1="-3" y1="-12" x2="-3" y2="8"/><line x1="3" y1="-12" x2="3" y2="8"/><line x1="9" y1="-12" x2="9" y2="8"/></g>
+      <path d="M-17.3,14 L17.3,14 L17.3,30 A17.3,9.3 0 0 1 -17.3,30 Z" fill="${LIQ}"/>
+      <line x1="-17" y1="14" x2="17" y2="14" stroke="#2d6db5" stroke-width="1" stroke-dasharray="3 2"/>
+      <rect x="-3" y="-45" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-3" y="38" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-27" y="-11" width="9" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
     phase_splitter: () => `
       <circle cx="0" cy="0" r="22" fill="url(#gV)" ${STK}/>
       <path d="M-21.17,6 L21.17,6 A22,22 0 0 1 -21.17,6 Z" fill="${LIQ}"/>

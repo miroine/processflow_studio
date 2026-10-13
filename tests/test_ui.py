@@ -1383,6 +1383,36 @@ run()
 _html = _br(ss.model, ss.sol, ss.svg, "v7.8 report")
 c.check("report builds its process sections without failure", "unavailable" not in _html, "")
 
+# ---- 17f. v7.8.1: opening a saved flowsheet from the sidebar -----------------------------------------------------------
+import json as _js, io as _io   # noqa: E401,E402
+class _Up:
+    def __init__(self, name, data):
+        self.name, self._d = name, data
+        self.size = len(data)
+    def getvalue(self):
+        return self._d
+_k0 = next(n for n in EXAMPLES if n.startswith("Gas conditioning (v7.7)"))
+_blob = _js.dumps(EXAMPLES[_k0](), default=float).encode()
+st.HOOK["press"].add("New (blank)")
+run()
+c.eq("blank before opening", len(ss.model["units"]), 0)
+_key = f"open_json_{ss.get('open_ver', 0)}"
+st.HOOK["values"][_key] = _Up("mycase.json", _blob)
+run()
+c.check("an uploaded flowsheet becomes the active case", len(ss.model["units"]) == len(EXAMPLES[_k0]()["units"]) and ss.sol is not None, str(len(ss.model["units"])))
+c.check("the canvas receives the opened flowsheet", len(canvas_args()["model"]["units"]) == len(ss.model["units"]), "")
+st.HOOK["press"].add("New (blank)")
+run()
+_key = f"open_json_{ss.get('open_ver', 0)}"
+st.HOOK["values"][_key] = _Up("mycase.json", _blob)
+run()
+c.check("the same file can be opened again after another case was loaded", len(ss.model["units"]) > 0, "")
+_key = f"open_json_{ss.get('open_ver', 0)}"
+st.HOOK["values"][_key] = _Up("broken.json", b'{"hello": 1}')
+st.HOOK["errors"].clear()
+run()
+c.check("a wrong file shows a plain error and leaves the case alone", len(ss.model["units"]) > 0, "")
+
 # ---- 18. blank flowsheet -----------------------------------------------------------------------
 st.HOOK["press"].add("New (blank)")
 run()

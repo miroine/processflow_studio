@@ -21,7 +21,7 @@ import os                                              # noqa: E402
 import sys                                             # noqa: E402
 import traceback                                       # noqa: E402
 
-APP_VERSION = "7.8.0"
+APP_VERSION = "7.8.2"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _PKGS = ("procsim", "ui", "pfd_canvas", "fieldmap_canvas")
 if _ROOT not in sys.path:
@@ -137,17 +137,21 @@ with st.sidebar:
     if c2.button("New (blank)", width="stretch"):
         S.load_model(new_model())
         st.rerun()
-    up = st.file_uploader("Open flowsheet (.json)", type=["json"])
-    if up is not None and ss.get("_loaded_file") != (up.name, up.size):
+    up = st.file_uploader("Open flowsheet (.json)", type=["json"], key=f"open_json_{ss.get('open_ver', 0)}")
+    if ss.get("_open_msg"):
+        st.success(ss.pop("_open_msg"))
+    if up is not None:
         try:
-            m = json.loads(up.getvalue().decode("utf-8"))
-            if "units" not in m or "streams" not in m or "fluid" not in m:
-                raise ValueError("not a ProcessFlow Studio flowsheet")
-            ss["_loaded_file"] = (up.name, up.size)
+            from procsim.flowsheet import coerce_model
+            m = coerce_model(json.loads(up.getvalue().decode("utf-8-sig")))
             S.load_model(m)
+            ss["open_ver"] = ss.get("open_ver", 0) + 1          # empties the uploader: the same file can be opened again
+            ss["_open_msg"] = f"Opened {up.name}: {len(ss.model['units'])} units, {len(ss.model['streams'])} streams"
             st.rerun()
-        except Exception as e:
-            st.error(f"Could not open file: {e}")
+        except Exception as e:                                   # noqa: BLE001
+            if type(e).__name__ in ("RerunException", "StopException") or "Rerun" in type(e).__name__:
+                raise
+            st.error(f"Could not open {up.name}: {e}")
     st.download_button("Save flowsheet (.json)", data=json.dumps(ss.model, indent=1, default=float),
                        file_name="flowsheet.json", mime="application/json", width="stretch")
     st.divider()

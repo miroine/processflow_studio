@@ -146,4 +146,51 @@ try:
 except ValueError:
     c.check("no phases is an error", True, "")
 
+# ---- deliquifier --------------------------------------------------------------------------------------------------
+def dq(**kw):
+    mm = new_model()
+    ff = add_unit(mm, "feed", params={"T_C": 30.0, "P_bar": 60.0, "flow_basis": "MSm³/d", "flow": 2.0, "composition": dict(WET_GAS)})
+    cc = add_unit(mm, "cooler", params={"spec": "Outlet temperature", "T_out": 10.0})
+    d_ = add_unit(mm, "deliquifier", params=kw)
+    g_, l_ = add_unit(mm, "product"), add_unit(mm, "product")
+    connect(mm, ff, "out", cc, "in")
+    connect(mm, cc, "out", d_, "feed")
+    connect(mm, d_, "gas", g_, "in")
+    connect(mm, d_, "liquid", l_, "in")
+    return mm, d_, solve(mm)
+
+
+md, d_, sd = dq(eff=99.9)
+rd = sd.results[d_]
+fin = sd.streams[port_edges(md, d_, "in")["feed"][0]]
+tot = sum(sd.streams[x].F * sd.streams[x].z for lst in port_edges(md, d_, "out").values() for x in lst)
+c.close("deliquifier: component balance (rel.)", float(np.max(np.abs(tot - fin.F * fin.z))) / fin.F, 0.0, 1e-9)
+c.close("deliquifier: liquid left = (1 − η) × liquid in", rd["Liquid left in the gas [mg/Sm³]"], rd["Liquid in the feed [mg/Sm³ gas]"] * 0.001, 1e-6)
+md2, d2, sd2 = dq(spec="Liquid carry-over in the gas", carry=5.0)
+c.close("deliquifier: carry-over specification is met", sd2.results[d2]["Liquid left in the gas [mg/Sm³]"], 5.0, 1e-6)
+c.check("deliquifier: lower K -> larger diameter", dq(K=0.07)[2].results[dq(K=0.07)[1]]["Required vessel / element diameter [mm]"] > rd["Required vessel / element diameter [mm]"], "")
+gas_out = sd.streams[port_edges(md, d_, "out")["gas"][0]]
+c.check("deliquifier: pressure drop applied", abs(gas_out.P - (fin.P - 0.3)) < 1e-9, "")
+
+# ---- opening a saved flowsheet (coerce_model) ---------------------------------------------------------------------------
+import json as _json
+from procsim.flowsheet import coerce_model
+k0 = next(n for n in EXAMPLES if n.startswith("Gas conditioning (v7.7)"))
+saved = _json.loads(_json.dumps(EXAMPLES[k0](), default=float))
+m_ = coerce_model(saved)
+c.eq("saved flowsheet round-trips", len(m_["units"]), len(EXAMPLES[k0]()["units"]))
+c.check("round-tripped flowsheet solves", solve(m_).converged, "")
+c.eq("a {'model': ...} wrapper is accepted", len(coerce_model({"model": _json.loads(_json.dumps(EXAMPLES[k0](), default=float))})["units"]), len(m_["units"]))
+lean = {"units": {"u1": {"type": "feed", "name": "Gas", "params": {"T_C": 30.0, "P_bar": 50.0, "flow_basis": "kmol/h", "flow": 100.0, "composition": {"C1": 0.9, "C2": 0.1}}},
+                  "u2": {"type": "product", "name": "Out"}}, "streams": {"s1": {"name": "1", "src": ["u1", "out"], "dst": ["u2", "in"]}}}
+ml = coerce_model(lean)
+c.check("a lean file gets fluid, positions and counter", ml["fluid"]["components"] == ["C1", "C2"] and "x" in ml["units"]["u1"] and ml["counter"] >= 3, str(ml.get("counter")))
+c.check("a lean file solves", solve(ml).converged, "")
+for bad, label in (({"foo": 1}, "no units"), ({"units": {"u1": {"type": "warp_drive"}}, "streams": {}}, "unknown type")):
+    try:
+        coerce_model(bad)
+        c.check(f"coerce_model rejects: {label}", False, "")
+    except ValueError:
+        c.check(f"coerce_model rejects: {label}", True, "")
+
 sys.exit(c.report())

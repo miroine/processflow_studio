@@ -45,6 +45,20 @@ SCHEMA = {
             _f("casing", "Casing / other losses", "% of fuel heat", 2.0, minv=0.0, maxv=10.0),
         ],
     },
+    "deliquifier": {
+        "label": "Deliquifier (gas-liquid coalescer / filter separator)", "prefix": "DQ", "category": "Separation",
+        "ports": {"in": {"feed": {"multi": True}}, "out": {"gas": {"multi": False}, "liquid": {"multi": False}}},
+        "params": [
+            _s("spec", "Specification", ["Removal efficiency", "Liquid carry-over in the gas"], "Removal efficiency",
+               help="Either the share of the entrained liquid that is removed, or the liquid left in the outlet gas"),
+            _f("eff", "Liquid removal efficiency", "% of liquid", 99.5, {"spec": "Removal efficiency"}, minv=0.0, maxv=100.0),
+            _f("carry", "Liquid left in the outlet gas", "mg/Sm³", 5.0, {"spec": "Liquid carry-over in the gas"}, minv=0.0),
+            _f("dP", "Pressure drop (clean elements)", "bar", 0.3, minv=0.0),
+            _f("K", "Souders-Brown K for the vessel / elements", "m/s", 0.15, minv=0.01, maxv=0.6,
+               help="Vane / mesh ~0.1-0.2, coalescing cartridges ~0.05-0.1, cyclones ~0.3-0.5"),
+            _f("gas_in_liq", "Gas carried under with the liquid", "% of gas", 0.0, minv=0.0, maxv=20.0),
+        ],
+    },
     "phase_splitter": {
         "label": "Phase splitter (ideal)", "prefix": "PS", "category": "Separation",
         "ports": {"in": {"feed": {"multi": True}},
@@ -190,10 +204,67 @@ def calc_phase_splitter(unit, ins, fp):
     return outs, res, en
 
 
+# ---------------------------------------------------------------------------------------------- deliquifier
+def calc_deliquifier(unit, ins, fp):
+    """Removes the free liquid (hydrocarbon and water) from a gas stream.  The liquid leaves on ``liquid``; a part stays in the gas
+    as carry-over (efficiency, or a mg/Sm3 specification).  Reports the Souders-Brown vessel diameter, the liquid load and a
+    carry-over warning when the specification cannot be met by the efficiency given."""
+    from .process_units import STD_VOL
+    p = unit["params"]
+    streams = ins.get("feed") or []
+    F, z, Hf, P, Tg = _mix(streams, fp)
+    if F <= 0:
+        zz = streams[0].z if streams else None
+        return _outs_zero(unit, zz, fp, ["gas", "liquid"]), {"Status": "No flow"}, []
+    P = P - float(p.get("dP", 0.0))
+    _check_P(P, unit["name"])
+    fr = _ph(fp, z, P, Hf / F, Tg)
+    n = {k: np.zeros(fp.n) for k in "VLW"}
+    for ph in fr.phases:
+        n[ph.kind] = n[ph.kind] + F * ph.beta * ph.x
+    liq = n["L"] + n["W"]
+    liq_kg = float((liq * fp.MW).sum())                       # kg/h of free liquid (kmol/h x kg/kmol)
+    gas_sm3 = float(n["V"].sum()) * STD_VOL
+    if gas_sm3 <= 0:
+        raise UnitError(f"{unit['name']}: there is no gas in the feed - a deliquifier needs a gas stream")
+    in_mg = liq_kg * 1e6 / gas_sm3
+    if p.get("spec") == "Liquid carry-over in the gas":
+        eff = 1.0 - min(float(p["carry"]) / in_mg, 1.0) if in_mg > 0 else 1.0
+    else:
+        eff = float(p["eff"]) / 100.0
+    cu = float(p.get("gas_in_liq", 0.0)) / 100.0
+    gas_n = n["V"] * (1 - cu) + liq * (1 - eff)
+    liq_n = liq * eff + n["V"] * cu
+    outs = {}
+    for port, flow in (("gas", gas_n), ("liquid", liq_n)):
+        Fo = float(flow.sum())
+        if Fo <= 1e-12:
+            outs[port] = [zero_stream("", fp, z, fr.T, P)]
+        else:
+            zo = flow / Fo
+            outs[port] = [make_stream("", fp, Fo, zo, fp.pt_flash(zo, fr.T, P))]
+    out_mg = liq_kg * (1 - eff) * 1e6 / gas_sm3
+    v = fr.phase("V")
+    rho_g = float(v.rho) if v is not None else 1.0
+    lq = fr.phase("L") or fr.phase("W")
+    rho_l = float(lq.rho) if lq is not None else 700.0
+    q_act = float(n["V"].sum()) * 1000.0 * (v.Vs if v is not None else 0.0) / 3600.0      # m3/s actual gas
+    vmax = float(p["K"]) * ((max(rho_l - rho_g, 1.0)) / max(rho_g, 1e-6)) ** 0.5
+    D = (4.0 * q_act / (np.pi * vmax)) ** 0.5 * 1000.0 if q_act > 0 else 0.0
+    res = {"Vessel P [bar(a)]": P, "Vessel T [°C]": fr.T - K0, "Liquid in the feed [kg/h]": liq_kg,
+           "Liquid in the feed [mg/Sm³ gas]": in_mg, "Removal efficiency [%]": 100.0 * eff,
+           "Liquid left in the gas [mg/Sm³]": out_mg, "Liquid removed [kg/h]": liq_kg * eff,
+           "Gas flow [MSm³/d]": gas_sm3 * 24.0 / 1e6, "Allowable gas velocity [m/s]": vmax,
+           "Required vessel / element diameter [mm]": D, "Gas density [kg/m³]": rho_g, "Liquid density [kg/m³]": rho_l}
+    if p.get("spec") == "Removal efficiency" and out_mg > 50.0:
+        res["Warning"] = f"{out_mg:.0f} mg/Sm³ of liquid stays in the gas: raise the removal efficiency or add a stage"
+    return outs, res, []
+
+
 def register():
     from .unitops import CATALOGUE, CALC
     CATALOGUE.update(SCHEMA)
-    CALC.update({"gas_turbine": calc_gas_turbine, "phase_splitter": calc_phase_splitter})
+    CALC.update({"gas_turbine": calc_gas_turbine, "phase_splitter": calc_phase_splitter, "deliquifier": calc_deliquifier})
 
 
 register()

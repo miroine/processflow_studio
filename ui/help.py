@@ -385,6 +385,8 @@ Built on the Field life model; it answers "which strategy, how many wells, what 
 * **Typical values.** Open *Typical values* at the top of a unit's Design tab to fill the efficiencies, pressure drops, roughness, permeances … from a generic
   textbook preset (not vendor data).
 
+* **Deliquifier** (Separation, v7.8.1): removes free hydrocarbon and water liquid from a gas stream (filter-separator / coalescer). Give a removal efficiency or a liquid carry-over in mg/Sm³; it reports the liquid load, the liquid left in the gas, the Souders-Brown allowable velocity and the vessel / element diameter, and warns when carry-over stays high. For downhole liquid unloading (plunger lift, foam, velocity string) use the well and flow-assurance views - this unit is the topside gas-liquid element.
+
 ### Process units and analysis added in v7.7
 
 * **Chiller** (Heat transfer): a process cooler served by a refrigeration loop. Give the outlet temperature, the evaporator approach, the condensing

@@ -47,6 +47,44 @@ def new_model(components=None):
             "units": {}, "streams": {}, "counter": 1}
 
 
+def coerce_model(obj):
+    """Turn a loaded JSON object into a flowsheet model: accepts a bare model, a {"model": ...} wrapper, and fills in what older or
+    hand-made files lack (fluid, phases, counter, unit parameters).  Raises ValueError with a plain message otherwise."""
+    if isinstance(obj, dict) and "units" not in obj and isinstance(obj.get("model"), dict):
+        obj = obj["model"]
+    if not isinstance(obj, dict) or not isinstance(obj.get("units"), dict):
+        raise ValueError("this is not a ProcessFlow Studio flowsheet (no 'units' section) - save one with 'Save flowsheet (.json)'")
+    m = obj
+    m.setdefault("streams", {})
+    if not isinstance(m["streams"], dict):
+        raise ValueError("the 'streams' section must be an object keyed by stream id")
+    unknown = sorted({u.get("type") for u in m["units"].values() if u.get("type") not in CATALOGUE})
+    if unknown:
+        raise ValueError("unknown unit type(s) in the file: " + ", ".join(map(str, unknown)) +
+                         " - the file may come from a newer version of the app")
+    fl = m.get("fluid")
+    if not isinstance(fl, dict) or not fl.get("components"):
+        comps = []
+        for u in m["units"].values():
+            for k in (u.get("params") or {}).get("composition", {}) or {}:
+                if k not in comps:
+                    comps.append(k)
+        m["fluid"] = {"components": comps or new_model()["fluid"]["components"], "hypos": {}, "kij": {}}
+    else:
+        fl.setdefault("hypos", {})
+        fl.setdefault("kij", {})
+    m.setdefault("phases", [])
+    m.setdefault("stage", -1)
+    for i, (uid, u) in enumerate(m["units"].items()):
+        u.setdefault("name", uid)
+        u.setdefault("params", {})
+        u.setdefault("x", 60 + 140 * (i % 8))
+        u.setdefault("y", 80 + 120 * (i // 8))
+    nums = [int(k[1:]) for k in list(m["units"]) + list(m["streams"]) if isinstance(k, str) and k[1:].isdigit()]
+    m["counter"] = max(int(m.get("counter", 1) or 1), (max(nums) + 1) if nums else 1)
+    return m
+
+
 def build_fluid(model) -> FluidPackage:
     fl = model["fluid"]
     hypos = {k: Component.from_dict(v) for k, v in fl.get("hypos", {}).items()}

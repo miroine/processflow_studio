@@ -43,6 +43,7 @@ COST_TABLE = {
     "scrubber": (("Vapour flow [kg/h]+Liquid flow [kg/h]",), "kg/h", 100000.0, 2.5, 0.6),
     "separator3": (("Vapour flow [kg/h]+Oil flow [kg/h]+Water flow [kg/h]",), "kg/h", 100000.0, 5.0, 0.6),
     "phase_splitter": (("Vapour flow [kg/h]+Oil flow [kg/h]+Water flow [kg/h]",), "kg/h", 100000.0, 3.0, 0.6),
+    "deliquifier": (("Liquid in the feed [kg/h]",), "kg/h", 2000.0, 1.5, 0.5),
     "column": (("Reboiler duty [kW]",), "kW", 5000.0, 10.0, 0.65),
     "teg_contactor": (("Water removed [kg/h]",), "kg/h", 2000.0, 6.0, 0.6),
     "amine_contactor": (("Reboiler duty [kW]",), "kW", 10000.0, 25.0, 0.7),
