@@ -409,7 +409,7 @@ Built on the Field life model; it answers "which strategy, how many wells, what 
   set a free colour in the *Appearance* panel. New elements drawn while a phase is active in the toolbar are tagged automatically.
 * **Before / after.** The stage selector shows *Design* (everything, final stage solved), *Today*, or *After phase n*. Elements that are not in
   place at the chosen stage are removed from the calculation and drawn as faint ghosts (toggle). The *Before / after* analysis tab compares the stages
-  side by side. Two streams may share a single-connection port when they are never in place together (bypass today, new line later).
+  side by side. Two streams may share a single-connection port when they are never in place together (bypass today, new line later). To swap the feed of a tee, mixer inlet or any single port in a later phase: tag the new equipment *new in phase n*, choose *New in Phase n* in the toolbar and draw the new connection onto the occupied port - the existing connection is retired (*removed in phase n*) automatically.
   Specs are not re-tuned between stages.
 * **Orientation and zoom.** Separators and scrubbers can be vertical or horizontal (key **O**, or the Appearance panel); every element has its own zoom
   (keys **+** / **−**, Alt+wheel over an element, or the scale in the Appearance panel). Ports and routing follow.

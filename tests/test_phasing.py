@@ -132,4 +132,34 @@ c.check("carry-over parameters keep the balance", sq2.status[ps] == "ok", sq2.er
 tot_out2 = sum(s.F * s.MW for k, s in sq2.streams.items() if q["streams"][k]["name"] in ("g", "o", "w"))
 c.rel("balance holds with carry-over", tot_out2, tot_in, 1e-6)
 
+# ---- mixer feeds a tee today, a booster feeds the same tee port after phase 1 -----------------------------------------------------
+from procsim.flowsheet import normalize as _norm   # noqa: E402
+from procsim.examples import WET_GAS as _WG         # noqa: E402
+mt = new_model()
+ph1 = PH.add_phase(mt, "Phase 1: booster")
+fa = add_unit(mt, "feed", 0, 0, "A", {"T_C": 30.0, "P_bar": 30.0, "flow_basis": "MSm³/d", "flow": 1.0, "composition": dict(_WG)})
+fb = add_unit(mt, "feed", 0, 100, "B", {"T_C": 30.0, "P_bar": 30.0, "flow_basis": "MSm³/d", "flow": 1.0, "composition": dict(_WG)})
+mx = add_unit(mt, "mixer", 100, 50, "MIX")
+kk = add_unit(mt, "compressor", 100, 150, "K", {"spec": "Outlet pressure", "P_out": 40.0})
+te = add_unit(mt, "splitter", 220, 50, "TEE")
+o1 = add_unit(mt, "product", 340, 20, "O1")
+o2 = add_unit(mt, "product", 340, 80, "O2")
+connect(mt, fa, "out", mx, "in", "1")
+s2_ = connect(mt, fb, "out", kk, "in", "2")
+old = connect(mt, mx, "out", te, "in", "3")
+connect(mt, te, "out", o1, "in", "4")
+connect(mt, te, "out", o2, "in", "5")
+PH.set_phase(mt, [kk, fb, s2_], ph1["id"], "add")
+PH.set_phase(mt, [old], ph1["id"], "remove")
+mt["streams"]["sn"] = {"name": "6", "src": [kk, "out"], "dst": [te, "in"], "phase": ph1["id"], "change": "add"}
+_norm(mt)
+c.check("old and new route can share the tee inlet when they are never together", "sn" in mt["streams"] and old in mt["streams"], str(list(mt["streams"])))
+s0 = solve(dict(mt, stage=0))
+s1 = solve(dict(mt, stage=1))
+c.check("today: the mixer feeds the tee", s0.converged and not s0.errors, str(s0.errors))
+c.check("after phase 1: the booster feeds the tee", s1.converged and not s1.errors, str(s1.errors))
+mt["streams"][old].pop("phase"), mt["streams"][old].pop("change")
+_norm(mt)
+c.check("without the retirement tag the second route is refused", "sn" not in mt["streams"], "")
+
 sys.exit(c.report())

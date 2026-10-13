@@ -45,6 +45,18 @@ const P = require(SRC);
   const lts = ids.find((k) => m.units[k].type === "separator");
   const jt = ids.find((k) => m.units[k].type === "valve");
   check("canConnect refuses an already-used single outlet", !P.canConnect(m, fixture.catalogue, lts, "vapour", jt, "in"));
+  {
+    // phasing: a new route into a single-connection port replaces the connection that is in place today
+    const ph = [{ id: "p1", name: "Phase 1" }];
+    const mm = { units: { m: { type: "mixer", name: "MIX" }, t: { type: "splitter", name: "TEE" }, k: { type: "compressor", name: "K", phase: "p1", change: "add" } },
+                 streams: { s1: { name: "1", src: ["m", "out"], dst: ["t", "in"] } } };
+    check("without a phase an occupied single inlet is refused", !P.canConnect(mm, fixture.catalogue, "k", "out", "t", "in", { phases: ph, draw: "" }));
+    const r = P.portConflicts(mm, fixture.catalogue, "k", "out", "t", "in", { phases: ph, draw: "p1:add" });
+    check("with 'new in phase 1' the existing connection is retired instead", r.ok && r.replace.length === 1 && r.replace[0] === "s1", JSON.stringify(r));
+    mm.streams.s1.phase = "p1"; mm.streams.s1.change = "remove";
+    check("after retiring it the new route is accepted", P.canConnect(mm, fixture.catalogue, "k", "out", "t", "in", { phases: ph, draw: "p1:add" }));
+    check("two simultaneous routes into one single inlet stay refused", !P.canConnect({ units: mm.units, streams: { s1: { name: "1", src: ["m", "out"], dst: ["t", "in"], phase: "p1", change: "add" } } }, fixture.catalogue, "k", "out", "t", "in", { phases: ph, draw: "p1:add" }));
+  }
   check("canConnect refuses inlet->inlet", !P.canConnect(m, fixture.catalogue, jt, "in", lts, "feed"));
   check("canConnect accepts a free multi inlet", P.canConnect(
     Object.assign({}, m, { units: Object.assign({}, m.units, { q: { type: "valve", name: "q", x: 0, y: 0 } }) }),

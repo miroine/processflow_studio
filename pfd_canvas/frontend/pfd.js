@@ -258,28 +258,37 @@
 
   /** Can an edge be added between (uOut,pOut) -> (uIn,pIn)?  ctx = {phases, draw}: with phasing, two streams may share a
    *  single-connection port when they are never in place together (old route / new route of a modification). */
-  function canConnect(model, catalogue, src, sp, dst, dp, ctx) {
-    if (!src || !dst || src === dst) return false;
+  function portConflicts(model, catalogue, src, sp, dst, dp, ctx) {
+    const res = { ok: false, replace: [] };
+    if (!src || !dst || src === dst) return res;
     const us = model.units[src], ud = model.units[dst];
-    if (!us || !ud) return false;
+    if (!us || !ud) return res;
     const cs = catalogue[us.type].ports.out[sp], cd = catalogue[ud.type].ports.in[dp];
-    if (!cs || !cd) return false;
+    if (!cs || !cd) return res;
     const phases = ctx && ctx.phases && ctx.phases.length ? ctx.phases : null;
-    let cand = null;
+    let cand = null, draw = {};
     if (phases) {
-      const draw = parseDraw(ctx.draw);
+      draw = parseDraw(ctx.draw);
       cand = streamPresence(Object.assign({}, model, { units: model.units }), phases,
                             { phase: draw.phase, change: draw.change, src: [src, sp], dst: [dst, dp] });
     }
-    for (const s of Object.values(model.streams)) {
+    for (const sid of Object.keys(model.streams)) {
+      const s = model.streams[sid];
       const sharesOut = s.src[0] === src && s.src[1] === sp, sharesIn = s.dst[0] === dst && s.dst[1] === dp;
       if (!sharesOut && !sharesIn) continue;
       if (cand && !intersects(streamPresence(model, phases, s), cand)) continue;
-      if (!cs.multi && sharesOut) return false;
-      if (!cd.multi && sharesIn) return false;
-      if (sharesOut && sharesIn) return false;
+      if (sharesOut && sharesIn) return res;
+      if ((!cs.multi && sharesOut) || (!cd.multi && sharesIn)) {
+        // a connection that is in place today can be retired in the phase being drawn: the new route replaces it
+        if (phases && draw.phase && draw.change === "add" && !s.phase) { res.replace.push(sid); continue; }
+        return res;
+      }
     }
-    return true;
+    res.ok = true;
+    return res;
+  }
+  function canConnect(model, catalogue, src, sp, dst, dp, ctx) {
+    return portConflicts(model, catalogue, src, sp, dst, dp, ctx).ok;
   }
 
   // ------------------------------------------------------------------ icons
@@ -751,7 +760,7 @@
   // ----------------------------------------------------------- node export
   if (typeof document === "undefined") {
     module.exports = { GEOM, portPos, energyPos, route, simplify, labelAnchor, nextName, nextStreamName,
-                       canConnect, ICON, geomOf, scaleOf, orientOf, hasOrient, extentOf, presentAt, presenceOf, phaseColor,
+                       canConnect, portConflicts, ICON, geomOf, scaleOf, orientOf, hasOrient, extentOf, presentAt, presenceOf, phaseColor,
                        DEFAULT_ORIENT };
     return;
   }
@@ -1315,12 +1324,21 @@
       const dist = Math.hypot(w.x - p.x, w.y - p.y);
       const under = document.elementFromPoint(e.clientX, e.clientY);
       const onPort = !!(under && under.classList && under.classList.contains("port"));
-      if (!target && onPort) { hint("Those ports cannot be connected"); render(); return; }
+      if (!target && onPort) {
+        hint(phases().length && !parseDraw(S.draw).phase
+          ? "That port is in use: choose 'New in Phase n' in the toolbar to replace the existing connection in that phase"
+          : "Those ports cannot be connected");
+        render(); return;
+      }
       if (target) {
         snapshot();
         const sid = newId("s");
         const src = dir === "out" ? [uid, port] : [target.id, target.port];
         const dst = dir === "out" ? [target.id, target.port] : [uid, port];
+        const pc = portConflicts(S.model, S.catalogue, src[0], src[1], dst[0], dst[1], phCtx());
+        const dr = parseDraw(S.draw);
+        for (const old of pc.replace) { S.model.streams[old].phase = dr.phase; S.model.streams[old].change = "remove"; }
+        if (pc.replace.length) hint("The existing connection to that port is removed in the same phase");
         S.model.streams[sid] = Object.assign({ name: terminalName(src, dst) || nextStreamName(S.model), src, dst }, parseDraw(S.draw));
         S.selected = new Set([sid]);
         render(); send("connect");
