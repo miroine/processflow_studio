@@ -23,6 +23,19 @@ def _fmt_kw(v):
     return f"{v / 1000.0:.2f} MW" if abs(v) >= 1000 else f"{v:.0f} kW"
 
 
+# (unit type, result key, low, high, unit, why) - generic screening ranges, not vendor limits
+SIZING_RANGES = [
+    ("compressor", "Power [kW]", 100.0, 60000.0, "kW", "Centrifugal compressor bodies and drivers are normally limited to a few tens of MW."),
+    ("pump", "Power [kW]", 5.0, 8000.0, "kW", "Single pumps above several MW are unusual."),
+    ("heater", "Duty [kW]", 10.0, 80000.0, "kW", "Fired and electric heaters above this size are normally split."),
+    ("cooler", "Duty removed [kW]", 10.0, 80000.0, "kW", "Shell-and-tube coolers above this size are normally in parallel."),
+    ("hx", "Duty [kW]", 10.0, 60000.0, "kW", "A single shell is limited in area; check the UA."),
+    ("aircooler", "Duty removed [kW]", 50.0, 40000.0, "kW", "Air-cooler bays are limited by plot and fan count."),
+    ("expander", "Power [kW]", 50.0, 40000.0, "kW", "Gas expanders of this size are special machines."),
+    ("separator", "Vapour flow [kg/h]", None, 2.0e6, "kg/h", "Check the vessel diameter against the gas load."),
+]
+
+
 def advise(model, sol):
     out = []
 
@@ -76,6 +89,23 @@ def advise(model, sol):
             if exh and float(exh) > 1000 and not any(x["type"] in ("heater", "hx") and "waste" in x["name"].lower() for x in model["units"].values()):
                 add("Opportunity", uid, f"Exhaust heat {_fmt_kw(float(exh))} is not used",
                     "A waste-heat recovery unit can supply the process heating (reboilers, TEG regeneration, heating medium) and cut fuel gas.", float(exh))
+
+    # ---- sizing-range check: results outside what one machine / exchanger normally covers (generic, illustrative limits)
+    for uid, u in model["units"].items():
+        r = sol.results.get(uid) or {}
+        if sol.status.get(uid) not in ("ok", "warning"):
+            continue
+        for (typ, key, lo, hi, unit, why) in SIZING_RANGES:
+            v = r.get(key)
+            if u["type"] != typ or not isinstance(v, (int, float)) or isinstance(v, bool):
+                continue
+            v = abs(float(v))
+            if hi is not None and v > hi:
+                add("Check", uid, f"{key} {v:,.0f} {unit} is above a typical single unit (about {hi:,.0f} {unit})",
+                    f"{why} Split the duty over parallel trains or revisit the specification.", v)
+            elif lo is not None and 0 < v < lo:
+                add("Check", uid, f"{key} {v:,.1f} {unit} is below a typical size (about {lo:,.0f} {unit})",
+                    f"{why} A very small duty may not justify the equipment or may be outside its turn-down.", v)
 
     # ---- capacity (debottlenecking rows)
     try:

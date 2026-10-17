@@ -120,6 +120,17 @@ def stage_model(model, stage=None):
     streams = {k: t for k, t in model["streams"].items()
                if present(t, model, s) and t["src"][0] in units and t["dst"][0] in units}
     out["units"], out["streams"] = units, streams
+    # stage-specific specifications: unit["stage_params"] = {phase id: {param: value}} apply from that phase on (later phases win)
+    idx = {p["id"]: i for i, p in enumerate(phase_list(model), 1)}
+    for uid, u in list(units.items()):
+        sp = u.get("stage_params")
+        if not sp:
+            continue
+        newp = dict(u["params"])
+        for pid, vals in sorted(sp.items(), key=lambda kv: idx.get(kv[0], 0)):
+            if 0 < idx.get(pid, 0) <= s:
+                newp.update(vals)
+        units[uid] = dict(u, params=newp)
     # an adjust whose variable or target is gone cannot run
     for uid, u in list(units.items()):
         if u["type"] == "adjust":

@@ -158,6 +158,8 @@ and steps never jump over a feed ramp's breakpoint. UI: loading a flowsheet clea
 default vessel volumes are no longer pinned into the settings, the dynamic model assembly is cached between reruns and the default Python script
 works on an empty flowsheet.
 
+**v7.9 additions:** stage-specific specifications (a parameter that takes a new value from a chosen phase on), import of your own cost table (CSV, kept in the saved file only), a one-click printable phase report, a sensitivity (tornado) tab, sizing-range checks in the advisor, recycle convergence feedback and named cases in one file.
+
 **v7.8 additions (calibration, more SURF, phase economics):** a **Calibrate** tab that tunes any numeric unit parameter (efficiencies, pressure drops,
 heat-transfer coefficients, permeances …) to plant measurements over several operating cases, with parameter confidence intervals, an identifiability
 warning, held-out validation cases, parity plots and *apply to flowsheet*, plus an **optimiser** (decision variables, constraints, objective from the

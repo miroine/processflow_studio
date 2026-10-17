@@ -231,8 +231,18 @@ def _phase_section(model):
     pr = r.get("params") or {}
     return ("<h2 class='break'>Project phases: cost and payback (screening)</h2>" + _table(
         ["Phase", "Items", f"CAPEX [M {cur}]", "Δ production [boe/d]", f"Net benefit [M {cur}/y]", "Payback [y]", f"NPV [M {cur}]"], rows) +
+        _stage_table(r, cur) +
         f"<p class='note'>Price {pr.get('price_boe', '')} {cur}/boe, discount {pr.get('discount', '')} %, life {pr.get('life', '')} y, installation factor "
         f"{pr.get('install', '')}, contingency {pr.get('contingency', '')} %. Equipment costs are generic power-law placeholders unless overridden.</p>")
+
+
+def _stage_table(r, cur):
+    st_ = r.get("stages") or []
+    if not st_:
+        return ""
+    return "<h3>Stages</h3>" + _table(["Stage", "Production [boe/d]", "Power [kW]", "CO₂ [t/y]", f"Energy + CO₂ [{cur}/y]", "Solved"],
+                                      [[x["name"], fmt(x["boe_d"]), fmt(x["power_kW"]), fmt(x["co2_t_y"]), fmt(x["energy_cur_y"]),
+                                        "yes" if x["converged"] and not x["problems"] else "incomplete"] for x in st_])
 
 
 def _surf_section(model, sol):

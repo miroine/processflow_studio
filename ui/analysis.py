@@ -252,6 +252,10 @@ def analysis_tab():
                             key=f"an_pipe_{uid}")
         if sol.recycle_log:
             st.plotly_chart(charts.recycle_figure(sol.recycle_log), width="stretch", key="an_rcy")
+            from procsim import convdiag
+            for row in convdiag.summarise(sol):
+                if row["verdict"] != "converged":
+                    st.warning(f"Recycle {row['recycle']}: {row['verdict']} (flow error {row['flow_error']:.2g}). {row['hint']}")
         if sol.adjust_log:
             st.plotly_chart(charts.adjust_figure(sol.adjust_log), width="stretch", key="an_adj")
 

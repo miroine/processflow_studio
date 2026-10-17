@@ -21,7 +21,7 @@ import os                                              # noqa: E402
 import sys                                             # noqa: E402
 import traceback                                       # noqa: E402
 
-APP_VERSION = "7.8.3"
+APP_VERSION = "7.9.0"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _PKGS = ("procsim", "ui", "pfd_canvas", "fieldmap_canvas")
 if _ROOT not in sys.path:
@@ -154,6 +154,32 @@ with st.sidebar:
             st.error(f"Could not open {up.name}: {e}")
     st.download_button("Save flowsheet (.json)", data=json.dumps(ss.model, indent=1, default=float),
                        file_name="flowsheet.json", mime="application/json", width="stretch")
+    with st.expander("🗂 Cases (variants in this file)"):
+        from procsim import cases as CS
+        cur = CS.active(ss.model)
+        pick = st.selectbox("Open case", CS.names(ss.model), key=f"case_pick_{ss.widget_ver}")
+        if pick != cur:
+            S.load_model(CS.switch(ss.model, pick))
+            st.rerun()
+        nn = st.text_input("New case from the open one", key=f"case_new_{ss.widget_ver}", placeholder="e.g. High GOR")
+        c1, c2 = st.columns(2)
+        if c1.button("Add case", key="case_add", disabled=not nn.strip()):
+            try:
+                S.push_edit("add case")
+                CS.add_case(ss.model, nn)
+                ss.model = CS.switch(ss.model, nn.strip())
+                S.load_model(ss.model, fit=False)
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
+        if c2.button("Delete open case", key="case_del", disabled=len(CS.names(ss.model)) < 2):
+            others = [n for n in CS.names(ss.model) if n != cur]
+            old = ss.model
+            ss.model = CS.switch(old, others[0])
+            CS.delete(ss.model, cur)
+            S.load_model(ss.model, fit=False)
+            st.rerun()
+        st.caption("Each case is a full copy (flowsheet, phases, specifications); all travel in the saved .json.")
     st.divider()
 
     def _units_changed():

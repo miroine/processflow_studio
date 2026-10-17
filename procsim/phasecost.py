@@ -25,6 +25,7 @@ DEFAULTS = {
     "contingency": 25.0,       # % on the installed cost
     "maint": 3.0,              # % of the installed cost per year
     "overrides": {},           # unit name -> installed cost [Mcur]
+    "table": {},               # own cost curves {type: [S_ref, C_ref, exponent]} (replace the generic ones for those types)
 }
 
 # type: (result keys tried in order, size unit, reference size, reference equipment cost [Mcur], exponent)
@@ -62,10 +63,49 @@ NO_COST = ("feed", "product", "recycle", "adjust", "platform")
 FALLBACK_Mcur = 2.0            # types without a cost model
 
 
+def parse_cost_csv(text):
+    """Own cost table from CSV text.  Columns (header names, any order): type, S_ref, C_ref, exponent  (C_ref in millions of the model
+    currency, S_ref in the size unit of COST_TABLE for that type).  Returns ({type: [S_ref, C_ref, exponent]}, [problems]).
+    The table is kept in the saved model only (model["phasecost"]["table"]), never in the program."""
+    import csv
+    import io
+    rows = list(csv.reader(io.StringIO(text.replace(";", ",") if text.count(";") > text.count(",") else text)))
+    rows = [[c.strip() for c in r] for r in rows if any(c.strip() for c in r)]
+    if not rows:
+        return {}, ["the file is empty"]
+    head = [h.lower().replace(" ", "").replace("_", "") for h in rows[0]]
+    need = {"type": ("type", "unittype"), "s": ("sref", "size", "refsize"), "c": ("cref", "cost", "refcost"), "n": ("exponent", "n", "exp")}
+    col = {}
+    for k, names in need.items():
+        for i, h in enumerate(head):
+            if h in names:
+                col[k] = i
+                break
+    problems = [f"column missing: {k}" for k in need if k not in col]
+    if problems:
+        return {}, problems
+    table = {}
+    for ln, r in enumerate(rows[1:], 2):
+        try:
+            t = r[col["type"]]
+            if t not in COST_TABLE:
+                problems.append(f"line {ln}: unknown unit type '{t}'")
+                continue
+            sr, cr, n = float(r[col["s"]]), float(r[col["c"]]), float(r[col["n"]])
+            if sr <= 0 or cr < 0 or not (0.2 <= n <= 1.5):
+                problems.append(f"line {ln}: S_ref must be > 0, C_ref >= 0 and the exponent between 0.2 and 1.5")
+                continue
+            table[t] = [sr, cr, n]
+        except (ValueError, IndexError):
+            problems.append(f"line {ln}: could not read the numbers")
+    return table, problems
+
+
 def cost_params(model):
     p = dict(DEFAULTS)
     p.update(model.get("phasecost") or {})
     p["overrides"] = dict(p.get("overrides") or {})
+    p["table"] = dict(p.get("table") or {})
     return p
 
 
@@ -103,6 +143,9 @@ def element_costs(model, sol, p=None):
             eq, basis = FALLBACK_Mcur, "no cost model for this type: placeholder (enter an override)"
         else:
             keys, unit, s_ref, c_ref, n = spec
+            own = p["table"].get(t)
+            if own:
+                s_ref, c_ref, n = own
             s = _size(res, keys)
             row["Size unit"] = unit
             if s is None or s <= 0:
@@ -110,7 +153,7 @@ def element_costs(model, sol, p=None):
             else:
                 row["Size"] = s if keys else None
                 eq = c_ref * (s / s_ref) ** n if keys else c_ref
-                basis = f"{c_ref:g} Mcur at {s_ref:g} {unit}, exponent {n:g}" if keys else f"fixed {c_ref:g} Mcur"
+                basis = (f"{c_ref:g} Mcur at {s_ref:g} {unit}, exponent {n:g}" + (" (own table)" if own else "")) if keys else f"fixed {c_ref:g} Mcur"
         row["Equipment [Mcur]"] = eq
         row["Installed [Mcur]"] = eq * float(p["install"]) * (1.0 + float(p["contingency"]) / 100.0)
         row["Basis"] = basis

@@ -152,9 +152,9 @@ def load_model(m, fit=True):
     bump(fit)
 
 
-_TAB_PREFIXES = ("pc_", "pcp_", "opv_", "opo_", "opc_", "dyn_", "prof_", "_dynbase_", "_prof_", "_datbase_", "dat_ed", "dat_tbl", "dat_comp", "dat_prof_", "dat_ev_", "dat_bval",
+_TAB_PREFIXES = ("tor_", "ss_", "pc_", "pcp_", "opv_", "opo_", "opc_", "dyn_", "prof_", "_dynbase_", "_prof_", "_datbase_", "dat_ed", "dat_tbl", "dat_comp", "dat_prof_", "dat_ev_", "dat_bval",
                  "dat_bparam", "dat_bpat", "dat_btypes", "dat_bop", "dat_bmode")
-_TAB_KEYS = ("_calib_result", "_opt_result", "_phasecost", "_cal_msg", "_data_run", "data_edited", "dyn_result", "prof_result", "_dyn_builds")
+_TAB_KEYS = ("_tornado", "_calib_result", "_opt_result", "_phasecost", "_cal_msg", "_data_run", "data_edited", "dyn_result", "prof_result", "_dyn_builds")
 
 
 def reset_tab_state():
@@ -346,7 +346,7 @@ def process_canvas_value(key="pfd"):
 def model_hash(model):
     m = copy.deepcopy(model)
     for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios", "heating", "fieldlife",
-              "fieldlife_result", "waxsand", "power", "fa2", "design", "prognosis", "prognosis_result", "profile", "profile_result", "dynamics", "calibration", "calibration_applied", "calibration_summary", "phasecost", "phasecost_result"):   # post-processing settings and results: editing them never re-solves
+              "fieldlife_result", "waxsand", "power", "fa2", "design", "prognosis", "prognosis_result", "profile", "profile_result", "dynamics", "calibration", "calibration_applied", "calibration_summary", "phasecost", "phasecost_result", "cases", "case_active"):   # post-processing settings and results: editing them never re-solves
         m.pop(k, None)
     m["units"] = {k: u for k, u in m["units"].items() if u["type"] != "platform"}      # drawing areas never change the solution
     for u in m["units"].values():

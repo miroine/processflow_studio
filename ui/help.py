@@ -360,6 +360,14 @@ Built on the Field life model; it answers "which strategy, how many wells, what 
   horizontal) or liquid (with elevation); Churchill friction at each pipe's Reynolds number; flows, node pressures,
   velocities and the erosional ratio. The text is saved with the flowsheet. Multiphase lines belong in the flowsheet.
 
+### Stage-specific specs, cost table, sensitivity and cases (v7.9)
+
+* **Different value in a later phase**: select a unit, open *Appearance & project phase* and then *Different value in a later phase*. Choose the phase, the parameter and the new value; it replaces the Design-tab value in that stage and every later one (a later phase wins). Use it for what changes with the project - feed pressure after a booster, efficiency of a revamped machine, a new rate - so each stage solves with its own specification and the phase economics shows a production gain. Base values stay in the Parameters tab.
+* **Own cost table**: in *Cost and price assumptions*, import a CSV with columns `type, S_ref, C_ref, exponent` (C_ref in millions of the model currency). It replaces the generic curve for those types and is kept in the saved flowsheet only. **Download phase report** produces a printable page with the phase table, the stages and the flowsheet.
+* **Sensitivity** (Calibrate tab): moves chosen parameters ± x % one at a time and draws a tornado of one result.
+* **Advisor**: new sizing-range check flags duties and powers above (or far below) what one machine normally covers - generic screening limits, not vendor limits. **Recycle feedback** says if a loop stalls, converges slowly or needs more iterations.
+* **Cases**: sidebar *Cases* keeps full variants (Base, High GOR ...) in one file; switching saves the open case and opens the other.
+
 ### Calibration, more SURF equipment and phase economics (v7.8)
 
 * **Calibrate tab.** Plant data enter as rows: for each *case* (an operating condition) add *set* rows for what you impose (feed rate, inlet

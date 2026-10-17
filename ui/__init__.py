@@ -1,2 +1,2 @@
 """ProcessFlow Studio user interface."""
-__version__ = "7.8.3"
+__version__ = "7.9.0"

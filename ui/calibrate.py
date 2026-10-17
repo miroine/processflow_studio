@@ -313,6 +313,44 @@ def _opt_tab(cal, model, sol):
             st.rerun()
 
 
+def _tornado_tab(model, sol):
+    """Which parameters move one result the most (one at a time, +-x %)."""
+    import plotly.graph_objects as go
+    ss = st.session_state
+    st.caption("Moves each chosen parameter by ± the given percentage, one at a time, and shows how much one result changes - the "
+               "bars say where to spend effort on data or design. Every parameter costs two flowsheet solves.")
+    names = sorted(u["name"] for u in model["units"].values() if TU.float_params(u["type"]))
+    cands = []
+    for n_ in names:
+        ut = next(u["type"] for u in model["units"].values() if u["name"] == n_)
+        cands += [(n_, k, f"{n_} · {lab}") for k, lab, *_ in TU.float_params(ut)]
+    label = {(a, b): c for a, b, c in cands}
+    chosen = st.multiselect("Parameters", list(label), format_func=lambda t: label[t], max_selections=20, key=f"tor_p_{ss.widget_ver}")
+    k, o, q = _pick("tor", model, sol)
+    d = st.number_input("Change [%]", value=10.0, min_value=0.1, max_value=50.0, key="tor_d")
+    if st.button("Run sensitivity", key="tor_go", type="primary", disabled=not (chosen and k and o and q)):
+        try:
+            with st.spinner("Solving…"):
+                ss["_tornado"] = TU.tornado(model, chosen, {"kind": k, "obj": o, "q": q}, d)
+        except Exception as e:                       # noqa: BLE001
+            st.error(str(e))
+    res = ss.get("_tornado")
+    if not res:
+        return
+    rows = res["rows"][::-1]
+    base = res["base"]
+    fig = go.Figure()
+    fig.add_bar(y=[f"{r['unit']} · {r['key']}" for r in rows], x=[(r["low"] - base) if r["low"] is not None else 0 for r in rows],
+                orientation="h", name=f"−{res['delta_pct']:g} %", marker_color="#2c7fb8")
+    fig.add_bar(y=[f"{r['unit']} · {r['key']}" for r in rows], x=[(r["high"] - base) if r["high"] is not None else 0 for r in rows],
+                orientation="h", name=f"+{res['delta_pct']:g} %", marker_color="#d95f0e")
+    fig.update_layout(barmode="relative", title=f"Change in {res['ref']['q']} (base {base:,.4g})", height=max(260, 40 * len(rows) + 120),
+                      margin=dict(l=10, r=10, t=50, b=10))
+    st.plotly_chart(fig, width="stretch", key="tor_fig")
+    if res["failed"]:
+        st.warning("Not solved at one of the two points: " + ", ".join(res["failed"]) + " (bar shown as zero on that side).")
+
+
 def calibrate_tab():
     ss = st.session_state
     st.markdown("#### Calibrate to plant data, then optimise")
@@ -326,7 +364,7 @@ def calibrate_tab():
     sol = ss.sol if sol_is_current() else None
     if sol is None:
         st.info("Solve the flowsheet to pick measured quantities from lists (you can also type them).")
-    t1, t2, t3, t4 = st.tabs(["1 · Plant data", "2 · Parameters & fit", "3 · Results", "Optimiser"])
+    t1, t2, t3, t4, t5 = st.tabs(["1 · Plant data", "2 · Parameters & fit", "3 · Results", "Optimiser", "Sensitivity"])
     with t1:
         _data_tab(cal, ss.model, sol)
     with t2:
@@ -335,3 +373,5 @@ def calibrate_tab():
         _results_tab(cal, ss.model)
     with t4:
         _opt_tab(cal, ss.model, sol)
+    with t5:
+        _tornado_tab(ss.model, sol)

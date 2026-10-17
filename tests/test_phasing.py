@@ -162,4 +162,39 @@ mt["streams"][old].pop("phase"), mt["streams"][old].pop("change")
 _norm(mt)
 c.check("without the retirement tag the second route is refused", "sn" not in mt["streams"], "")
 
+# ---- v7.9 stage-specific specifications
+m9 = phased_hp_compression()
+normalize(m9)
+k1_ = byname(m9, "K-100")
+pk = next(x["key"] for x in __import__("procsim.unitops", fromlist=["CATALOGUE"]).CATALOGUE["compressor"]["params"] if x["key"] == "P_out")
+base = m9["units"][k1_]["params"][pk]
+ph9 = m9["phases"][0]["id"]
+m9["units"][k1_]["stage_params"] = {ph9: {pk: base * 1.2}}
+sm0, sm1 = PH.stage_model(m9, 0), PH.stage_model(m9, 1)
+c.check("stage-specific value absent today", sm0["units"][k1_]["params"][pk] == base, "")
+c.check("stage-specific value applies after its phase", abs(sm1["units"][k1_]["params"][pk] - base * 1.2) < 1e-9, "")
+c.check("the model's own params are untouched", m9["units"][k1_]["params"][pk] == base, "")
+c.check("design view (final stage) uses the override", abs(PH.stage_model(m9, -1)["units"][k1_]["params"][pk] - base * 1.2) < 1e-9, "")
+sa, sb = solve(dict(m9, stage=0)), solve(dict(m9, stage=1))
+kd = lambda sol: next(e.duty_kW for e in sol.energy if "K-100" in e.name)
+c.check("the override changes the solution", sa.converged and sb.converged and kd(sb) > kd(sa) * 1.05, f"{kd(sa):.0f} {kd(sb):.0f}")
+
+# ---- v7.9 own cost table and phase report
+from procsim import phasecost as PCo                                         # noqa: E402
+tab, probs = PCo.parse_cost_csv("type;S_ref;C_ref;exponent\ncompressor;4000;30;0.8\nfoo;1;1;1\n")
+c.check("cost table parsed (semicolon too), bad rows reported", list(tab) == ["compressor"] and len(probs) == 1, str((tab, probs)))
+mc = phased_hp_compression()
+normalize(mc)
+r0 = PCo.rollup(mc, None)
+mc["phasecost"] = {"table": {"compressor": [5000.0, 200.0, 0.75]}}
+r1 = PCo.rollup(mc, None)
+c.check("own cost table changes the CAPEX", r1["phases"][0]["capex_Mcur"] > 3 * r0["phases"][0]["capex_Mcur"],
+        f"{r0['phases'][0]['capex_Mcur']:.1f} {r1['phases'][0]['capex_Mcur']:.1f}")
+c.check("basis says own table", any("own table" in e["Basis"] for e in r1["elements"]), "")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "stubs"))
+from ui.report import build_report                                           # noqa: E402
+mc["phasecost_result"] = {k: v for k, v in r1.items() if k != "elements"}
+html = build_report(mc, solve(mc), None, "t")
+c.check("report has the phase stages table", "<h3>Stages</h3>" in html and "Today" in html, "")
+
 sys.exit(c.report())

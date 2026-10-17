@@ -144,6 +144,59 @@ def appearance_panel(obj_id):
         if changed:
             S.bump()
             st.rerun()
+    if is_unit and ph:
+        stage_spec_panel(obj_id)
+
+
+def stage_spec_panel(uid):
+    """Different value of a parameter from a later phase on (feed pressure after the booster, a new efficiency ...)."""
+    ss = st.session_state
+    m = ss.model
+    u = m["units"][uid]
+    ph = PH.phase_list(m)
+    sp = u.setdefault("stage_params", {})
+    specs = [x for x in CATALOGUE[u["type"]]["params"] if x["kind"] in ("float", "select")]
+    with st.expander("🔀 Different value in a later phase", expanded=bool(sp)):
+        st.caption("The Design tab holds today's value. A value set here replaces it in the stage of the chosen phase and every later "
+                   "stage (a later phase wins). Use it for what changes with the project: feed pressure after a booster, "
+                   "efficiency of a revamped machine, a new rate.")
+        if sp:
+            rows = []
+            for pid, vals in sp.items():
+                pn = next((p["name"] for p in ph if p["id"] == pid), pid)
+                for k, v in vals.items():
+                    rows.append({"From": pn, "Parameter": k, "Today": u["params"].get(k), "New value": v})
+            st.dataframe(pd.DataFrame(rows).set_index("From").map(lambda v: S.fmt(v) if isinstance(v, float) else v), width="stretch")
+        c1, c2, c3 = st.columns([2, 2, 2])
+        pn = c1.selectbox("From", [p["name"] for p in ph], key=f"ss_ph_{uid}_{ss.widget_ver}")
+        pid = next(p["id"] for p in ph if p["name"] == pn)
+        labels = {x["key"]: x["label"] for x in specs}
+        key = c2.selectbox("Parameter", list(labels), format_func=lambda k: labels[k], key=f"ss_k_{uid}_{ss.widget_ver}")
+        spec = next((x for x in specs if x["key"] == key), None)
+        if spec is not None:
+            cur = sp.get(pid, {}).get(key, u["params"].get(key, spec["default"]))
+            if spec["kind"] == "select":
+                val = c3.selectbox("New value", spec["options"], index=spec["options"].index(cur) if cur in spec["options"] else 0,
+                                   key=f"ss_v_{uid}_{ss.widget_ver}_{pid}_{key}")
+            else:
+                val = c3.number_input("New value", value=float(cur), format="%.6g", key=f"ss_v_{uid}_{ss.widget_ver}_{pid}_{key}")
+            a, b = st.columns(2)
+            if a.button("Set from this phase", key=f"ss_set_{uid}_{ss.widget_ver}"):
+                S.push_edit(f"{u['name']}: {key} from {pn}")
+                sp.setdefault(pid, {})[key] = val
+                S.bump()
+                st.rerun()
+            if sp.get(pid, {}).get(key) is not None and b.button("Remove this override", key=f"ss_del_{uid}_{ss.widget_ver}"):
+                S.push_edit(f"{u['name']}: remove {key} override")
+                sp[pid].pop(key, None)
+                if not sp[pid]:
+                    sp.pop(pid)
+                if not sp:
+                    u.pop("stage_params", None)
+                S.bump()
+                st.rerun()
+    if not u.get("stage_params"):
+        u.pop("stage_params", None)
 
 
 # --------------------------------------------------------------- compare stages
@@ -220,6 +273,22 @@ def compare_panel():
 
 # --------------------------------------------------------------- phase economics (v7.8)
 
+def _phase_report_button(m, res):
+    """One click: printable report with the phase table, the stages and the final-stage flowsheet."""
+    from procsim import phasecost as PCo  # noqa: F401
+    from .report import build_report
+    ss = st.session_state
+    try:
+        fin = dict(m, stage=-1, phasecost_result={k: v for k, v in res.items() if k != "elements"})
+        sol = solve(fin, build_fluid(m))
+        html = build_report(fin, sol, ss.get("svg"), "Project phases: " + str(m.get("name", "flowsheet")))
+    except Exception as e:                           # noqa: BLE001
+        st.caption(f"Phase report unavailable: {e}")
+        return
+    st.download_button("Download phase report (HTML → print to PDF)", data=html, file_name="processflow_phase_report.html",
+                       mime="text/html", key="pc_report")
+
+
 def phase_economics_panel():
     """CAPEX, change in cost and production, payback and NPV of each project phase."""
     import plotly.graph_objects as go
@@ -254,6 +323,21 @@ def phase_economics_panel():
                 else:
                     ov.pop(nm, None)
         new["overrides"] = ov
+        new["table"] = dict(p["table"])
+        st.markdown("**Own cost table** (CSV with columns `type, S_ref, C_ref, exponent`; C_ref in millions of the model currency)")
+        up = st.file_uploader("Import cost table", type=["csv", "txt"], key=f"pc_tab_{ss.get('pc_tab_ver', 0)}")
+        if up is not None:
+            tab, probs = PCo.parse_cost_csv(up.getvalue().decode("utf-8", "replace"))
+            for x in probs[:8]:
+                st.warning(x)
+            if tab:
+                new["table"].update(tab)
+                ss["pc_tab_ver"] = ss.get("pc_tab_ver", 0) + 1
+                st.success(f"{len(tab)} cost curve(s) imported - kept in the saved flowsheet only.")
+        if new["table"]:
+            st.caption("Own curves for: " + ", ".join(sorted(new["table"])))
+            if st.button("Clear own cost table", key="pc_tab_clear"):
+                new["table"] = {}
         if new != {k: p[k] for k in new}:
             m["phasecost"] = new
             p = PCo.cost_params(m)
@@ -294,6 +378,7 @@ def phase_economics_panel():
             st.dataframe(el.set_index("Unit").map(lambda v: S.fmt(v) if isinstance(v, float) else v), width="stretch")
         else:
             st.caption("No element is tagged with a phase.")
+    _phase_report_button(m, res)
     st.caption("A phase that only adds compression often shows no production gain in a steady-state flowsheet whose product rates are "
                "fixed by the feed: tie the benefit to a higher feed rate or a lower well-head pressure in the 'after' stage "
                "(e.g. with a stage-specific feed unit) to see it.")

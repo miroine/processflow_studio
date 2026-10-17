@@ -398,6 +398,11 @@ def unit_view(uid):
                 if log:
                     st.plotly_chart(charts.recycle_figure(log), width="stretch", key=f"rcyfig_{uid}")
                     st.dataframe(pd.DataFrame(log), hide_index=True, width="stretch")
+                    from procsim import convdiag
+                    for row in convdiag.summarise(sol):
+                        if row["recycle"] == u["name"] and row["verdict"] != "converged":
+                            st.warning(f"{row['verdict'].capitalize()}: flow error {row['flow_error']:.2g}, T error {row['T_error']:.2g} °C "
+                                       f"after {row['iterations']} iterations. {row['hint']}")
             else:
                 st.caption("No iterations yet.")
 

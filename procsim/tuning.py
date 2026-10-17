@@ -366,3 +366,38 @@ def apply_optimum(model, result):
     for v in result["vars"]:
         set_param(model, v["unit"], v["key"], v["best"])
     return len(result["vars"])
+
+
+# --------------------------------------------------------------------------------------------------------- sensitivity
+def tornado(model, params, ref, delta_pct=10.0, fp=None, progress=None):
+    """One-at-a-time sensitivity.  ``params`` = [(unit name, key)]; each is moved by -delta % and +delta % of its value
+    (an absolute +-delta/100 when the value is 0) and ``ref`` = {"kind","obj","q"} is read back.  Returns
+    {"base": value, "rows": [{unit,key,base_value,low_value,high_value,low,high,swing}] sorted by swing, "failed": [...]}."""
+    fp = fp or build_fluid(model)
+    base_sol = solve(model, fp)
+    base = measure(model, base_sol, ref)
+    if base is None:
+        raise ValueError("the chosen result is not available in the base solution")
+    rows, failed = [], []
+    for i, (uname, key) in enumerate(params):
+        x0 = get_param(model, uname, key)
+        step = abs(x0) * delta_pct / 100.0 if x0 != 0 else delta_pct / 100.0
+        vals = {}
+        for tag, x in (("low", x0 - step), ("high", x0 + step)):
+            m = _apply(model, [(uname, key, x)])
+            try:
+                sol = solve(m, fp)
+                ok = bool(sol.converged) and not any(v in ("error", "missing") for v in sol.status.values())
+                vals[tag] = measure(m, sol, ref) if ok else None
+            except Exception:                         # noqa: BLE001
+                vals[tag] = None
+        if vals["low"] is None or vals["high"] is None:
+            failed.append(f"{uname} · {key}")
+        lo, hi = vals["low"], vals["high"]
+        swing = abs((hi if hi is not None else base) - (lo if lo is not None else base))
+        rows.append({"unit": uname, "key": key, "base_value": x0, "low_value": x0 - step, "high_value": x0 + step,
+                     "low": lo, "high": hi, "swing": swing})
+        if progress:
+            progress(i + 1, len(params))
+    rows.sort(key=lambda r: -r["swing"])
+    return {"base": base, "rows": rows, "failed": failed, "ref": ref, "delta_pct": delta_pct}
