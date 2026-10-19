@@ -27,10 +27,10 @@ _LAYOUT = {"title", "xaxis", "yaxis", "xaxis2", "yaxis2", "xaxis3", "yaxis3", "y
 _AXIS = {"title", "gridcolor", "zeroline", "linecolor", "ticks", "showline", "type", "autorange", "range",
          "ticksuffix", "tickformat", "showgrid", "mirror", "tickfont", "matches", "dtick", "categoryorder",
          "automargin", "title_text", "showspikes", "spikemode", "tickcolor", "zerolinecolor", "scaleanchor",
-         "scaleratio", "constrain"}
+         "scaleratio", "constrain", "rangemode"}
 _TEXTPOS = {"top center", "outside", "inside", "auto", "bottom center", "middle right", "middle left", "top right",
             "top left", "bottom right", "none"}
-_MODES = {"lines", "markers", "lines+markers", "markers+text", "lines+markers+text", "text", "lines+text"}
+_MODES = {"lines", "markers", "lines+markers", "markers+text", "lines+markers+text", "text", "lines+text", "none"}
 
 
 def _check(kind, kw):
