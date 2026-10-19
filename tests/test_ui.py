@@ -664,8 +664,21 @@ run()
 c.check("changing the spec back reuses the cached solution instantly", ss.sol is base_sol and ss.sol_hash == base_hash, "")
 pending.append(("auto_limit", 1.0))
 run()
-ss.model["units"][xv]["params"]["dP"] = 0.4
-run()
+original_solve = S_.solve
+
+
+def slow_solve(model, fluid):
+    sol = original_solve(model, fluid)
+    sol.seconds = max(sol.seconds, 2.0)
+    return sol
+
+
+S_.solve = slow_solve
+try:
+    ss.model["units"][xv]["params"]["dP"] = 0.4
+    run()
+finally:
+    S_.solve = original_solve
 c.check("a solve slower than the limit pauses auto-solve", ss.get("auto_paused") is True, "")
 ss.model["units"][xv]["params"]["dP"] = 0.45
 run()
