@@ -2,11 +2,13 @@
 property view, and the before / after comparison."""
 from __future__ import annotations
 
+import copy
+
 import pandas as pd
 import streamlit as st
 
 from procsim import phasing as PH
-from procsim.flowsheet import solve, build_fluid
+from procsim.flowsheet import solve, build_fluid, replace_connection
 from procsim.unitops import CATALOGUE
 
 from . import state as S
@@ -158,8 +160,55 @@ def appearance_panel(obj_id):
         if changed:
             S.bump()
             st.rerun()
-    if is_unit and ph:
-        stage_spec_panel(obj_id)
+    if ph:
+        connection_phase_panel(obj_id)
+        if is_unit:
+            stage_spec_panel(obj_id)
+
+
+def connection_phase_panel(obj_id):
+    """Explicitly schedule a replacement without deleting the old route."""
+    ss = st.session_state
+    m = ss.model
+    ph = PH.phase_list(m)
+    streams = {sid: s for sid, s in m["streams"].items()
+               if sid == obj_id or any(s[end][0] == obj_id for end in ("src", "dst"))}
+    if not ph or not streams:
+        return
+    with st.expander("Replace connection in a later phase", expanded=False):
+        st.caption("Keep the old route before the chosen phase and use a new route from that phase on. "
+                   "Choose the connection to replace, then change its source or destination. "
+                   "This changes routing, not equipment parameter values.")
+        prefix = f"ss_conn_{obj_id}_{ss.widget_ver}"
+        sid = st.selectbox("Connection to replace", list(streams), key=f"{prefix}_old",
+                           format_func=lambda k: f"{streams[k]['name']}: "
+                           f"{m['units'][streams[k]['src'][0]]['name']} / {streams[k]['src'][1]} -> "
+                           f"{m['units'][streams[k]['dst'][0]]['name']} / {streams[k]['dst'][1]}")
+        pid = st.selectbox("Replace from phase", [p["id"] for p in ph], key=f"{prefix}_phase",
+                           format_func=lambda k: next(p["name"] for p in ph if p["id"] == k))
+        old = streams[sid]
+        ends = {}
+        for end, direction, label in (("src", "out", "New source"), ("dst", "in", "New destination")):
+            choices = [uid for uid, u in m["units"].items() if CATALOGUE[u["type"]]["ports"][direction]]
+            uid = st.selectbox(label, choices, index=choices.index(old[end][0]),
+                               format_func=lambda k: m["units"][k]["name"], key=f"{prefix}_{sid}_{end}")
+            ports = list(CATALOGUE[m["units"][uid]["type"]]["ports"][direction])
+            port = st.selectbox(f"{label} port", ports,
+                                index=ports.index(old[end][1]) if old[end][1] in ports else 0,
+                                key=f"{prefix}_{sid}_{end}_{uid}_port")
+            ends[end] = (uid, port)
+        if st.button("Schedule replacement", key=f"{prefix}_set"):
+            updated = copy.deepcopy(m)
+            try:
+                new_sid = replace_connection(updated, sid, pid, *ends["src"], *ends["dst"])
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                S.push_edit(f"Replace connection {old['name']} from {PH.stage_name(m, PH.phase_index(m, pid))}")
+                ss.model = updated
+                ss.selected = [new_sid]
+                S.bump()
+                st.rerun()
 
 
 def stage_spec_panel(uid):
@@ -168,8 +217,12 @@ def stage_spec_panel(uid):
     m = ss.model
     u = m["units"][uid]
     ph = PH.phase_list(m)
-    sp = u.setdefault("stage_params", {})
+    sp = u.get("stage_params", {})
     specs = [x for x in CATALOGUE[u["type"]]["params"] if x["kind"] in ("float", "select")]
+    if not specs and not sp:
+        st.caption("This equipment has no phase-specific numeric or dropdown settings. To change its routing, "
+                   "use 'Replace connection in a later phase' above or select a connection on the diagram.")
+        return
     with st.expander("🔀 Different value in a later phase", expanded=bool(sp)):
         st.caption("The Design tab holds today's value. A value set here replaces it in the stage of the chosen phase and every later "
                    "stage (a later phase wins). Use it for what changes with the project: feed pressure after a booster, "
@@ -197,7 +250,7 @@ def stage_spec_panel(uid):
             a, b = st.columns(2)
             if a.button("Set from this phase", key=f"ss_set_{uid}_{ss.widget_ver}"):
                 S.push_edit(f"{u['name']}: {key} from {pn}")
-                sp.setdefault(pid, {})[key] = val
+                u.setdefault("stage_params", {}).setdefault(pid, {})[key] = val
                 S.bump()
                 st.rerun()
             if sp.get(pid, {}).get(key) is not None and b.button("Remove this override", key=f"ss_del_{uid}_{ss.widget_ver}"):

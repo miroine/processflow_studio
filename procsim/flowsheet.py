@@ -28,7 +28,7 @@ from .streams import MaterialStream, EnergyStream, make_stream, zero_stream, str
 from .unitops import CATALOGUE, CALC, UnitError, default_params, hx_post, K0, PROFILE_TYPES
 from . import surf
 
-from .phasing import stage_model, presence, ANNOTATION_TYPES      # noqa: E402
+from .phasing import stage_model, presence, phase_index, ANNOTATION_TYPES      # noqa: E402
 
 LOGICAL = ("feed", "product", "recycle", "adjust") + ANNOTATION_TYPES
 EXTRAS = ("_post", "_profile", "_map", "_column", "_inlet_F")     # per-unit post-processing data kept with cached results
@@ -158,6 +158,74 @@ def port_edges(model, uid, direction):
         if s[key][0] == uid:
             out.setdefault(s[key][1], []).append(sid)
     return out
+
+
+def replace_connection(model, sid, pid, src_uid, src_port, dst_uid, dst_port):
+    """Replace a stream from a project phase on, keeping the earlier route intact.
+
+    Validate before editing: unlike ``connect``, both routes must be phase-tagged
+    before normalization can see that they do not compete for the same port.
+    """
+    stage = phase_index(model, pid)
+    if not stage:
+        raise ValueError("Choose an existing project phase for the replacement.")
+    old = model["streams"].get(sid)
+    if old is None:
+        raise ValueError("The connection to replace no longer exists.")
+    units = model["units"]
+    src, dst = [src_uid, src_port], [dst_uid, dst_port]
+    if src_uid not in units or dst_uid not in units or src_uid == dst_uid:
+        raise ValueError("Choose two different equipment items for the new connection.")
+    outs = CATALOGUE[units[src_uid]["type"]]["ports"]["out"]
+    ins = CATALOGUE[units[dst_uid]["type"]]["ports"]["in"]
+    if src_port not in outs or dst_port not in ins:
+        raise ValueError("Choose a valid outlet and inlet for the new connection.")
+    if src == old["src"] and dst == old["dst"]:
+        raise ValueError("Change the source or destination to replace this connection.")
+    before = presence(old, model)
+    for end in ("src", "dst"):
+        before &= presence(units[old[end][0]], model)
+    if stage - 1 not in before:
+        raise ValueError("The old connection must be in place in the stage immediately before the replacement.")
+    if stage not in presence(units[src_uid], model) or stage not in presence(units[dst_uid], model):
+        raise ValueError("Both new endpoints must be in place in the chosen phase.")
+
+    new = {"name": next_stream_name(model), "src": src, "dst": dst, "phase": pid, "change": "add"}
+    end_pid = old.get("phase") if old.get("change") == "remove" else old.get("until")
+    if phase_index(model, end_pid) > stage:
+        new["until"] = end_pid
+    active = presence(new, model) & presence(units[src_uid], model) & presence(units[dst_uid], model)
+    for other_id, other in model["streams"].items():
+        if other_id == sid:
+            continue
+        same_route = other["src"] == src and other["dst"] == dst
+        shared_out = other["src"] == src and not outs[src_port]["multi"]
+        shared_in = other["dst"] == dst and not ins[dst_port]["multi"]
+        if not (same_route or shared_out or shared_in):
+            continue
+        overlap = presence(other, model)
+        for end in ("src", "dst"):
+            overlap &= presence(units[other[end][0]], model)
+        if overlap & active:
+            raise ValueError(f"The new route conflicts with connection '{other['name']}' in an overlapping stage. "
+                             "Retire that connection or choose another port.")
+
+    n = model.get("counter", 1)
+    while f"s{n}" in model["streams"]:
+        n += 1
+    new_sid = f"s{n}"
+    if not phase_index(model, old.get("phase")) or old.get("change") == "remove":
+        old["phase"], old["change"] = pid, "remove"
+        old.pop("until", None)
+    else:
+        old["until"] = pid
+    if units[src_uid]["type"] == "feed":
+        new["name"] = units[src_uid]["name"]
+    elif units[dst_uid]["type"] == "product":
+        new["name"] = units[dst_uid]["name"]
+    model["streams"][new_sid] = new
+    model["counter"] = n + 1
+    return new_sid
 
 
 def _clash(others, pres):

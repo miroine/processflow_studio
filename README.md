@@ -160,6 +160,8 @@ works on an empty flowsheet.
 
 **v7.9 additions:** stage-specific specifications (a parameter that takes a new value from a chosen phase on), import of your own cost table (CSV, kept in the saved file only), a one-click printable phase report, a sensitivity (tornado) tab, sizing-range checks in the advisor, recycle convergence feedback and named cases in one file.
 
+**Replacing a connection in a later phase:** select a connection (or its equipment), open **Replace connection in a later phase**, choose the old line, the phase, and the new source/outlet or destination/inlet, then press **Schedule replacement**. The earlier stages keep the old route and the selected phase uses the new one. A later planned retirement is preserved. Conflicting connections are rejected with an explanation, and **Undo edit** reverses the change. **Different value in a later phase** is only for equipment settings, not routing.
+
 **v7.8 additions (calibration, more SURF, phase economics):** a **Calibrate** tab that tunes any numeric unit parameter (efficiencies, pressure drops,
 heat-transfer coefficients, permeances …) to plant measurements over several operating cases, with parameter confidence intervals, an identifiability
 warning, held-out validation cases, parity plots and *apply to flowsheet*, plus an **optimiser** (decision variables, constraints, objective from the
