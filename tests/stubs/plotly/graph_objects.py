@@ -30,7 +30,7 @@ _AXIS = {"title", "gridcolor", "zeroline", "linecolor", "ticks", "showline", "ty
          "scaleratio", "constrain", "rangemode"}
 _TEXTPOS = {"top center", "outside", "inside", "auto", "bottom center", "middle right", "middle left", "top right",
             "top left", "bottom right", "none"}
-_MODES = {"lines", "markers", "lines+markers", "markers+text", "lines+markers+text", "text", "lines+text"}
+_MODES = {"lines", "markers", "lines+markers", "markers+text", "lines+markers+text", "text", "lines+text", "none"}
 
 
 def _check(kind, kw):
