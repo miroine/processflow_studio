@@ -79,6 +79,119 @@ their lengths, legend, north arrow, scale bar and title block. Drag structures, 
 services from the legend and export to SVG; edits are saved with the flowsheet and never re-solve. New example
 *Subsea hub (SURF)*: two templates, a satellite, a PLEM, gas lift and water injection.
 
+**v6.5 additions (HYSYS-style process units):** amine sweetening contactor (MEA / DEA / MDEA / activated MDEA:
+CO₂ and H₂S specifications, circulation, rich loading, reboiler and pump duty as energy streams); relief valve with
+API 520/526 orifice selection (vapour, liquid, two-phase, API 521 fire case); flare (heat release, flame length,
+radiation, tip size, CO₂ and SO₂); component splitter; conversion and equilibrium reactors (reaction strings such as
+`C1 + 2 O2 -> CO2 + 2 H2O`, formation enthalpies included, ΔCp-corrected equilibrium constants); valve Cv / Kv,
+choking and opening; compressor drivers (electric motor or gas turbine: fuel, CO₂, ambient derating, margin). New
+examples: *Amine sweetening*, *Pressure relief*, *Steam reforming*.
+
+**v6.6 additions (OLGA-style flow assurance, SURF tab *Regime & corrosion*):** mechanistic flow regime and holdup
+(Taitel-Dukler, Taitel-Barnea-Dukler, Bendiksen drift flux) beside Beggs & Brill; CO₂ corrosion (de Waard-Lotz-Milliams)
+with allowance, pH and inhibitor targets; oil-water emulsion viscosity and inversion; liquid loading (Turner / Coleman)
+and minimum stable rate; pigging (run time, liquid swept, receiver size); line pack and draw-down; insulation sized
+for a target cool-down time; PVT table export (CSV).
+
+**v6.7 additions (network and well design, *Design* tab):** flowline diameter sweep with a recommended size (arrival
+pressure, erosion, hydrate margin, slugging, steel mass), gas-lift allocation (performance curves from the well
+model, equal-marginal-gain split of the available gas), ESP sizing (head, free gas, generic pump catalogue, motor)
+and a looped / branched pipe-network solver for gas or liquid.
+
+**v7.0 additions (production prognosis, *Prognosis* tab):** on top of the Field life model, a drainage-strategy
+comparison (oil: water-injection voidage replacement and facility size; gas: facility size with the 0.6-power cost
+rule; subsea boosting timing), each option at its highest-NPV well count, and an uncertainty analysis (Latin-hypercube
+samples of in-place volume, aquifer, water breakthrough and price) giving P90 / P50 / P10 recovery factor and NPV per
+well count, the chance of a negative NPV, and the best-on-average and the most robust well count. The deliverability
+tables of a well count are shared by all samples. A recommended development summary and a report section are included.
+
+**v7.1 additions (topside templates and debottlenecking):** six topside example flowsheets (HP compressor bypass, debottlenecking,
+two parallel trains with recycle loops, produced-water handling and reinjection, gas blending to a Wobbe-index specification,
+HP / LP flare system), gas-quality properties on gas streams (GCV, Wobbe index, relative density, CO₂), a vessel diameter on
+separators for a gas-load check, and a *Debottlenecking* panel on the Design tab (utilisation of every unit and a throughput sweep
+that ranks the limits).
+
+**v7.2 additions (profile simulation, *Profile* tab):** the process flowsheet can be run for a time profile as well as for a single
+step. A table with one row per time step holds the feed rate, pressure and temperature (and, optionally, any other numeric unit
+parameter); every row is solved as a full steady-state flowsheet (recycles and Adjust loops included) and the results are charted
+against time with cumulative gas, liquid, power and CO₂. A blank cell keeps the flowsheet value; a step that does not solve is
+marked and does not stop the run. Tables can be generated (linear or exponential decline), edited, uploaded and downloaded as CSV.
+It is a quasi-steady profile: nothing carries over between steps (no hold-up, no dynamics). An example table for the *Oil stabilisation*
+example is in `docs/example_profile_oil_stabilisation.csv` (upload it on the *Profile* tab).
+
+**v7.3 additions (dynamic simulation, *Dynamic* tab):** a lumped, time-domain simulation of the solved flowsheet, from seconds to
+hours. It starts from the steady-state solution (t = 0 reproduces it) and follows a table of events - feed-rate / temperature /
+pressure steps and ramps, set-point and valve changes, compressor trip / start / speed, pump trip, opening a blowdown valve or PSV,
+a fire heat input, a back-pressure change. Four applications are covered: **vessel hold-up with level and pressure control**
+(separators, scrubbers, mixers; PI controllers with anti-windup), **blowdown / depressurisation** (orifice flow to a flare header,
+API 520 / ISO 4126 gas flow, choked and subsonic, PSV with reseat), **pipeline line-pack** (pipes become chains of isothermal cells)
+and **compressor trip, coast-down and surge** (map-based flow, speed lag, check valve, anti-surge valve and controller). Vessels
+are well-mixed holdups solved with a U-V flash at every step (Peng-Robinson), total moles are conserved to round-off, and the
+time step adapts. Four examples (all generic data): *Dynamic: HP separator ...*, *gas vessel blowdown*, *compressor trip*,
+*pipeline line-pack*. Limits: no pressure waves or momentum (no water hammer), well-mixed holdups (no stratification, no
+foaming or carry-over), homogeneous flow in pipes (no slip, no slugging), valves are ideal characteristics, liquid-full vessels and
+columns, heat exchangers, reactors and other unit types are not supported (the tab says which unit is the problem).
+Valve, compressor and pump coefficients are calibrated at the steady state, so a flowsheet with no data for them still starts at
+its steady point; vessel volumes and valve sizes default to generic values - change them for a real design. Not a replacement for
+a validated dynamic simulator (HYSYS Dynamics, UniSim, OLGA, K-Spice).
+
+**v7.4 additions (data exchange, *Data* tab):** *Import* parameters, feed compositions, profile tables and dynamic events from **CSV, Excel
+or YAML** (or open a complete flowsheet in YAML). The layout of every sheet is recognised from its columns (one row per parameter, one row per
+unit, compositions long or wide, `Time` + `Unit | parameter` profile, events); nothing is written until a **change plan** (old value, new value,
+status, reason) has been checked - unknown units or parameters (with "did you mean"), values outside the catalogue limits, bad select options and
+parameters hidden by the unit's specification are flagged, and *Undo edit* reverts an import. *Batch edit*: set / multiply / add / reset a
+parameter on all units of a type or name pattern, edit a table of one unit type, or edit all feed compositions in one grid. *Export* the result
+tables (streams, stream compositions, unit results, energy, overall KPIs, parameters, feed compositions, plus the last Profile and Dynamic
+results) to a formatted **Excel** workbook, **CSV** (one table or a zip), or the flowsheet / parameters as **YAML** / JSON; the *Parameters* and
+*Feed compositions* sheets of an export can be edited in Excel and imported again. A **Python editor** lets you adjust the export tables with a
+short script before exporting (and apply an edited Parameters table back to the flowsheet). The editor runs code, so it is **off unless the
+host enables it** (environment variable `PFS_PYTHON_EDITOR=on` or the Streamlit secret `python_editor = "on"`, optionally with a password
+`python_editor_password`); scripts run in a separate process with CPU, memory and no-file-write limits, no file or network access and a
+short allow-list of imports; modules are handed over through read-only views (no `pd.io` / `np.os` doors), private attributes are blocked and file / process / network calls are audited (v7.4.1) - defence in depth, still not a certified sandbox. Examples: `docs/example_import_parameters.csv`,
+`docs/example_import_changes.yaml`. Needs `pyyaml` (added to `requirements.txt`).
+
+**v7.4.1 (audit and bug-fix release):** closed a hole in the Python editor (`pd.io.common.os` gave a script access to the operating system) with
+read-only module views, a stricter AST check and an audit hook. Dynamics: bumpless manual → auto transfer, surge margin in surge, anti-surge
+controller back to auto after a restart, a second `run()` continues with the same mass-balance baseline, events and settings are validated with
+readable messages (bad target, missing time, text value, negative run length, zero volume, PSV without set pressure), valve openings are clamped,
+and steps never jump over a feed ramp's breakpoint. UI: loading a flowsheet clears the Profile / Dynamic / Data widget state and caches, untouched
+default vessel volumes are no longer pinned into the settings, the dynamic model assembly is cached between reruns and the default Python script
+works on an empty flowsheet.
+
+**v7.9 additions:** stage-specific specifications (a parameter that takes a new value from a chosen phase on), import of your own cost table (CSV, kept in the saved file only), a one-click printable phase report, a sensitivity (tornado) tab, sizing-range checks in the advisor, recycle convergence feedback and named cases in one file.
+
+**v7.8 additions (calibration, more SURF, phase economics):** a **Calibrate** tab that tunes any numeric unit parameter (efficiencies, pressure drops,
+heat-transfer coefficients, permeances …) to plant measurements over several operating cases, with parameter confidence intervals, an identifiability
+warning, held-out validation cases, parity plots and *apply to flowsheet*, plus an **optimiser** (decision variables, constraints, objective from the
+economics) that runs on the calibrated model; six subsea units (**choke module, manifold, multiphase flow meter, pig launcher/receiver, de-oiling
+hydrocyclone, electric heater**) and a subsea-equipment example; **cost and payback of every project phase** (CAPEX, change in energy/CO₂ cost and
+production, payback, NPV); utility cost, CO₂ and a rough payback in the **heat-integration** tab; the advisor, pinch, calibration and phase findings in the
+**printable report**; a **refrigeration-cycle model** for the chiller (propane, propylene, ethylene, ammonia, i-butane, ethane; optional economiser) on the
+PR equation of state; a **two-stage membrane** with permeate recompression and recycle; and a vendor-neutral **typical-values** preset list in every unit's
+property view.
+
+**v7.7 additions (process units and analysis):** a **chiller** (refrigeration loop with COP and compressor power), a **membrane separator** for CO₂ / H₂S
+removal (cross-flow, area or CO₂-specification mode, methane loss), a **molecular-sieve dryer** (bed sizing, regeneration heat), a **Heat integration** tab
+(pinch targets, composite curves) and a **Process advisor** tab (rule-based improvement opportunities). A gas-conditioning example ties them together.
+
+**v7.6 additions (phasing and symbols):** elements and streams can be tagged *new in phase n* / *removed in phase n* and coloured freely; a stage selector
+shows the design, today, or the situation after any phase, with the calculation following the stage (absent items are dropped and shown as ghosts), plus a
+*Before / after* comparison tab. Separators and scrubbers can be vertical or horizontal, every element has its own zoom, and the new elements are an
+offshore platform frame (fixed, floating, FPSO, subsea, onshore), a gas turbine (LHV-based power, derating, exhaust heat, CO₂, plant power balance) and
+a phase splitter. A phased example flowsheet is included.
+
+**v7.5 additions (fluid package, *Fluid package* tab and *Phase envelope*):** the component library grows from 13 to **163** (n-alkanes to C20, branched
+alkanes, cyclics, aromatics, olefins, sulfur compounds, alcohols, glycols, amines, light and noble gases) with CAS number and formula, searchable and
+filterable; data from the ChemSep pure-component database (Artistic License 2.0). **EOS calibration** fits the Peng-Robinson *m* and the Peneloux
+volume shift (optionally ω, Tc, Pc, with weak priors) of any component to vapour-pressure and liquid-density data, or a pair's kij to bubble
+pressures, shows before/after deviations and stores the result in the flowsheet. **Plus-fraction splitting** (Pedersen distribution, Søreide density,
+equal-mass pseudo-components). The **phase envelope** is now traced by continuation through the critical point (smooth, 1-3 s) with optional
+vapour-fraction lines; the old grid method remains as a fallback. Tests: `tests/test_fluid75.py`.
+Limits: extended-library kij are generic family rules; Cp is a cubic fit; calibrations are only as good as the data and extrapolate poorly when
+ω/Tc/Pc are fitted together with m.
+
+
+
 **Hydrate model (v6):** Motiee gas-gravity correlation or a van der Waals–Platteeuw model (sI/sII, Kihara potentials, PR
 fugacities, fitted to pure-gas data), selected on the Fluid package tab.
 

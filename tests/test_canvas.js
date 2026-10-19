@@ -45,6 +45,35 @@ const P = require(SRC);
   const lts = ids.find((k) => m.units[k].type === "separator");
   const jt = ids.find((k) => m.units[k].type === "valve");
   check("canConnect refuses an already-used single outlet", !P.canConnect(m, fixture.catalogue, lts, "vapour", jt, "in"));
+  {
+    // phasing: a new route into a single-connection port replaces the connection that is in place today
+    const ph = [{ id: "p1", name: "Phase 1" }];
+    const mm = { units: { m: { type: "mixer", name: "MIX" }, t: { type: "splitter", name: "TEE" }, k: { type: "compressor", name: "K", phase: "p1", change: "add" } },
+                 streams: { s1: { name: "1", src: ["m", "out"], dst: ["t", "in"] } } };
+    {
+      const ra = P.portConflicts(mm, fixture.catalogue, "k", "out", "t", "in", { phases: ph, draw: "" });
+      check("without a phase the new route (from an element added in phase 1) takes over from phase 1 by itself",
+            ra.ok && ra.replace[0] === "s1" && ra.at === "p1" && ra.tag && ra.tag.phase === "p1" && ra.tag.change === "add", JSON.stringify(ra));
+    }
+    check("two lines that would both exist today stay refused", !P.canConnect({ units: { m: mm.units.m, t: mm.units.t, k2: { type: "compressor", name: "K2" } }, streams: mm.streams },
+          fixture.catalogue, "k2", "out", "t", "in", { phases: ph, draw: "" }));
+    {
+      // the old line was added in phase 1; a compressor added in phase 2 takes over from phase 2 and the old line ends there
+      const ph2 = [{ id: "p1", name: "Phase 1" }, { id: "p2", name: "Phase 2" }];
+      const m3 = { units: { m: { type: "mixer", name: "MIX", phase: "p1", change: "add" }, t: { type: "splitter", name: "TEE" },
+                            k: { type: "compressor", name: "K", phase: "p2", change: "add" } },
+                   streams: { s1: { name: "1", src: ["m", "out"], dst: ["t", "in"], phase: "p1", change: "add" } } };
+      const rb = P.portConflicts(m3, fixture.catalogue, "k", "out", "t", "in", { phases: ph2, draw: "" });
+      check("old line added in phase 1 is retired in phase 2 by a compressor added in phase 2", rb.ok && rb.at === "p2" && rb.tag.phase === "p2", JSON.stringify(rb));
+      P.retireStream(m3.streams.s1, rb.at);
+      check("retired line is in place in phase 1 only", P.presentAt(ph2, m3.streams.s1, 1) && !P.presentAt(ph2, m3.streams.s1, 2) && !P.presentAt(ph2, m3.streams.s1, 0), JSON.stringify(m3.streams.s1));
+    }
+    const r = P.portConflicts(mm, fixture.catalogue, "k", "out", "t", "in", { phases: ph, draw: "p1:add" });
+    check("with 'new in phase 1' the existing connection is retired instead", r.ok && r.replace.length === 1 && r.replace[0] === "s1", JSON.stringify(r));
+    mm.streams.s1.phase = "p1"; mm.streams.s1.change = "remove";
+    check("after retiring it the new route is accepted", P.canConnect(mm, fixture.catalogue, "k", "out", "t", "in", { phases: ph, draw: "p1:add" }));
+    check("two simultaneous routes into one single inlet stay refused", !P.canConnect({ units: mm.units, streams: { s1: { name: "1", src: ["m", "out"], dst: ["t", "in"], phase: "p1", change: "add" } } }, fixture.catalogue, "k", "out", "t", "in", { phases: ph, draw: "p1:add" }));
+  }
   check("canConnect refuses inlet->inlet", !P.canConnect(m, fixture.catalogue, jt, "in", lts, "feed"));
   check("canConnect accepts a free multi inlet", P.canConnect(
     Object.assign({}, m, { units: Object.assign({}, m.units, { q: { type: "valve", name: "q", x: 0, y: 0 } }) }),
@@ -56,6 +85,29 @@ const P = require(SRC);
     const all = Object.keys(c.ports.in).concat(Object.keys(c.ports.out));
     check(`every catalogue port of ${t} has a position`, all.every((pn) => g.ports[pn]), all.join(","));
   }
+}
+
+// ------------------------------------------------------------ v7.6: orientation, zoom, phasing
+{
+  const v = { type: "separator", x: 100, y: 100 }, h = { type: "separator", x: 100, y: 100, orient: "h" };
+  check("separator defaults to vertical", P.orientOf(v) === "v" && P.hasOrient("separator") && !P.hasOrient("valve"));
+  const pv = P.portPos(v, "vapour"), ph = P.portPos(h, "vapour");
+  check("horizontal separator moves the vapour port off the top", pv.dir === "U" && ph.dir !== pv.dir || ph.x !== pv.x, JSON.stringify([pv, ph]));
+  check("horizontal separator is wider than tall", P.extentOf(h).w > P.extentOf(h).h && P.extentOf(v).h > P.extentOf(v).w);
+  const z = { type: "separator", x: 100, y: 100, scale: 2 };
+  const pz = P.portPos(z, "vapour");
+  check("zoom scales the port offset about the centre", pz.y === 100 + (pv.y - 100) * 2 && pz.x === 100, JSON.stringify(pz));
+  check("zoom is clamped", P.scaleOf({ scale: 99 }) === 4 && P.scaleOf({ scale: 0.01 }) === 0.4 && P.scaleOf({}) === 1);
+  check("platform size comes from the unit", P.extentOf({ type: "platform", w: 700, h: 400 }).w === 700);
+  const phs = [{ id: "p1", name: "Tie-in" }, { id: "p2", name: "Boost" }];
+  const add1 = { phase: "p1", change: "add" }, rem2 = { phase: "p2", change: "remove" };
+  check("presentAt: untagged always", [0, 1, 2].every((s) => P.presentAt(phs, {}, s)));
+  check("presentAt: added in p1 appears from stage 1", !P.presentAt(phs, add1, 0) && P.presentAt(phs, add1, 1) && P.presentAt(phs, add1, 2));
+  check("presentAt: removed in p2 disappears at stage 2", P.presentAt(phs, rem2, 1) && !P.presentAt(phs, rem2, 2));
+  check("presenceOf lists stages", [...P.presenceOf(phs, rem2)].join() === "0,1");
+  check("phaseColor: explicit beats phase default", P.phaseColor(phs, { color: "#123456", phase: "p1" }) === "#123456" && /^#/.test(P.phaseColor(phs, add1)) && P.phaseColor(phs, {}) === null);
+  for (const t of ["platform", "gas_turbine", "phase_splitter"])
+    check(`new type ${t} is in the catalogue`, !!fixture.catalogue[t]);
 }
 
 // ------------------------------------------------------------ DOM shim

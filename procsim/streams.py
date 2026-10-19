@@ -111,7 +111,9 @@ def stream_properties(st: MaterialStream, fp: FluidPackage) -> dict:
                 "Molecular weight": st.MW, "Mass density [kg/m³]": None, "Z (vapour)": None,
                 "Cp [kJ/kmol·K]": None, "Cp/Cv (vapour)": None, "Viscosity vapour [cP]": None,
                 "Viscosity liquid [cP]": None, "Hydrate T (Motiee) [°C]": None, "Hydrate margin [°C]": None,
-                "Inhibitor in aqueous [wt%]": None, "Hydrate T (inhibited) [°C]": None, "Phase": "No flow"}
+                "Inhibitor in aqueous [wt%]": None, "Hydrate T (inhibited) [°C]": None,
+                "GCV (dry) [MJ/Sm³]": None, "Wobbe index [MJ/Sm³]": None, "Relative density (air = 1)": None,
+                "CO₂ (dry) [mol%]": None, "Phase": "No flow"}
     fr = st.flash
     MW = st.MW
     mass = st.F * MW
@@ -126,6 +128,11 @@ def stream_properties(st: MaterialStream, fp: FluidPackage) -> dict:
         vols = [p.beta * p.Vs for p in liqs]
         mu_l = sum(w * phase_viscosity_cP(fp, p, st.T) for w, p in zip(vols, liqs)) / sum(vols)
     t_hyd, t_inh, margin, wt = hydrate_state(st, fp)
+    gq = None
+    if fr.vf is not None and fr.vf >= 0.5:                 # sales-gas quality only for gas-like streams
+        from .gasquality import quality
+        gq = quality(fp, st.z)
+    gq = gq or {}
     return {
         "Phase": fr.phase_label,
         "Vapour fraction": fr.vf,
@@ -150,6 +157,10 @@ def stream_properties(st: MaterialStream, fp: FluidPackage) -> dict:
         "Inhibitor in aqueous [wt%]": wt,
         "Hydrate T (inhibited) [°C]": t_inh,
         "Hydrate margin [°C]": margin,
+        "GCV (dry) [MJ/Sm³]": gq.get("GCV (dry) [MJ/Sm³]"),
+        "Wobbe index [MJ/Sm³]": gq.get("Wobbe index [MJ/Sm³]"),
+        "Relative density (air = 1)": gq.get("Relative density (air = 1)"),
+        "CO₂ (dry) [mol%]": gq.get("CO₂ (dry) [mol%]"),
     }
 
 

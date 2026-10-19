@@ -34,11 +34,20 @@
     pump:       { w: 48, h: 50, ports: { in: [-24, 4, "L"], out: [24, -14, "R"] }, energy: [0, 25, "D"] },
     heater:     { w: 44, h: 44, ports: { in: [-22, 0, "L"], out: [22, 0, "R"] }, energy: [0, -22, "U"] },
     cooler:     { w: 44, h: 44, ports: { in: [-22, 0, "L"], out: [22, 0, "R"] }, energy: [0, -22, "U"] },
+    chiller:    { w: 44, h: 44, ports: { in: [-22, 0, "L"], out: [22, 0, "R"] }, energy: [0, -22, "U"] },
+    membrane:   { w: 96, h: 44, ports: { feed: [-48, 0, "L"], retentate: [48, 0, "R"], permeate: [0, 22, "D"] } },
+    mol_sieve:  { w: 76, h: 84, ports: { feed: [-38, -14, "L"], dry: [38, -14, "R"], water: [0, 42, "D"] } },
     aircooler:  { w: 78, h: 46, ports: { in: [-39, -8, "L"], out: [39, -8, "R"] }, energy: [0, -20, "U"] },
     hx:         { w: 104, h: 44, ports: { tube_in: [-52, 0, "L"], tube_out: [52, 0, "R"],
                                           shell_in: [26, -18, "U"], shell_out: [-26, 18, "D"] } },
     scrubber:   { w: 40, h: 104, ports: { feed: [-20, 8, "L"], vapour: [0, -52, "U"], liquid: [0, 52, "D"] } },
     teg_contactor: { w: 44, h: 110, ports: { feed: [-22, 34, "L"], dry: [0, -55, "U"], water: [22, 42, "R"] } },
+    amine_contactor: { w: 44, h: 110, ports: { feed: [-22, 34, "L"], sweet: [0, -55, "U"], acid: [22, 42, "R"] } },
+    relief_valve: { w: 40, h: 44, ports: { in: [-20, 10, "L"], out: [0, -22, "U"] } },
+    flare:      { w: 36, h: 100, ports: { in: [-18, 40, "L"] } },
+    comp_splitter: { w: 50, h: 70, ports: { feed: [-25, 0, "L"], top: [25, -20, "R"], bottom: [25, 20, "R"] }, energy: [0, 35, "D"] },
+    conv_reactor: { w: 50, h: 76, ports: { feed: [-25, 0, "L"], out: [25, 0, "R"] }, energy: [0, 38, "D"] },
+    eq_reactor: { w: 50, h: 76, ports: { feed: [-25, 0, "L"], out: [25, 0, "R"] }, energy: [0, 38, "D"] },
     column:     { w: 50, h: 190, ports: { feed_top: [-25, -70, "L"], feed: [-25, 0, "L"], feed_bottom: [-25, 70, "L"],
                                           overhead: [0, -95, "U"], bottoms: [0, 95, "D"], water: [25, 30, "R"] },
                   energies: [[25, -76, "R"], [25, 76, "R"]] },
@@ -62,21 +71,55 @@
     subsea_cooler:     { w: 70, h: 56, ports: { in: [-35, -16, "L"], out: [35, 16, "R"] } },
     intensifier:       { w: 64, h: 40, ports: { in: [-32, 6, "L"], out: [32, 6, "R"] }, energy: [-8, -20, "U"] },
     cimv:              { w: 44, h: 44, ports: { in: [-22, 8, "L"], chem: [0, -22, "U"], out: [22, 8, "R"] } },
+    // v7.8: more subsea equipment
+    subsea_choke:        { w: 46, h: 46, ports: { in: [-23, 8, "L"], out: [23, 8, "R"] } },
+    subsea_manifold:     { w: 90, h: 50, ports: { in: [-45, 0, "L"], out: [45, 0, "R"] } },
+    mpfm:                { w: 50, h: 44, ports: { in: [-25, 6, "L"], out: [25, 6, "R"] } },
+    pig_station:         { w: 74, h: 36, ports: { in: [-37, 6, "L"], out: [37, 6, "R"] } },
+    subsea_hydrocyclone: { w: 54, h: 96, ports: { feed: [-27, -20, "L"], water: [0, 48, "D"], reject: [0, -48, "U"] } },
+    subsea_heater:       { w: 70, h: 50, ports: { in: [-35, 6, "L"], out: [35, 6, "R"] }, energy: [0, 25, "D"] },
+    // v7.6: installation area (size comes from the unit), gas turbine, ideal phase splitter
+    platform:       { w: 96, h: 60, ports: {} },
+    gas_turbine:    { w: 76, h: 50, ports: { fuel: [-8, -25, "U"] }, energy: [30, 25, "D"] },
+    phase_splitter: { w: 56, h: 56, ports: { feed: [-28, 0, "L"], vapour: [0, -28, "U"], oil: [28, 8, "R"], water: [0, 28, "D"] },
+                      energy: [22, 22, "R"] },
+    deliquifier: { w: 54, h: 90, ports: { feed: [-27, -8, "L"], gas: [0, -45, "U"], liquid: [0, 45, "D"] } },
+    // alternative orientations (key "type:orientation"; the orientation named in DEFAULT_ORIENT is the base geometry)
+    "separator:h":  { w: 96, h: 46, ports: { feed: [-48, 0, "L"], vapour: [14, -23, "U"], liquid: [32, 23, "D"] },
+                      energy: [48, 8, "R"] },
+    "scrubber:h":   { w: 108, h: 42, ports: { feed: [-54, 5, "L"], vapour: [14, -21, "U"], liquid: [38, 21, "D"] } },
+    "separator3:v": { w: 50, h: 112, ports: { feed: [-25, 0, "L"], vapour: [0, -56, "U"], oil: [25, 24, "R"],
+                                              water: [0, 56, "D"] }, energy: [25, 40, "R"] },
   };
+  const DEFAULT_ORIENT = { separator: "v", scrubber: "v", separator3: "h" };
+  const ORIENT_NAME = { v: "vertical", h: "horizontal" };
+  const MIN_SCALE = 0.4, MAX_SCALE = 4;
+
+  function orientOf(u) { return u.orient || DEFAULT_ORIENT[u.type] || "v"; }
+  function hasOrient(type) { return !!DEFAULT_ORIENT[type]; }
+  function geomKey(u) { const k = u.type + ":" + orientOf(u); return GEOM[k] ? k : u.type; }
+  function scaleOf(u) { const k = Number(u && u.scale); return k > 0 ? Math.min(MAX_SCALE, Math.max(MIN_SCALE, k)) : 1; }
+  /** Geometry of a unit (orientation variant; a platform frame takes its size from the unit). */
+  function geomOf(u) {
+    if (u.type === "platform") return { w: Number(u.w) > 0 ? Number(u.w) : 520, h: Number(u.h) > 0 ? Number(u.h) : 320, ports: {} };
+    return GEOM[geomKey(u)] || { w: 40, h: 40, ports: {} };
+  }
+  /** Width/height of a unit on the canvas (geometry x element zoom). */
+  function extentOf(u) { const g = geomOf(u), k = scaleOf(u); return { w: g.w * k, h: g.h * k }; }
 
   function portPos(u, port) {
-    const g = GEOM[u.type];
+    const g = geomOf(u);
     const p = g && g.ports[port];
     if (!p) return null;
-    const fx = u.flip ? -1 : 1;
-    return { x: u.x + fx * p[0], y: u.y + p[1], dir: u.flip ? MIRROR[p[2]] : p[2] };
+    const fx = u.flip ? -1 : 1, k = scaleOf(u);
+    return { x: u.x + fx * p[0] * k, y: u.y + p[1] * k, dir: u.flip ? MIRROR[p[2]] : p[2] };
   }
 
   function energyPos(u) {
-    const g = GEOM[u.type];
+    const g = geomOf(u);
     if (!g || !g.energy) return null;
-    const e = g.energy, fx = u.flip ? -1 : 1;
-    return { x: u.x + fx * e[0], y: u.y + e[1], dir: u.flip ? MIRROR[e[2]] : e[2] };
+    const e = g.energy, fx = u.flip ? -1 : 1, k = scaleOf(u);
+    return { x: u.x + fx * e[0] * k, y: u.y + e[1] * k, dir: u.flip ? MIRROR[e[2]] : e[2] };
   }
 
   function simplify(pts) {
@@ -172,19 +215,111 @@
     let n = 1; while (used.has(String(n))) n++; return String(n);
   }
 
-  /** Can an edge be added between (uOut,pOut) -> (uIn,pIn)? */
-  function canConnect(model, catalogue, src, sp, dst, dp) {
-    if (!src || !dst || src === dst) return false;
-    const us = model.units[src], ud = model.units[dst];
-    if (!us || !ud) return false;
-    const cs = catalogue[us.type].ports.out[sp], cd = catalogue[ud.type].ports.in[dp];
-    if (!cs || !cd) return false;
-    for (const s of Object.values(model.streams)) {
-      if (!cs.multi && s.src[0] === src && s.src[1] === sp) return false;
-      if (!cd.multi && s.dst[0] === dst && s.dst[1] === dp) return false;
-      if (s.src[0] === src && s.src[1] === sp && s.dst[0] === dst && s.dst[1] === dp) return false;
+  // ------------------------------------------------------------ phasing (v7.6)
+  // phases = [{id, name, color}] in order; an element may carry phase (id), change ("add" | "remove"), color.
+  // Stage 0 = today, i = after phase i.  Presence mirrors procsim/phasing.py.
+  const PHASE_COLORS = ["#e8590c", "#7048e8", "#0b7285", "#c2255c", "#5c940d", "#f08c00"];
+  function phaseIndex(phases, pid) {
+    if (!pid) return 0;
+    return (phases || []).findIndex((p) => p.id === pid) + 1;
+  }
+  function presentAt(phases, el, stage) {
+    const i = phaseIndex(phases, el && el.phase);
+    if (!i) return true;
+    if (el.change === "remove") return stage < i;
+    const u = phaseIndex(phases, el.until);              // an added item may be retired again by a later phase
+    return stage >= i && !(u > i && stage >= u);
+  }
+  function presenceOf(phases, el) {
+    const out = new Set();
+    for (let k = 0; k <= (phases || []).length; k++) if (presentAt(phases, el, k)) out.add(k);
+    return out;
+  }
+  function phaseColor(phases, el) {
+    if (!el) return null;
+    if (el.color) return el.color;
+    const i = phaseIndex(phases, el.phase);
+    return i ? ((phases[i - 1].color) || PHASE_COLORS[(i - 1) % PHASE_COLORS.length]) : null;
+  }
+  function parseDraw(txt) {
+    if (!txt) return {};
+    const [phase, change] = String(txt).split(":");
+    return phase ? { phase, change: change === "remove" ? "remove" : "add" } : {};
+  }
+  function intersects(a, b) { for (const x of a) if (b.has(x)) return true; return false; }
+  function streamPresence(model, phases, s) {
+    const a = presenceOf(phases, s);
+    for (const end of [s.src[0], s.dst[0]]) {
+      const u = model.units[end];
+      if (!u) continue;
+      const pu = presenceOf(phases, u);
+      for (const x of Array.from(a)) if (!pu.has(x)) a.delete(x);
     }
-    return true;
+    return a;
+  }
+
+  /** Can an edge be added between (uOut,pOut) -> (uIn,pIn)?  ctx = {phases, draw}: with phasing, two streams may share a
+   *  single-connection port when they are never in place together (old route / new route of a modification). */
+  function portConflicts(model, catalogue, src, sp, dst, dp, ctx) {
+    const res = { ok: false, replace: [] };
+    if (!src || !dst || src === dst) return res;
+    const us = model.units[src], ud = model.units[dst];
+    if (!us || !ud) return res;
+    const cs = catalogue[us.type].ports.out[sp], cd = catalogue[ud.type].ports.in[dp];
+    if (!cs || !cd) return res;
+    const phases = ctx && ctx.phases && ctx.phases.length ? ctx.phases : null;
+    let cand = null, draw = {};
+    if (phases) {
+      draw = parseDraw(ctx.draw);
+      cand = streamPresence(Object.assign({}, model, { units: model.units }), phases,
+                            { phase: draw.phase, change: draw.change, src: [src, sp], dst: [dst, dp] });
+    }
+    const retire = [];                       // [{sid, r}] connections that the new one replaces, with the stage index it takes over
+    for (const sid of Object.keys(model.streams)) {
+      const s = model.streams[sid];
+      const sharesOut = s.src[0] === src && s.src[1] === sp, sharesIn = s.dst[0] === dst && s.dst[1] === dp;
+      if (!sharesOut && !sharesIn) continue;
+      if (cand && !intersects(streamPresence(model, phases, s), cand)) continue;
+      if (sharesOut && sharesIn) return res;
+      if ((!cs.multi && sharesOut) || (!cd.multi && sharesIn)) {
+        let r = 0;
+        if (phases) {
+          if (draw.phase && draw.change === "add") r = phaseIndex(phases, draw.phase);
+          else if (!draw.phase) {
+            // no phase chosen: the new line starts in the first stage where both ends exist and the old line is also in place
+            const both = streamPresence(model, phases, { src: [src, sp], dst: [dst, dp] });
+            const ov = Array.from(streamPresence(model, phases, s)).filter((x) => both.has(x));
+            r = ov.length ? Math.min.apply(null, ov) : 0;
+          }
+        }
+        if (r > 0 && canRetire(phases, s, r)) { retire.push({ sid, r }); continue; }
+        return res;
+      }
+    }
+    if (retire.length) {
+      const r = Math.min.apply(null, retire.map((x) => x.r));
+      if (!retire.every((x) => canRetire(phases, model.streams[x.sid], r))) return res;
+      res.replace = retire.map((x) => x.sid);
+      res.at = phases[r - 1].id;
+      res.tag = draw.phase ? null : { phase: res.at, change: "add" };
+    }
+    res.ok = true;
+    return res;
+  }
+  /** Can ``s`` be retired at stage index r (it must have been in place before)? */
+  function canRetire(phases, s, r) {
+    const i = phaseIndex(phases, s.phase);
+    if (!i || s.change === "remove") return true;
+    return i < r;
+  }
+  /** Retire connection ``s`` from phase pid on. */
+  function retireStream(s, pid) {
+    if (!s.phase) { s.phase = pid; s.change = "remove"; }
+    else if (s.change === "remove") s.phase = pid;
+    else s.until = pid;
+  }
+  function canConnect(model, catalogue, src, sp, dst, dp, ctx) {
+    return portConflicts(model, catalogue, src, sp, dst, dp, ctx).ok;
   }
 
   // ------------------------------------------------------------------ icons
@@ -308,6 +443,36 @@
       <path d="M15,-38 L24,-38" stroke="#b08400" stroke-width="2"/>
       <path d="M15,28 L24,28" stroke="#b08400" stroke-width="2"/>
       <text x="0" y="40" font-size="8" text-anchor="middle" fill="#2f3a46">TEG</text>`,
+    amine_contactor: () => `
+      <rect x="-15" y="-48" width="30" height="96" rx="14" fill="url(#gV)" ${STK}/>
+      <path d="M-15,-30 L15,-30 M-15,-18 L15,-18 M-15,-6 L15,-6 M-15,6 L15,6 M-15,18 L15,18" stroke="#4d5a68" stroke-width="1"/>
+      <path d="M15,-38 L24,-38" stroke="#7a5ea8" stroke-width="2"/>
+      <path d="M15,28 L24,28" stroke="#7a5ea8" stroke-width="2"/>
+      <text x="0" y="40" font-size="8" text-anchor="middle" fill="#2f3a46">AMINE</text>`,
+    relief_valve: () => `
+      <path d="M-14,16 L-14,-2 L0,8 L14,-2 L14,16 Z M-14,-2 L-14,-14 L14,-14 L14,-2" fill="url(#gV)" ${STK}/>
+      <line x1="0" y1="-14" x2="0" y2="-22" stroke="#2f3a46" stroke-width="1.6"/>
+      <path d="M-8,-14 L8,-14 L8,-22 L-8,-22 Z" fill="none" stroke="#c0392b" stroke-width="1.4"/>
+      <path d="M-4,-18 L4,-18" stroke="#c0392b" stroke-width="1.4"/>`,
+    flare: () => `
+      <rect x="-3" y="-20" width="6" height="68" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <path d="M-9,-20 L9,-20 L5,-26 L-5,-26 Z" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <path d="M0,-50 C9,-40 8,-31 0,-27 C-8,-31 -9,-40 0,-50 Z" fill="#f2a33a" stroke="#c0392b" stroke-width="1.1"/>
+      <path d="M0,-42 C4,-37 3,-32 0,-30 C-3,-32 -4,-37 0,-42 Z" fill="#fde28a"/>`,
+    comp_splitter: () => `
+      <rect x="-18" y="-30" width="36" height="60" rx="3" fill="url(#gV)" ${STK}/>
+      <path d="M-18,0 L0,0 M0,0 L18,-20 M0,0 L18,20" stroke="#4d5a68" stroke-width="1.3" fill="none"/>
+      <text x="-2" y="-18" font-size="8" text-anchor="middle" fill="#2f3a46">SPLIT</text>`,
+    conv_reactor: () => `
+      <rect x="-15" y="-34" width="30" height="68" rx="12" fill="url(#gV)" ${STK}/>
+      <path d="M-15,-6 L15,-6 M-15,8 L15,8" stroke="#4d5a68" stroke-width="1"/>
+      <text x="0" y="-12" font-size="9" text-anchor="middle" font-weight="700" fill="#2f3a46">R</text>
+      <text x="0" y="24" font-size="7" text-anchor="middle" fill="#2f3a46">conv</text>`,
+    eq_reactor: () => `
+      <rect x="-15" y="-34" width="30" height="68" rx="12" fill="url(#gV)" ${STK}/>
+      <path d="M-15,-6 L15,-6 M-15,8 L15,8" stroke="#4d5a68" stroke-width="1"/>
+      <text x="0" y="-12" font-size="9" text-anchor="middle" font-weight="700" fill="#2f3a46">R</text>
+      <text x="0" y="24" font-size="9" text-anchor="middle" fill="#2f3a46">⇌</text>`,
     scrubber: () => `
       <path d="M-16,-40 A16,9 0 0 1 16,-40 L16,40 A16,9 0 0 1 -16,40 Z" fill="url(#gV)" ${STK}/>
       <rect x="-15.3" y="-33" width="30.6" height="7" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".8"/>
@@ -437,6 +602,41 @@
       <rect x="-3" y="-50" width="6" height="5" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
       <rect x="-3" y="44" width="6" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
       <line x1="-25" y1="50" x2="25" y2="50" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    subsea_choke: () => `
+      <path d="M-18,8 L-18,-6 L0,2 L18,-6 L18,8 L0,16 Z" fill="url(#gV)" ${STK}/>
+      <line x1="0" y1="2" x2="0" y2="-14" stroke="#2f3a46" stroke-width="1.4"/>
+      <rect x="-7" y="-19" width="14" height="6" rx="1.5" fill="#f2b33d" ${STK}/>
+      <line x1="-23" y1="8" x2="-18" y2="8" stroke="#2f3a46" stroke-width="2"/><line x1="18" y1="8" x2="23" y2="8" stroke="#2f3a46" stroke-width="2"/>`,
+    subsea_manifold: () => `
+      <rect x="-40" y="-20" width="80" height="40" rx="4" fill="#eef5fb" ${STK}/>
+      <line x1="-45" y1="0" x2="45" y2="0" stroke="#2f3a46" stroke-width="5"/>
+      <line x1="-45" y1="0" x2="45" y2="0" stroke="#7fb3e0" stroke-width="2.4"/>
+      <path d="M-28,-18 L-28,0 M-10,-18 L-10,0 M8,-18 L8,0 M26,-18 L26,0" stroke="#2f3a46" stroke-width="3" fill="none"/>
+      <path d="M-28,18 L-28,0 M-10,18 L-10,0" stroke="#2f3a46" stroke-width="3" fill="none"/>
+      <rect x="-32" y="-22" width="8" height="5" fill="#f2b33d" ${STK}/><rect x="-14" y="-22" width="8" height="5" fill="#f2b33d" ${STK}/>
+      <rect x="4" y="-22" width="8" height="5" fill="#f2b33d" ${STK}/><rect x="22" y="-22" width="8" height="5" fill="#f2b33d" ${STK}/>`,
+    mpfm: () => `
+      <path d="M-25,6 L-12,6 L-5,-2 L5,-2 L12,6 L25,6" fill="none" stroke="#2f3a46" stroke-width="5" stroke-linejoin="round"/>
+      <path d="M-25,6 L-12,6 L-5,-2 L5,-2 L12,6 L25,6" fill="none" stroke="#7fb3e0" stroke-width="2.2" stroke-linejoin="round"/>
+      <rect x="-12" y="-20" width="24" height="14" rx="3" fill="#e9eef3" ${STK}/>
+      <text x="0" y="-9.5" text-anchor="middle" font-size="8" font-weight="700" fill="#2f3a46">MPFM</text>`,
+    pig_station: () => `
+      <rect x="-34" y="-4" width="52" height="20" rx="4" fill="url(#gV)" ${STK}/>
+      <rect x="18" y="-1" width="19" height="14" fill="#eef5fb" ${STK}/>
+      <ellipse cx="-12" cy="6" rx="4" ry="8" fill="#f2b33d" ${STK}/>
+      <line x1="-34" y1="-10" x2="-34" y2="-4" stroke="#2f3a46" stroke-width="2"/>
+      <rect x="-40" y="-16" width="12" height="6" rx="2" fill="#9aa6b3" ${STK}/>`,
+    subsea_hydrocyclone: () => `
+      <rect x="-24" y="-38" width="48" height="8" rx="3" fill="url(#gV)" ${STK}/>
+      <path d="M-17,-30 L17,-30 L17,-6 L5,40 L-5,40 L-17,-6 Z" fill="url(#gV)" ${STK}/>
+      <path d="M-27,-20 L-17,-20" stroke="#2f3a46" stroke-width="3"/>
+      <path d="M-11,-22 C4,-22 10,-14 -9,-10 C8,-6 6,2 -6,4" fill="none" stroke="#2d6db5" stroke-width="1.2"/>
+      <rect x="-3" y="40" width="6" height="8" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-3" y="-48" width="6" height="10" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
+    subsea_heater: () => `
+      <rect x="-30" y="-16" width="60" height="32" rx="6" fill="#fbeee6" ${STK}/>
+      <path d="M-35,6 L-22,6 L-22,-8 L-12,-8 L-12,8 L-2,8 L-2,-8 L8,-8 L8,8 L18,8 L18,6 L35,6" fill="none" stroke="#c0392b" stroke-width="2.4" stroke-linejoin="round"/>
+      <path d="M2,-22 L-3,-16 L3,-16 L-2,-9" fill="none" stroke="#f2b33d" stroke-width="2"/>`,
     subsea_cooler: () => `
       <rect x="-30" y="-24" width="60" height="44" rx="3" fill="#eef5fb" ${STK}/>
       <path d="M-35,-16 L-22,-16 L-22,10 L-12,10 L-12,-16 L-2,-16 L-2,10 L8,10 L8,-16 L18,-16 L18,16 L35,16" fill="none"
@@ -465,12 +665,134 @@
       <rect x="-9" y="-18" width="18" height="12" rx="2" fill="#f2b33d" ${STK}/>
       <path d="M-5,-12 L5,-12" stroke="#2f3a46" stroke-width="1.2"/>`,
   };
+  // ---- v7.6 symbols ------------------------------------------------------------------------------------------
+  Object.assign(ICON, {
+    chiller: () => `
+      <circle cx="0" cy="0" r="18" fill="url(#gC)" ${STK}/>
+      <g stroke="#123f70" stroke-width="1.6" stroke-linecap="round">
+        <line x1="0" y1="-12" x2="0" y2="12"/><line x1="-10.4" y1="-6" x2="10.4" y2="6"/><line x1="-10.4" y1="6" x2="10.4" y2="-6"/>
+        <polyline points="-3,-10 0,-7 3,-10" fill="none" stroke-width="1.1"/><polyline points="-3,10 0,7 3,10" fill="none" stroke-width="1.1"/>
+      </g>`,
+    membrane: () => `
+      <path d="M-40,-16 L40,-16 A8,16 0 0 1 40,16 L-40,16 A8,16 0 0 1 -40,-16 Z" fill="url(#gH)" ${STK}/>
+      <line x1="-40" y1="0" x2="42" y2="0" stroke="#7a2e8c" stroke-width="2.2" stroke-dasharray="5 2"/>
+      <path d="M-34,-12 L34,-12 M-34,-6 L34,-6 M-34,6 L34,6 M-34,12 L34,12" stroke="#4d5a68" stroke-width=".7" stroke-dasharray="2 3"/>
+      <path d="M-8,0 L-8,6 M6,0 L6,6 M20,0 L20,6" stroke="#7a2e8c" stroke-width="1.2"/>
+      <rect x="-3" y="16" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <text x="-30" y="-19" font-size="7" fill="#4d5a68">feed</text>`,
+    mol_sieve: () => `
+      <path d="M-30,-36 A12,7 0 0 1 -6,-36 L-6,32 A12,7 0 0 1 -30,32 Z" fill="url(#gV)" ${STK}/>
+      <path d="M6,-36 A12,7 0 0 1 30,-36 L30,32 A12,7 0 0 1 6,32 Z" fill="url(#gV)" ${STK}/>
+      <rect x="-28" y="-24" width="20" height="46" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".7"/>
+      <rect x="8" y="-24" width="20" height="46" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".7"/>
+      <path d="M-18,-42 L18,-42 M-18,38 L18,38" stroke="#2f3a46" stroke-width="1.4"/>
+      <rect x="-3" y="36" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
+    gas_turbine: () => `
+      <line x1="-36" y1="0" x2="26" y2="0" stroke="#2f3a46" stroke-width="2.2"/>
+      <path d="M-36,-14 L-14,-6 L-14,6 L-36,14 Z" fill="url(#gB)" ${STK}/>
+      <line x1="-29" y1="-10" x2="-29" y2="10" stroke="#34507a" stroke-width="1"/>
+      <line x1="-22" y1="-8" x2="-22" y2="8" stroke="#34507a" stroke-width="1"/>
+      <rect x="-14" y="-12" width="14" height="24" rx="3" fill="url(#gR)" ${STK}/>
+      <path d="M-7,6 C-12,0 -6,-3 -7,-8 C-2,-4 0,2 -7,6 Z" fill="#f2a33a" stroke="#c0392b" stroke-width=".8"/>
+      <path d="M0,-6 L22,-16 L22,16 L0,6 Z" fill="url(#gR)" ${STK}/>
+      <line x1="8" y1="-9" x2="8" y2="9" stroke="#8c2a22" stroke-width="1"/>
+      <line x1="15" y1="-12" x2="15" y2="12" stroke="#8c2a22" stroke-width="1"/>
+      <circle cx="30" cy="0" r="8.5" fill="url(#gG)" ${STK}/>
+      <text x="30" y="3.6" text-anchor="middle" font-size="10" font-weight="700" fill="#17492c">G</text>
+      <rect x="-12" y="-25" width="8" height="12" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-40" y="14" width="76" height="5" rx="1" fill="url(#gMot)" stroke="#2f3a46" stroke-width="1"/>`,
+    deliquifier: () => `
+      <path d="M-18,-34 A18,10 0 0 1 18,-34 L18,30 A18,10 0 0 1 -18,30 Z" fill="url(#gV)" ${STK}/>
+      <rect x="-14" y="-26" width="28" height="8" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".8"/>
+      <g stroke="#4d5a68" stroke-width="1.6"><line x1="-9" y1="-12" x2="-9" y2="8"/><line x1="-3" y1="-12" x2="-3" y2="8"/><line x1="3" y1="-12" x2="3" y2="8"/><line x1="9" y1="-12" x2="9" y2="8"/></g>
+      <path d="M-17.3,14 L17.3,14 L17.3,30 A17.3,9.3 0 0 1 -17.3,30 Z" fill="${LIQ}"/>
+      <line x1="-17" y1="14" x2="17" y2="14" stroke="#2d6db5" stroke-width="1" stroke-dasharray="3 2"/>
+      <rect x="-3" y="-45" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-3" y="38" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-27" y="-11" width="9" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
+    phase_splitter: () => `
+      <circle cx="0" cy="0" r="22" fill="url(#gV)" ${STK}/>
+      <path d="M-21.17,6 L21.17,6 A22,22 0 0 1 -21.17,6 Z" fill="${LIQ}"/>
+      <path d="M-16.97,14 L16.97,14 A22,22 0 0 1 -16.97,14 Z" fill="${WAT}"/>
+      <line x1="-21" y1="6" x2="21" y2="6" stroke="#2d6db5" stroke-width="1" stroke-dasharray="3 2"/>
+      <line x1="-17" y1="14" x2="17" y2="14" stroke="#1d5fa6" stroke-width="1" stroke-dasharray="3 2"/>
+      <text x="0" y="-5" text-anchor="middle" font-size="9" font-weight="700" fill="#2f3a46">PS</text>
+      <rect x="-3" y="-28" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-3" y="21" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="21" y="5" width="7" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-28" y="-3" width="7" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
+    "separator:h": () => `
+      <path d="M-34,-17 L34,-17 A14,17 0 0 1 34,17 L-34,17 A14,17 0 0 1 -34,-17 Z" fill="url(#gH)" ${STK}/>
+      <path d="M-40,3 L40,3 L40,12 A13.5,16 0 0 1 34,16.6 L-34,16.6 A13.5,16 0 0 1 -40,5 Z" fill="${LIQ}"/>
+      <line x1="-44" y1="3" x2="44" y2="3" stroke="#2d6db5" stroke-width="1" stroke-dasharray="3 2"/>
+      <line x1="22" y1="-17" x2="22" y2="16" stroke="#4d5a68" stroke-width="1" stroke-dasharray="2 2"/>
+      <rect x="11" y="-23" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="29" y="16" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-48" y="-3" width="7" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
+    "scrubber:h": () => `
+      <path d="M-40,-14 L40,-14 A12,14 0 0 1 40,14 L-40,14 A12,14 0 0 1 -40,-14 Z" fill="url(#gH)" ${STK}/>
+      <rect x="2" y="-13.4" width="10" height="26.8" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".8"/>
+      <path d="M12,3 L40,3 L40,10 A12,13 0 0 1 34,13.4 L12,13.4 Z" fill="${LIQ}"/>
+      <line x1="12" y1="3" x2="44" y2="3" stroke="#2d6db5" stroke-width="1" stroke-dasharray="3 2"/>
+      <rect x="11" y="-20" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="35" y="13" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-54" y="2" width="7" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
+    "separator3:v": () => `
+      <path d="M-18,-44 A18,10 0 0 1 18,-44 L18,44 A18,10 0 0 1 -18,44 Z" fill="url(#gV)" ${STK}/>
+      <path d="M-17.3,-6 L17.3,-6 L17.3,44 A17.3,9.3 0 0 1 -17.3,44 Z" fill="${LIQ}"/>
+      <path d="M-17.3,26 L17.3,26 L17.3,44 A17.3,9.3 0 0 1 -17.3,44 Z" fill="${WAT}"/>
+      <line x1="-17" y1="-6" x2="17" y2="-6" stroke="#2d6db5" stroke-width="1" stroke-dasharray="3 2"/>
+      <line x1="-17" y1="26" x2="17" y2="26" stroke="#1d5fa6" stroke-width="1" stroke-dasharray="3 2"/>
+      <rect x="-14" y="-38" width="28" height="5" fill="url(#mesh)" stroke="#4d5a68" stroke-width=".8"/>
+      <rect x="-3" y="-56" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-3" y="49" width="6" height="7" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="-25" y="-3" width="7" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>
+      <rect x="18" y="21" width="7" height="6" fill="#9aa6b3" stroke="#2f3a46" stroke-width="1"/>`,
+  });
+
+  /** Pictograms for the installation types (about 60 x 40 units around the origin). */
+  const WAVE = '<path d="M-30,12 q5,-4 10,0 t10,0 t10,0 t10,0 t10,0 t10,0" fill="none" stroke="#2d6db5" stroke-width="1.3"/>';
+  const PLATFORM_PICTO = {
+    "Fixed jacket platform": () => `${WAVE}
+      <rect x="-20" y="-16" width="40" height="8" fill="url(#gV)" ${STK}/><rect x="-12" y="-24" width="10" height="8" fill="#e9eef3" ${STK}/>
+      <rect x="4" y="-22" width="8" height="6" fill="#e9eef3" ${STK}/><line x1="14" y1="-24" x2="14" y2="-40" stroke="#2f3a46" stroke-width="1.2"/>
+      <path d="M-16,-8 L-22,22 M16,-8 L22,22 M-16,-8 L22,22 M16,-8 L-22,22 M-19,7 L19,7" fill="none" stroke="#2f3a46" stroke-width="1.3"/>`,
+    "Gravity-based platform": () => `${WAVE}
+      <rect x="-20" y="-16" width="40" height="8" fill="url(#gV)" ${STK}/><rect x="-12" y="-24" width="10" height="8" fill="#e9eef3" ${STK}/>
+      <path d="M-12,-8 L-12,6 L-24,22 L24,22 L12,6 L12,-8 Z" fill="#cfd6dd" ${STK}/>`,
+    "Jack-up": () => `${WAVE}
+      <rect x="-22" y="-14" width="44" height="7" fill="url(#gV)" ${STK}/><rect x="-10" y="-22" width="10" height="8" fill="#e9eef3" ${STK}/>
+      <path d="M-14,-7 L-14,24 M0,-7 L0,24 M14,-7 L14,24" stroke="#2f3a46" stroke-width="1.6"/>`,
+    "Semi-submersible": () => `${WAVE}
+      <rect x="-22" y="-20" width="44" height="8" fill="url(#gV)" ${STK}/><rect x="-8" y="-28" width="10" height="8" fill="#e9eef3" ${STK}/>
+      <path d="M-15,-12 L-15,12 M15,-12 L15,12" stroke="#2f3a46" stroke-width="3"/>
+      <rect x="-26" y="12" width="52" height="7" rx="3.5" fill="url(#gB)" ${STK}/>`,
+    "FPSO": () => `${WAVE}
+      <path d="M-28,-2 L24,-2 L30,-10 L-28,-10 Z" fill="url(#gV)" ${STK}/>
+      <path d="M-30,-2 L28,-2 L22,12 L-24,12 Z" fill="url(#gB)" ${STK}/>
+      <rect x="-20" y="-18" width="8" height="8" fill="#e9eef3" ${STK}/><rect x="-6" y="-16" width="8" height="6" fill="#e9eef3" ${STK}/>
+      <rect x="10" y="-22" width="8" height="12" fill="#e9eef3" ${STK}/>`,
+    "Spar / TLP": () => `${WAVE}
+      <rect x="-20" y="-20" width="40" height="8" fill="url(#gV)" ${STK}/><rect x="-8" y="-28" width="10" height="8" fill="#e9eef3" ${STK}/>
+      <rect x="-5" y="-12" width="10" height="36" rx="3" fill="url(#gB)" ${STK}/>`,
+    "Subsea / seabed area": () => `
+      <path d="M-30,-14 q5,-4 10,0 t10,0 t10,0 t10,0 t10,0 t10,0" fill="none" stroke="#2d6db5" stroke-width="1.3"/>
+      <rect x="-14" y="6" width="28" height="12" fill="#eef2f6" ${STK}/><circle cx="-7" cy="12" r="3" fill="url(#gB)" ${STK}/>
+      <circle cx="7" cy="12" r="3" fill="url(#gB)" ${STK}/><path d="M-30,22 L30,22" stroke="#7a6a4f" stroke-width="1.4" stroke-dasharray="4 2"/>`,
+    "Onshore plant": () => `
+      <rect x="-24" y="-4" width="16" height="22" rx="3" fill="url(#gV)" ${STK}/><rect x="-4" y="2" width="14" height="16" rx="3" fill="url(#gV)" ${STK}/>
+      <rect x="14" y="-10" width="8" height="28" fill="#e9eef3" ${STK}/><line x1="-30" y1="22" x2="30" y2="22" stroke="#7a6a4f" stroke-width="1.4"/>`,
+  };
+  ICON.platform = () => `<g transform="scale(1)">${PLATFORM_PICTO["Fixed jacket platform"]()}</g>`;
+  GEOM.platform = { w: 76, h: 62, ports: {} };
+
   const ICON_TEXT = { recycle: "R", adjust: "A" };
 
   // ----------------------------------------------------------- node export
   if (typeof document === "undefined") {
     module.exports = { GEOM, portPos, energyPos, route, simplify, labelAnchor, nextName, nextStreamName,
-                       canConnect, ICON };
+                       canConnect, portConflicts, retireStream, ICON, geomOf, scaleOf, orientOf, hasOrient, extentOf, presentAt, presenceOf, phaseColor,
+                       DEFAULT_ORIENT };
     return;
   }
 
@@ -490,7 +812,12 @@
     status: "",
     fitted: false,
     armed: null,     // palette type armed for click-to-place (touch)
+    draw: "",        // phase of newly drawn items ("" = existing, "p1:add", "p1:remove")
+    ghost: true,     // stage views: show items that are not in place as faint ghosts
   };
+  const phases = () => (S.model && S.model.phases) || [];
+  const stageNow = () => (S.model && Number.isInteger(S.model.stage) ? S.model.stage : -1);
+  const EL_FIELDS = ["phase", "change", "color", "until"];
 
   const svg = document.getElementById("svg");
   const wrap = document.getElementById("canvasWrap");
@@ -502,10 +829,19 @@
   function setHeight() { post("streamlit:setFrameHeight", { height: S.height }); }
   function structure() {
     const units = {}, streams = {};
-    for (const [id, u] of Object.entries(S.model.units))
-      units[id] = { type: u.type, name: u.name, x: Math.round(u.x), y: Math.round(u.y), flip: !!u.flip };
-    for (const [id, s] of Object.entries(S.model.streams))
-      streams[id] = { name: s.name, src: s.src.slice(), dst: s.dst.slice() };
+    for (const [id, u] of Object.entries(S.model.units)) {
+      const o = { type: u.type, name: u.name, x: Math.round(u.x), y: Math.round(u.y), flip: !!u.flip };
+      if (hasOrient(u.type) && u.orient && u.orient !== DEFAULT_ORIENT[u.type]) o.orient = u.orient;
+      if (u.scale && Math.abs(u.scale - 1) > 1e-6) o.scale = Math.round(scaleOf(u) * 1000) / 1000;
+      for (const f of EL_FIELDS) if (u[f]) o[f] = u[f];
+      if (u.type === "platform") { o.w = Math.round(geomOf(u).w); o.h = Math.round(geomOf(u).h); }
+      units[id] = o;
+    }
+    for (const [id, s] of Object.entries(S.model.streams)) {
+      const o = { name: s.name, src: s.src.slice(), dst: s.dst.slice() };
+      for (const f of EL_FIELDS) if (s[f]) o[f] = s[f];
+      streams[id] = o;
+    }
     return { units, streams };
   }
   function send(event, extra) {
@@ -531,6 +867,7 @@
       S.nonce = a.nonce;
       S.model = JSON.parse(JSON.stringify(a.model || { units: {}, streams: {} }));
       for (const u of Object.values(S.model.units)) u.flip = !!u.flip;
+      S.model.phases = S.model.phases || [];
       S.selected = new Set((a.selected || []).filter((id) => S.model.units[id] || S.model.streams[id]));
       if (!S.fitted || a.fit) { S.fitted = true; requestAnimationFrame(fit); }
     }
@@ -558,7 +895,7 @@
   }
 
   // -------------------------------------------------------------- palette
-  const PAL_ORDER = ["Streams", "Separation", "Pressure change", "Rotating", "Heat transfer", "Piping",
+  const PAL_ORDER = ["Streams", "Facilities", "Separation", "Pressure change", "Rotating", "Heat transfer", "Piping",
                      "Subsea (SURF)", "Logical"];
   let paletteBuilt = "";
   function buildPalette() {
@@ -627,7 +964,8 @@
   function addUnit(type, x, y) {
     snapshot();
     const id = newId("u");
-    S.model.units[id] = { type, name: nextName(S.model, type, S.catalogue), x, y, flip: false };
+    S.model.units[id] = Object.assign({ type, name: nextName(S.model, type, S.catalogue), x, y, flip: false }, parseDraw(S.draw));
+    if (type === "platform") S.model.units[id].kind = "Fixed jacket platform";
     S.selected = new Set([id]);
     render();
     send("add", { added: id });
@@ -645,14 +983,15 @@
   // ---------------------------------------------------------------- render
   let world = null;
   function render() {
-    svg.innerHTML = DEFS;
+    svg.innerHTML = DEFS + dynDefs();
     if (S.opts.grid) el("rect", { x: -5000, y: -5000, width: 10000, height: 10000, fill: "url(#grid)",
                                   transform: `translate(${S.view.tx % (20 * S.view.k)},${S.view.ty % (20 * S.view.k)})` }, svg)
       .setAttribute("pointer-events", "none");
     const bg = el("rect", { x: 0, y: 0, width: "100%", height: "100%", fill: "transparent", id: "bg" }, svg);
     bg.addEventListener("pointerdown", onBgDown);
     world = el("g", { transform: `translate(${S.view.tx},${S.view.ty}) scale(${S.view.k})` }, svg);
-    const gLinks = el("g", {}, world), gStreams = el("g", {}, world), gUnits = el("g", {}, world);
+    const gPlat = el("g", {}, world), gLinks = el("g", {}, world), gStreams = el("g", {}, world), gUnits = el("g", {}, world);
+    for (const [id, u] of Object.entries(S.model.units)) if (u.type === "platform") drawPlatform(id, u, gPlat);
     // adjust links
     for (const [a, b] of (S.results.links || [])) {
       const ua = S.model.units[a];
@@ -665,6 +1004,7 @@
     for (const [id, s] of Object.entries(S.model.streams)) drawStream(id, s, gStreams);
     for (const [id, u] of Object.entries(S.model.units)) drawUnit(id, u, gUnits);
     document.getElementById("status").textContent = S.status;
+    syncToolbar();
     for (const b of ["bGrid", "bRes", "bEnergy"]) document.getElementById(b).classList.toggle("on",
       { bGrid: S.opts.grid, bRes: S.opts.res, bEnergy: S.opts.energy }[b]);
   }
@@ -674,30 +1014,90 @@
     if (!us || !ud) return null;
     const a = portPos(us, s.src[1]), b = portPos(ud, s.dst[1]);
     if (!a || !b) return null;
-    const gs = GEOM[us.type], gd = GEOM[ud.type];
-    return route(a, a.dir, b, b.dir, Math.max(gs.h, gd.h) / 2 + 40);
+    return route(a, a.dir, b, b.dir, Math.max(extentOf(us).h, extentOf(ud).h) / 2 + 40);
+  }
+
+  // --- phasing helpers (stage view, colours) --------------------------------------------------------------------
+  function inStage(el) { const st = stageNow(); return st < 0 || presentAt(phases(), el, st); }
+  function streamIn(s) {
+    const us = S.model.units[s.src[0]], ud = S.model.units[s.dst[0]];
+    return inStage(s) && (!us || inStage(us)) && (!ud || inStage(ud));
+  }
+  /** colour of a stream: its own, else the colour of an end that is part of a project phase */
+  function streamColor(s) {
+    const c = phaseColor(phases(), s);
+    if (c) return c;
+    for (const end of [s.src[0], s.dst[0]]) {
+      const u = S.model.units[end];
+      const cu = u && u.type !== "feed" && u.type !== "product" ? phaseColor(phases(), u) : null;
+      if (cu) return cu;
+    }
+    const f = S.model.units[s.src[0]], pr = S.model.units[s.dst[0]];
+    return (f && f.type === "feed" && phaseColor(phases(), f)) || (pr && pr.type === "product" && phaseColor(phases(), pr)) || null;
+  }
+  function hexRgb(c) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(c || "");
+    if (!m) return [90, 90, 90];
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  const ckey = (c) => String(c).replace("#", "");
+  /** duotone filters and arrow heads for every colour in use */
+  function dynDefs() {
+    const cols = new Set();
+    for (const u of Object.values(S.model.units)) { const c = phaseColor(phases(), u); if (c) cols.add(c); }
+    for (const t of Object.values(S.model.streams)) { const c = streamColor(t); if (c) cols.add(c); }
+    let out = "<defs>";
+    for (const c of cols) {
+      const [r, g, b] = hexRgb(c);
+      const dk = [r, g, b].map((v) => (v * 0.30 / 255).toFixed(3)), lt = [r, g, b].map((v) => ((v + (255 - v) * 0.80) / 255).toFixed(3));
+      out += `<filter id="tint_${ckey(c)}" color-interpolation-filters="sRGB" x="-5%" y="-5%" width="110%" height="110%">` +
+        `<feColorMatrix type="matrix" values=".3 .59 .11 0 0  .3 .59 .11 0 0  .3 .59 .11 0 0  0 0 0 1 0"/>` +
+        `<feComponentTransfer><feFuncR type="table" tableValues="${dk[0]} ${lt[0]}"/><feFuncG type="table" tableValues="${dk[1]} ${lt[1]}"/>` +
+        `<feFuncB type="table" tableValues="${dk[2]} ${lt[2]}"/></feComponentTransfer></filter>` +
+        `<marker id="mk_${ckey(c)}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">` +
+        `<path d="M0,0 L10,5 L0,10 z" fill="${c}"/></marker>`;
+    }
+    return out + "</defs>";
+  }
+  function badge(el) {
+    const i = phaseIndex(phases(), el.phase);
+    return i ? (el.change === "remove" ? "−P" : "+P") + i : "";
+  }
+  function phaseTitle(el) {
+    const i = phaseIndex(phases(), el.phase);
+    if (!i) return "";
+    const u = el.change !== "remove" ? phaseIndex(phases(), el.until) : 0;
+    return "\n" + (el.change === "remove" ? "Removed in " : "Added in ") + (phases()[i - 1].name || "phase " + i) +
+           (u > i ? ", removed in " + (phases()[u - 1].name || "phase " + u) : "");
   }
 
   function drawStream(id, s, parent) {
     const pts = streamPoints(s);
     if (!pts) return;
+    const present = streamIn(s);
+    if (!present && !S.ghost) return;
     const r = (S.results.streams || {})[id] || {};
-    const solved = !!r.solved;
+    const solved = !!r.solved && present;
     const sel = S.selected.has(id);
+    const col = streamColor(s);
     const d = "M" + pts.map((p) => p.x + "," + p.y).join(" L");
-    const g = el("g", { "data-id": id }, parent);
-    const hit = el("path", { d, class: "streamhit" }, g);
-    el("path", { d, class: "stream", stroke: sel ? "var(--sel)" : solved ? "var(--mat)" : "var(--mat-uns)",
-                 "stroke-width": sel ? 3 : 2,
-                 "marker-end": `url(#${sel ? "mSel" : solved ? "mMat" : "mUns"})` }, g);
-    const t = el("title", {}, g); t.textContent = s.name + (r.tip ? "\n" + r.tip : "");
+    const g = el("g", { "data-id": id, class: present ? "" : "ghost" }, parent);
+    el("path", { d, class: "streamhit" }, g);
+    const attrs = { d, class: "stream", stroke: sel ? "var(--sel)" : col ? col : solved ? "var(--mat)" : "var(--mat-uns)",
+                    "stroke-width": sel ? 3 : 2,
+                    "marker-end": `url(#${sel ? "mSel" : col ? "mk_" + ckey(col) : solved ? "mMat" : "mUns"})` };
+    if (col) attrs["stroke-dasharray"] = s.change === "remove" || (!s.phase && (S.model.units[s.src[0]] || {}).change === "remove") ? "3 4" : "9 4";
+    el("path", attrs, g);
+    const t = el("title", {}, g); t.textContent = s.name + (r.tip ? "\n" + r.tip : "") + phaseTitle(s);
     const us = S.model.units[s.src[0]], ud = S.model.units[s.dst[0]];
     const terminal = us.type === "feed" || ud.type === "product";
-    if (!terminal) {
+    if (!terminal && present) {
       const la = labelAnchor(pts);
       const tx = el("text", { x: la.x + (la.horiz ? 0 : 6), y: la.y + (la.horiz ? -5 : 4), class: "slabel",
                               "text-anchor": la.horiz ? "middle" : "start" }, g);
-      tx.textContent = s.name + (r.warn ? "  ❄" : "");
+      tx.textContent = s.name + (r.warn ? "  ❄" : "") + (badge(s) ? "  " + badge(s) : "");
+      if (col) tx.setAttribute("style", "fill:" + col);
       if (r.warn) { tx.setAttribute("fill", "var(--warn)"); tx.setAttribute("style", "fill:var(--warn)"); }
       // conditions only where the segment is long enough to carry them (hover shows them anyway)
       const fits = !!r.label && (la.horiz ? la.len >= r.label.length * 5.4 + 12 : la.len >= 40);
@@ -710,22 +1110,94 @@
     g.addEventListener("pointerdown", (ev) => onItemDown(ev, id, "stream"));
   }
 
+  function drawPlatform(id, u, parent) {
+    const present = inStage(u);
+    if (!present && !S.ghost) return;
+    const g = geomOf(u), k = scaleOf(u), w = g.w, h = g.h;
+    const col = phaseColor(phases(), u) || "#3b6a8f";
+    const grp = el("g", { class: "unit platform" + (present ? "" : " ghost"), "data-id": id,
+                          transform: `translate(${u.x},${u.y}) scale(${k})` }, parent);
+    el("rect", { x: -w / 2, y: -h / 2, width: w, height: h, rx: 12, fill: col, "fill-opacity": 0.06, stroke: col,
+                 "stroke-width": 1.8, "stroke-dasharray": u.change === "remove" ? "3 4" : "10 5", "pointer-events": "none" }, grp);
+    // header strip (grab area), the frame line (grab area) - the inside stays click-through so equipment can be picked
+    el("rect", { x: -w / 2, y: -h / 2, width: w, height: 32, rx: 12, fill: col, "fill-opacity": 0.15 }, grp);
+    el("rect", { x: -w / 2, y: -h / 2, width: w, height: h, rx: 12, fill: "none", stroke: "transparent", "stroke-width": 14,
+                 "pointer-events": "stroke" }, grp);
+    const pic = el("g", { transform: `translate(${-w / 2 + 36},${-h / 2 + 17}) scale(.5)` }, grp);
+    pic.innerHTML = (PLATFORM_PICTO[u.kind] || PLATFORM_PICTO["Fixed jacket platform"])();
+    const nm = el("text", { x: -w / 2 + 70, y: -h / 2 + 15, class: "ulabel platname", "text-anchor": "start" }, grp);
+    nm.textContent = u.name + (badge(u) ? "  " + badge(u) : "");
+    nm.setAttribute("style", "text-anchor:start;fill:" + col);
+    const sub = [u.kind || "", u.note || ""].filter(Boolean).join(" · ");
+    if (sub) {
+      const t2 = el("text", { x: -w / 2 + 70, y: -h / 2 + 27, class: "rlabel", "text-anchor": "start", style: "text-anchor:start" }, grp);
+      t2.textContent = sub;
+    }
+    const tt = el("title", {}, grp); tt.textContent = u.name + (sub ? "\n" + sub : "") + phaseTitle(u);
+    if (S.selected.has(id)) {
+      el("rect", { x: -w / 2 - 6, y: -h / 2 - 6, width: w + 12, height: h + 12, rx: 14, class: "selbox" }, grp);
+      const grip = el("rect", { x: w / 2 - 12, y: h / 2 - 12, width: 18, height: 18, rx: 3, class: "grip" }, grp);
+      grip.addEventListener("pointerdown", (ev) => startResize(ev, id));
+    }
+    grp.addEventListener("pointerdown", (ev) => { if (!ev.target.classList.contains("grip")) onItemDown(ev, id, "unit"); });
+  }
+
+  function startResize(ev, id) {
+    ev.stopPropagation(); ev.preventDefault();
+    const u = S.model.units[id], g0 = geomOf(u), k = scaleOf(u);
+    const w0 = toWorld(ev.clientX, ev.clientY);
+    snapshot();
+    const move = (e) => {
+      const w = toWorld(e.clientX, e.clientY);
+      u.w = Math.max(120, Math.round((g0.w + 2 * (w.x - w0.x) / k) / 10) * 10);
+      u.h = Math.max(100, Math.round((g0.h + 2 * (w.y - w0.y) / k) / 10) * 10);
+      render();
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      send("move");
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
   function drawUnit(id, u, parent) {
-    const g = GEOM[u.type] || { w: 40, h: 40, ports: {} };
+    if (u.type === "platform") return;                   // drawn in the area layer underneath
+    const present = inStage(u);
+    if (!present && !S.ghost) return;
+    const g = geomOf(u), k = scaleOf(u);
     const r = (S.results.units || {})[id] || {};
-    const grp = el("g", { class: "unit", "data-id": id, transform: `translate(${u.x},${u.y})` }, parent);
-    const st = r.status;
-    if (st && st !== "ok") {
-      const col = st === "error" ? "#d0342c" : st === "warning" ? "#e39a17" : "#e8c21b";
+    const col = phaseColor(phases(), u);
+    const grp = el("g", { class: "unit" + (present ? "" : " ghost"), "data-id": id,
+                          transform: `translate(${u.x},${u.y})` + (k !== 1 ? ` scale(${k})` : "") }, parent);
+    const st = present ? r.status : null;
+    if (st && st !== "ok" && st !== "inactive") {
+      const c2 = st === "error" ? "#d0342c" : st === "warning" ? "#e39a17" : "#e8c21b";
       el("rect", { x: -g.w / 2 - 5, y: -g.h / 2 - 5, width: g.w + 10, height: g.h + 10, rx: 6, class: "statusbox",
-                   stroke: col, fill: st === "error" ? "rgba(208,52,44,.07)" : "rgba(232,194,27,.08)" }, grp);
+                   stroke: c2, fill: st === "error" ? "rgba(208,52,44,.07)" : "rgba(232,194,27,.08)" }, grp);
     }
     const body = el("g", { transform: u.flip ? "scale(-1,1)" : "" }, grp);
-    body.innerHTML = ICON[u.type] ? ICON[u.type]() : `<rect x="-20" y="-20" width="40" height="40" fill="#ccc"/>`;
+    if (col) body.setAttribute("filter", `url(#tint_${ckey(col)})`);
+    const key = geomKey(u);
+    body.innerHTML = ICON[key] ? ICON[key]() : (ICON[u.type] ? ICON[u.type]() : `<rect x="-20" y="-20" width="40" height="40" fill="#ccc"/>`);
     if (ICON_TEXT[u.type]) {
       const t = el("text", { x: 0, y: 5.5, "text-anchor": "middle", "font-size": 15, "font-weight": 700, fill: "#fff",
                              "pointer-events": "none" }, grp);
       t.textContent = ICON_TEXT[u.type];
+    }
+    if (col) {                                           // project phase: dashed frame in the phase colour, badge, strike-through if removed
+      el("rect", { x: -g.w / 2 - 4, y: -g.h / 2 - 4, width: g.w + 8, height: g.h + 8, rx: 6, fill: "none", stroke: col,
+                   "stroke-width": 1.6, "stroke-dasharray": u.change === "remove" ? "3 3" : "7 3", "pointer-events": "none" }, grp);
+      if (u.change === "remove")
+        el("path", { d: `M${-g.w / 2 - 2},${-g.h / 2 - 2} L${g.w / 2 + 2},${g.h / 2 + 2} M${g.w / 2 + 2},${-g.h / 2 - 2} L${-g.w / 2 - 2},${g.h / 2 + 2}`,
+                     stroke: col, "stroke-width": 1.4, opacity: 0.7, "pointer-events": "none" }, grp);
+      const bd = badge(u);
+      if (bd) {
+        const tb = el("text", { x: g.w / 2 + 4, y: -g.h / 2 - 7, "text-anchor": "end", "font-size": 9.5, "font-weight": 700,
+                                "pointer-events": "none" }, grp);
+        tb.textContent = bd; tb.setAttribute("style", "fill:" + col);
+      }
     }
     // invisible hit area
     el("rect", { x: -g.w / 2, y: -g.h / 2, width: g.w, height: g.h, fill: "transparent" }, grp);
@@ -736,20 +1208,20 @@
     if (g.energy && g.energy[2] === "D") ly += 6;
     const isTerm = u.type === "feed" || u.type === "product";
     // horizontal 3-phase vessels have nozzles underneath: put their labels above, clear of the vapour nozzle
-    const above = u.type === "separator3";
+    const above = u.type === "separator3" && orientOf(u) === "h";
     const lx = above ? (u.flip ? -28 : 28) : 0;
     const anchor = above ? (u.flip ? "start" : "end") : "middle";
     const lab = el("text", { x: lx, y: isTerm ? -12 : (above ? -g.h / 2 - 20 : ly), class: "ulabel",
                              "text-anchor": anchor }, grp);
     lab.textContent = u.name;
-    if (r.label && !isTerm) {
+    if (r.label && !isTerm && present) {
       const sub = el("text", { x: lx, y: above ? -g.h / 2 - 8 : ly + 12, class: "rlabel", "text-anchor": anchor }, grp);
       sub.textContent = r.label;
     }
-    if (isTerm && S.opts.res) {
+    if (isTerm && S.opts.res && present) {
       // terminal streams show their conditions next to the arrow
-      const sid = Object.keys(S.model.streams).find((k) => {
-        const s = S.model.streams[k]; return s.src[0] === id || s.dst[0] === id;
+      const sid = Object.keys(S.model.streams).find((k2) => {
+        const s2 = S.model.streams[k2]; return s2.src[0] === id || s2.dst[0] === id;
       });
       const rr = sid && (S.results.streams || {})[sid];
       if (rr && rr.label) {
@@ -758,9 +1230,9 @@
         if (rr.warn) t.setAttribute("style", "fill:var(--warn)");
       }
     }
-    const tt = el("title", {}, grp); tt.textContent = u.name + (r.tip ? "\n" + r.tip : "");
+    const tt = el("title", {}, grp); tt.textContent = u.name + (r.tip ? "\n" + r.tip : "") + phaseTitle(u);
     // energy stream
-    if (S.opts.energy && r.energy && r.energy.length) drawEnergy(u, r.energy, grp);
+    if (S.opts.energy && r.energy && r.energy.length && present) drawEnergy(u, r.energy, grp);
     // ports
     for (const [pn, p] of Object.entries(g.ports)) {
       const fx = u.flip ? -1 : 1;
@@ -776,7 +1248,7 @@
   }
 
   function drawEnergy(u, list, grp) {
-    const g = GEOM[u.type];
+    const g = geomOf(u);
     const slots = g.energies || (g.energy ? [g.energy] : []);
     for (const en of list) {
       const e = slots[en.slot || 0];
@@ -816,7 +1288,18 @@
     if (additive) { S.selected.has(id) ? S.selected.delete(id) : S.selected.add(id); }
     else if (!S.selected.has(id)) S.selected = new Set([id]);
     const start = toWorld(ev.clientX, ev.clientY);
-    const moving = kind === "unit" ? Array.from(S.selected).filter((k) => S.model.units[k]) : [];
+    let moving = kind === "unit" ? Array.from(S.selected).filter((k) => S.model.units[k]) : [];
+    if (!ev.altKey) {                      // an installation frame carries its equipment (Alt = move the frame alone)
+      const extra = new Set(moving);
+      for (const k of moving) {
+        const pu = S.model.units[k];
+        if (pu.type !== "platform") continue;
+        const e = extentOf(pu);
+        for (const [k2, u2] of Object.entries(S.model.units))
+          if (u2.type !== "platform" && Math.abs(u2.x - pu.x) <= e.w / 2 && Math.abs(u2.y - pu.y) <= e.h / 2) extra.add(k2);
+      }
+      moving = Array.from(extra);
+    }
     const orig = {};
     for (const k of moving) orig[k] = { x: S.model.units[k].x, y: S.model.units[k].y };
     drag = { kind: "move", start, orig, moved: false, snapTaken: false };
@@ -860,8 +1343,8 @@
       if (hitEl && hitEl.classList && hitEl.classList.contains("port")) {
         const tid = hitEl.parentNode.getAttribute("data-id");
         const tport = hitEl.getAttribute("data-port"), tdir = hitEl.getAttribute("data-dir");
-        const ok = tdir !== dir && (dir === "out" ? canConnect(S.model, S.catalogue, uid, port, tid, tport)
-                                                  : canConnect(S.model, S.catalogue, tid, tport, uid, port));
+        const ok = tdir !== dir && (dir === "out" ? canConnect(S.model, S.catalogue, uid, port, tid, tport, phCtx())
+                                                  : canConnect(S.model, S.catalogue, tid, tport, uid, port, phCtx()));
         if (ok) { hitEl.classList.add("hot"); target = { id: tid, port: tport }; }
       }
     };
@@ -874,13 +1357,25 @@
       const dist = Math.hypot(w.x - p.x, w.y - p.y);
       const under = document.elementFromPoint(e.clientX, e.clientY);
       const onPort = !!(under && under.classList && under.classList.contains("port"));
-      if (!target && onPort) { hint("Those ports cannot be connected"); render(); return; }
+      if (!target && onPort) {
+        hint(phases().length && !parseDraw(S.draw).phase
+          ? "That port is in use by a connection that is in place today: choose 'New in Phase n' in the toolbar to replace it from that phase"
+          : "Those ports cannot be connected");
+        render(); return;
+      }
       if (target) {
         snapshot();
         const sid = newId("s");
         const src = dir === "out" ? [uid, port] : [target.id, target.port];
         const dst = dir === "out" ? [target.id, target.port] : [uid, port];
-        S.model.streams[sid] = { name: terminalName(src, dst) || nextStreamName(S.model), src, dst };
+        const pc = portConflicts(S.model, S.catalogue, src[0], src[1], dst[0], dst[1], phCtx());
+        const dr = parseDraw(S.draw);
+        for (const old of pc.replace) retireStream(S.model.streams[old], pc.at);
+        if (pc.replace.length) {
+          const pn = (phases().find((x) => x.id === pc.at) || {}).name || pc.at;
+          hint("The new line replaces the existing connection from " + pn + " on");
+        }
+        S.model.streams[sid] = Object.assign({ name: terminalName(src, dst) || nextStreamName(S.model), src, dst }, parseDraw(S.draw), pc.tag || {});
         S.selected = new Set([sid]);
         render(); send("connect");
       } else if (dist > 25) {
@@ -893,10 +1388,10 @@
         const type = dir === "out" ? "product" : "feed";
         const tid = newId("u");
         const nm = nextName(S.model, type, S.catalogue);
-        S.model.units[tid] = { type, name: nm, x: snap(w.x), y: snap(w.y), flip: false };
+        S.model.units[tid] = Object.assign({ type, name: nm, x: snap(w.x), y: snap(w.y), flip: false }, parseDraw(S.draw));
         const sid = newId("s");
-        S.model.streams[sid] = dir === "out" ? { name: nm, src: [uid, port], dst: [tid, "in"] }
-                                             : { name: nm, src: [tid, "out"], dst: [uid, port] };
+        S.model.streams[sid] = Object.assign(dir === "out" ? { name: nm, src: [uid, port], dst: [tid, "in"] }
+                                                           : { name: nm, src: [tid, "out"], dst: [uid, port] }, parseDraw(S.draw));
         S.selected = new Set([tid]);
         render(); send("connect");
       } else render();
@@ -904,6 +1399,8 @@
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   }
+
+  function phCtx() { return { phases: phases(), draw: S.draw }; }
 
   function terminalName(src, dst) {
     const us = S.model.units[src[0]], ud = S.model.units[dst[0]];
@@ -961,6 +1458,15 @@
 
   svg.addEventListener("wheel", (ev) => {
     ev.preventDefault();
+    if (ev.altKey) {                                     // Alt + wheel over an element: zoom that element only
+      const host = ev.target && ev.target.closest ? ev.target.closest(".unit") : null;
+      const id = host && host.getAttribute("data-id");
+      if (id && S.model.units[id]) {
+        const ids = S.selected.has(id) ? Array.from(S.selected).filter((k) => S.model.units[k]) : [id];
+        scaleUnits(ids, ev.deltaY < 0 ? 1.1 : 1 / 1.1);
+        return;
+      }
+    }
     zoomAt(ev.clientX, ev.clientY, ev.deltaY < 0 ? 1.12 : 1 / 1.12);
   }, { passive: false });
 
@@ -980,7 +1486,7 @@
     if (!us.length || !r.width) { S.view = { tx: 40, ty: 40, k: 1 }; render(); return; }
     let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
     for (const u of us) {
-      const g = GEOM[u.type] || { w: 40, h: 40 };
+      const g = extentOf(u);
       const padx = (u.type === "feed" || u.type === "product") ? 110 : 50;
       x1 = Math.min(x1, u.x - g.w / 2 - padx); x2 = Math.max(x2, u.x + g.w / 2 + padx);
       y1 = Math.min(y1, u.y - g.h / 2 - 40); y2 = Math.max(y2, u.y + g.h / 2 + 70);
@@ -1004,6 +1510,13 @@
     hint(ids.length + " object(s) copied - Ctrl+V to paste");
     return true;
   }
+  /** fields that describe how an element looks / which project phase it belongs to (copied with it) */
+  function appearance(u) {
+    const o = {};
+    for (const f of EL_FIELDS) if (u[f]) o[f] = u[f];
+    for (const f of ["orient", "scale", "kind", "note", "w", "h"]) if (u[f] !== undefined && u[f] !== "") o[f] = u[f];
+    return o;
+  }
   function pasteClipboard() {
     if (!clipboard || !clipboard.units.length) return;
     snapshot();
@@ -1012,13 +1525,13 @@
       const id = newId("u");
       map[old] = id;
       copies[id] = old;
-      S.model.units[id] = { type: u.type, name: nextName(S.model, u.type, S.catalogue), x: u.x + 40, y: u.y + 40,
-                            flip: !!u.flip };
+      S.model.units[id] = Object.assign({ type: u.type, name: nextName(S.model, u.type, S.catalogue), x: u.x + 40, y: u.y + 40,
+                                          flip: !!u.flip }, appearance(u));
     }
     for (const s of clipboard.streams) {
       const sid = newId("s");
       const src = [map[s.src[0]], s.src[1]], dst = [map[s.dst[0]], s.dst[1]];
-      S.model.streams[sid] = { name: terminalName(src, dst) || nextStreamName(S.model), src, dst };
+      S.model.streams[sid] = Object.assign({ name: terminalName(src, dst) || nextStreamName(S.model), src, dst }, appearance(s));
     }
     // shift the clipboard so repeated pastes cascade
     for (const pair of clipboard.units) { pair[1].x += 40; pair[1].y += 40; }
@@ -1048,6 +1561,92 @@
     for (const k of ids) S.model.units[k].flip = !S.model.units[k].flip;
     render(); send("move");
   }
+  // ---- v7.6: element zoom, vessel orientation, project phase and colour of the selection ---------------------------
+  let sendTimer = null, scaleSnapAt = 0;
+  function sendSoon(ev) { clearTimeout(sendTimer); sendTimer = setTimeout(() => send(ev), 350); }
+  function scaleUnits(ids, f, absolute) {
+    ids = ids.filter((k) => S.model.units[k]);
+    if (!ids.length) return;
+    if (Date.now() - scaleSnapAt > 1500) snapshot();            // one undo step for a burst of wheel notches
+    scaleSnapAt = Date.now();
+    for (const k of ids) {
+      const u = S.model.units[k];
+      u.scale = absolute ? absolute : Math.round(Math.min(MAX_SCALE, Math.max(MIN_SCALE, scaleOf(u) * f)) * 100) / 100;
+    }
+    render(); sendSoon("move");
+  }
+  function sizeSelection(f, absolute) { scaleUnits(Array.from(S.selected), f, absolute); }
+  function orientSelection() {
+    const ids = Array.from(S.selected).filter((k) => S.model.units[k] && hasOrient(S.model.units[k].type));
+    if (!ids.length) { hint("Select a separator or scrubber, then press Orient (O) to turn it vertical / horizontal"); return; }
+    snapshot();
+    for (const k of ids) {
+      const u = S.model.units[k], def = DEFAULT_ORIENT[u.type];
+      u.orient = orientOf(u) === def ? (def === "v" ? "h" : "v") : def;
+    }
+    render(); send("move");
+  }
+  function applyPhase(val) {
+    S.draw = val;
+    const ids = Array.from(S.selected).filter((k) => S.model.units[k] || S.model.streams[k]);
+    if (!ids.length) { hint(val ? "New items are now drawn as " + val.replace(":", " / ") : "New items are drawn as existing"); render(); return; }
+    snapshot();
+    const d = parseDraw(val);
+    for (const k of ids) {
+      const e = S.model.units[k] || S.model.streams[k];
+      delete e.phase; delete e.change;
+      Object.assign(e, d);
+    }
+    render(); send("move");
+  }
+  function applyColor(c, commit) {
+    const ids = Array.from(S.selected).filter((k) => S.model.units[k] || S.model.streams[k]);
+    if (!ids.length) return;
+    if (commit) snapshot();
+    for (const k of ids) { const e = S.model.units[k] || S.model.streams[k]; if (c) e.color = c; else delete e.color; }
+    render(); if (commit) send("move");
+  }
+  let phaseSig = "";
+  function syncToolbar() {
+    const sel = document.getElementById("selPhase");
+    if (!sel || !sel.options) return;
+    const ph = phases();
+    const sig = JSON.stringify(ph.map((p) => [p.id, p.name]));
+    if (sig !== phaseSig) {
+      phaseSig = sig;
+      sel.innerHTML = "";
+      const add = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); };
+      add("", "Existing (in place today)");
+      for (const p of ph) { add(p.id + ":add", "＋ " + p.name + " — new"); add(p.id + ":remove", "− " + p.name + " — removed"); }
+    }
+    const els = Array.from(S.selected).map((k) => S.model.units[k] || S.model.streams[k]).filter(Boolean);
+    let val = S.draw;
+    if (els.length) {
+      const vals = new Set(els.map((e) => (e.phase ? e.phase + ":" + (e.change === "remove" ? "remove" : "add") : "")));
+      val = vals.size === 1 ? Array.from(vals)[0] : null;
+    }
+    if (val !== null && !Array.from(sel.options).some((o) => o.value === val)) val = "";
+    sel.selectedIndex = val === null ? -1 : Array.from(sel.options).findIndex((o) => o.value === val);
+    const ci = document.getElementById("inColor");
+    const first = els.find((e) => e.color) || (els[0] && { color: phaseColor(ph, els[0]) });
+    if (ci && first && first.color && /^#[0-9a-f]{6}$/i.test(first.color)) ci.value = first.color;
+    document.getElementById("bGhost").classList.toggle("on", S.ghost);
+    document.getElementById("bGhost").style.display = stageNow() >= 0 ? "" : "none";
+    const lg = document.getElementById("legend");
+    if (lg) {
+      if (!ph.length) { lg.style.display = "none"; }
+      else {
+        const st = stageNow();
+        const name = st < 0 ? "Design view — all phases" : st === 0 ? "Today (before any phase)" : "After " + (ph[st - 1] || {}).name;
+        lg.style.display = "block";
+        lg.innerHTML = `<b>${escapeXml(name)}</b><br>` +
+          `<span class="chip" style="border-color:#8a97a6"></span>existing &nbsp;` +
+          ph.map((p, i) => `<span class="chip" style="background:${p.color || PHASE_COLORS[i % PHASE_COLORS.length]}"></span>${escapeXml(p.name)}`).join(" &nbsp;") +
+          `<br><span class="dim">dashed frame = new (＋) or to be removed (−)</span>`;
+      }
+    }
+  }
+
   function undo() {
     const last = S.undo.pop();
     if (!last) return;
@@ -1092,6 +1691,15 @@
 
   document.getElementById("bDelete").onclick = deleteSelection;
   document.getElementById("bFlip").onclick = flipSelection;
+  document.getElementById("bOrient").onclick = orientSelection;
+  document.getElementById("bSzUp").onclick = () => sizeSelection(1.15);
+  document.getElementById("bSzDn").onclick = () => sizeSelection(1 / 1.15);
+  document.getElementById("bSz1").onclick = () => sizeSelection(1, 1);
+  document.getElementById("selPhase").onchange = (e) => applyPhase(e.target.value);
+  document.getElementById("inColor").oninput = (e) => applyColor(e.target.value, false);
+  document.getElementById("inColor").onchange = (e) => applyColor(e.target.value, true);
+  document.getElementById("bColorClr").onclick = () => applyColor(null, true);
+  document.getElementById("bGhost").onclick = () => { S.ghost = !S.ghost; render(); };
   document.getElementById("bDup").onclick = duplicateSelection;
   document.getElementById("bUndo").onclick = undo;
   document.getElementById("bZin").onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.2); };
@@ -1107,6 +1715,9 @@
     if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelection(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
     else if (e.key.toLowerCase() === "f" && !e.ctrlKey && !e.metaKey) flipSelection();
+    else if (e.key.toLowerCase() === "o" && !e.ctrlKey && !e.metaKey) orientSelection();
+    else if ((e.key === "+" || e.key === "=") && !e.ctrlKey && !e.metaKey) sizeSelection(1.15);
+    else if ((e.key === "-" || e.key === "_") && !e.ctrlKey && !e.metaKey) sizeSelection(1 / 1.15);
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") { copySelection(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") { e.preventDefault(); pasteClipboard(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateSelection(); }

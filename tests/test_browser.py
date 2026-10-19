@@ -41,6 +41,12 @@ for n, f in EXAMPLES.items():
     st.session_state.model, st.session_state.sol = m, sol
     st.session_state.sol_hash, st.session_state.solve_error = S.model_hash(m), None
     payload[n] = {"model": S.canvas_structure(m), "results": S.results_payload(), "status": S.status_line()}
+_pn = next(n for n in EXAMPLES if n.startswith("Phasing (v7.6)"))
+m0 = EXAMPLES[_pn]()
+m0["stage"] = 0
+st.session_state.model, st.session_state.sol = m0, solve(m0)
+st.session_state.sol_hash, st.session_state.solve_error = S.model_hash(m0), None
+STAGE0 = {"model": S.canvas_structure(m0), "results": S.results_payload(), "status": S.status_line()}
 CAT = S.catalogue_payload()
 from ui import units as UN   # noqa: E402
 UN.set_system(UN.FIELD)
@@ -97,6 +103,13 @@ for i, (n, d) in enumerate(payload.items()):
     pg.screenshot(path=os.path.join(OUT, f"example_{i}.png"))
 
 
+pg.evaluate("a=>window.render(a)", {"model": STAGE0["model"], "catalogue": CAT, "results": STAGE0["results"], "nonce": 40,
+                                    "height": 720, "status": STAGE0["status"], "fit": True, "selected": []})
+time.sleep(0.5)
+ng = frame.evaluate("document.querySelectorAll('g.unit.ghost').length")
+c.check("stage 'today': the future compressor is drawn as a ghost", ng >= 1, ng)
+c.check("stage 'today': legend says today", "Today" in frame.evaluate("document.getElementById('legend').textContent"), "")
+pg.screenshot(path=os.path.join(OUT, "stage_today.png"))
 pg.evaluate("a=>window.render(a)", {"model": FIELD_PAYLOAD["model"], "catalogue": CAT, "results": FIELD_PAYLOAD["results"],
                                     "nonce": 50, "height": 720, "status": FIELD_PAYLOAD["status"], "fit": True})
 time.sleep(0.5)
@@ -122,6 +135,7 @@ def centre(loc):
 
 
 def drop(ptype, x, y):
+    fr.locator(f'.pal[data-type="{ptype}"]').scroll_into_view_if_needed()   # (the palette scrolls)
     sx, sy = centre(fr.locator(f'.pal[data-type="{ptype}"]'))
     pg.mouse.move(sx, sy)
     pg.mouse.down()

@@ -80,51 +80,72 @@ def phase_envelope(fp, z, T_min_C=-120.0, T_max_C=300.0, P_max=200.0, nT=56, nP=
     return Ts - 273.15, Ps, grid
 
 
-def _envelope_traces(fig, T_C, P, grid, quality=True):
-    T_C, P = _arr("°C", T_C), _arr("bar(a)", P)
-    g = np.nan_to_num(grid, nan=1.0)
-    two = np.where((g > 1e-6) & (g < 1 - 1e-6), 1.0, np.nan)
-    fig.add_trace(go.Heatmap(x=T_C, y=P, z=two, colorscale=[[0, _alpha(TEAL, .10)], [1, _alpha(TEAL, .10)]],
-                             showscale=False, hoverinfo="skip", name="Two-phase region"))
+def _envelope_traces(fig, tr, quality=True, label_quality=True):
+    """Draw a traced envelope: shaded two-phase region, dew (orange) and bubble (blue) lines as smooth curves, the critical
+    point, cricondenbar / cricondentherm and (optional) lines of constant vapour fraction."""
+    uT, uP = U.uT(), U.uP()
+    hov = f"%{{x:.1f}} {uT} · %{{y:.2f}} {uP}<extra></extra>"
+    path = tr.get("path") or []
+    if len(path) > 3:
+        xs = [U.T(t - 273.15) for t, _ in path]
+        ys = [U.P(p) for _, p in path]
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode="none", fill="toself", fillcolor=_alpha(TEAL, .10), hoverinfo="skip",
+                                 name="Two-phase region", showlegend=True))
     if quality:
-        fig.add_trace(go.Contour(x=T_C, y=P, z=g, contours=dict(start=0.25, end=0.75, size=0.25, coloring="none",
-                                                                showlabels=True, labelfont=dict(size=10, color=GREY)),
-                                 line=dict(color=GREY, width=1, dash="dot"), showscale=False,
-                                 name="Vapour fraction 0.25 / 0.5 / 0.75", hoverinfo="skip", showlegend=True))
-    fig.add_trace(go.Contour(x=T_C, y=P, z=g, contours=dict(start=1e-4, end=1e-4, size=1, coloring="none"),
-                             line=dict(color=BLUE, width=2.5), showscale=False, name="Bubble-point line",
-                             hoverinfo="skip", showlegend=True))
-    fig.add_trace(go.Contour(x=T_C, y=P, z=g, contours=dict(start=0.9999, end=0.9999, size=1, coloring="none"),
-                             line=dict(color=ORANGE, width=2.5), showscale=False, name="Dew-point line",
-                             hoverinfo="skip", showlegend=True))
+        first = True
+        for b, line in sorted((tr.get("isopleths") or {}).items()):
+            fig.add_trace(go.Scatter(x=[U.T(t - 273.15) for t, _ in line], y=[U.P(p) for _, p in line], mode="lines",
+                                     line=dict(color=GREY, width=1, dash="dot"), name="Vapour fraction",
+                                     legendgroup="vf", showlegend=first, hovertemplate=f"vapour fraction {b:.2f}<br>" + hov))
+            first = False
+            if label_quality and len(line) > 8:
+                pc = (tr.get("critical") or tr.get("cricondenbar") or (0.0, max(p_ for _, p_ in line)))[1]
+                k = min(range(len(line)), key=lambda i_: abs(line[i_][1] - {0.1: 0.18, 0.25: 0.34, 0.5: 0.42, 0.75: 0.5, 0.9: 0.58}.get(round(b, 2), 0.4) * pc))
+                fig.add_trace(go.Scatter(x=[U.T(line[k][0] - 273.15)], y=[U.P(line[k][1])], mode="text", text=[f"{b * 100:.0f} %"],
+                                         textfont=dict(size=10, color=GREY), showlegend=False, hoverinfo="skip"))
+    for key, col, lab in (("bubble", BLUE, "Bubble-point line"), ("dew", ORANGE, "Dew-point line")):
+        pts = tr.get(key) or []
+        if len(pts) > 1:
+            fig.add_trace(go.Scatter(x=[U.T(t - 273.15) for t, _ in pts], y=[U.P(p) for _, p in pts], mode="lines", name=lab,
+                                     line=dict(color=col, width=2.6), hovertemplate=lab + "<br>" + hov))
+    cr = tr.get("critical")
+    if cr:
+        fig.add_trace(go.Scatter(x=[U.T(cr[0] - 273.15)], y=[U.P(cr[1])], mode="markers", name="Critical point",
+                                 marker=dict(size=11, symbol="diamond", color="#FFFFFF", line=dict(color=INK, width=2)),
+                                 hovertemplate="Critical point<br>" + hov))
 
 
-def envelope_figure(T_C, P, grid, points=(), title="Phase envelope", trace=None):
+def envelope_figure(tr, points=(), title="Phase envelope", ranges=None, quality=True):
+    """Envelope from a traced dict (``procsim.envelope.trace_envelope``).  ``ranges`` = (Tmin, Tmax, Pmax) in °C / bar(a)."""
     fig = go.Figure()
-    _envelope_traces(fig, T_C, P, grid)
-    if trace:
-        for key, col, lab in (("bubble", BLUE, "Bubble points (traced)"), ("dew", ORANGE, "Dew points (traced)")):
-            pts = trace.get(key) or []
-            if pts:
-                fig.add_trace(go.Scatter(x=[U.T(t - 273.15) for t, _ in pts], y=[U.P(p) for _, p in pts],
-                                         mode="markers", name=lab, marker=dict(size=6, color=col),
-                                         hovertemplate=f"%{{x:.1f}} {U.uT()} · %{{y:.1f}} {U.uP()}<extra></extra>"))
-        for key, sym, lab in (("cricondenbar", "triangle-up", "Cricondenbar"), ("cricondentherm", "triangle-right",
-                                                                                  "Cricondentherm")):
-            v = trace.get(key)
-            if v:
-                fig.add_trace(go.Scatter(x=[U.T(v[0] - 273.15)], y=[U.P(v[1])], mode="markers+text", text=[lab],
-                                         textposition="top right", name=lab,
-                                         marker=dict(size=13, symbol=sym, color=INK, line=dict(color="#FFFFFF", width=1.5)),
-                                         hovertemplate=f"{lab}: %{{x:.1f}} {U.uT()} · %{{y:.1f}} {U.uP()}<extra></extra>"))
+    _envelope_traces(fig, tr, quality)
+    for key, sym, lab in (("cricondenbar", "triangle-up", "Cricondenbar"), ("cricondentherm", "triangle-right", "Cricondentherm")):
+        v = tr.get(key)
+        if v:
+            fig.add_trace(go.Scatter(x=[U.T(v[0] - 273.15)], y=[U.P(v[1])], mode="markers+text", text=[lab],
+                                     textposition="top left" if key == "cricondentherm" else "top right", name=lab,
+                                     marker=dict(size=13, symbol=sym, color=INK, line=dict(color="#FFFFFF", width=1.5)),
+                                     hovertemplate=f"{lab}: %{{x:.1f}} {U.uT()} · %{{y:.1f}} {U.uP()}<extra></extra>"))
     if points:
         fig.add_trace(go.Scatter(x=[U.T(p[1]) for p in points], y=[U.P(p[2]) for p in points], mode="markers+text",
                                  text=[p[0] for p in points], textposition="top center",
                                  marker=dict(size=10, color=INK, line=dict(color="#FFFFFF", width=2)),
                                  name="Stream", hovertemplate=f"%{{text}}<br>%{{x:.1f}} {U.uT()} · %{{y:.1f}} {U.uP()}"
                                                               "<extra></extra>"))
-    return _style(fig, title, "Peng-Robinson; shaded = two-phase region", xaxis=dict(_AXIS, title=f"Temperature [{U.uT()}]"),
-                  yaxis=dict(_AXIS, title=f"Pressure [{U.uP()}]"))
+    xa, ya = dict(_AXIS, title=f"Temperature [{U.uT()}]"), dict(_AXIS, title=f"Pressure [{U.uP()}]")
+    if ranges:                                   # the window requested, trimmed to the envelope (and the stream point)
+        path = tr.get("path") or []
+        Ts = [t - 273.15 for t, _ in path] + [p_[1] for p_ in points]
+        Ps = [p for _, p in path] + [p_[2] for p_ in points]
+        t_lo, t_hi, p_hi = ranges[0], ranges[1], ranges[2]
+        if Ts:
+            t_lo, t_hi = max(t_lo, min(Ts) - 12.0), min(t_hi, max(Ts) + 25.0)
+            p_hi = min(p_hi, 1.12 * max(Ps))
+        if t_hi > t_lo and p_hi > 0:
+            xa["range"] = [U.T(t_lo), U.T(t_hi)]
+            ya["range"] = [0, U.P(p_hi)]
+    meth = "traced by continuation" if tr.get("method") == "continuation" else "bisection on the phase count"
+    return _style(fig, title, f"Peng-Robinson, hydrocarbon phases ({meth}); shaded = two-phase region", xaxis=xa, yaxis=ya)
 
 
 def flow_assurance_figure(env, trajectory, hydrate_curves, title="Flow assurance: P–T trajectory"):
@@ -134,7 +155,7 @@ def flow_assurance_figure(env, trajectory, hydrate_curves, title="Flow assurance
     hydrate_curves: list of (label, P array, T array, dashed)."""
     fig = go.Figure()
     if env is not None:
-        _envelope_traces(fig, *env, quality=False)
+        _envelope_traces(fig, env, quality=False)
     uT, uP = U.uT(), U.uP()
     for k, (label, Ph, Th, dashed) in enumerate(hydrate_curves):
         fig.add_trace(go.Scatter(x=_arr("°C", Th), y=_arr("bar(a)", Ph), mode="lines", name=label,
@@ -802,6 +823,18 @@ COMP_GROUPS = [("N₂ + CO₂ + H₂S", ("N2", "CO2", "H2S", "O2", "H2")), ("C1"
                ("C7+", ("nC7", "nC8", "nC9", "nC10")), ("Water + inhibitors", ("H2O", "MEG", "MeOH"))]
 
 
+def _group_of(c):
+    """Group label of a fluid component for the stacked composition bars (library keys first, then by family / size)."""
+    for label, members in COMP_GROUPS:
+        if c.key in members:
+            return label
+    if c.family == "hypo" or (c.family == "hydrocarbon" and c.MW >= 98.0):
+        return "C7+"
+    if c.family in ("hydrocarbon",) and c.MW < 98.0:
+        return "C5–C6" if c.MW >= 70.0 else "C3–C4"
+    return "Other"
+
+
 def composition_figure(model, sol, sids, basis="mole"):
     """Stacked horizontal bars: grouped composition of selected streams (fixed group order and colours)."""
     fp = sol.fp
@@ -813,19 +846,15 @@ def composition_figure(model, sol, sids, basis="mole"):
         z = st_.z * (fp.MW if basis == "mass" else 1.0)
         z = z / z.sum()
         fracs.append(z)
+    labels = [g for g, _ in COMP_GROUPS] + ["Other"]
+    of = [_group_of(c) for c in fp.comps]
     fig = go.Figure()
-    for g, (label, members) in enumerate(COMP_GROUPS):
-        vals = []
-        for z in fracs:
-            v = sum(z[fp.index(k)] for k in members if k in fp.keys)
-            # hypothetical cuts join C7+
-            if label == "C7+":
-                v += sum(z[i] for i, c in enumerate(fp.comps) if c.family == "hypo")
-            vals.append(100 * v)
+    for g, label in enumerate(labels):
+        vals = [100 * sum(float(z[i]) for i in range(fp.n) if of[i] == label) for z in fracs]
         if max(vals) <= 1e-9:
             continue
         fig.add_trace(go.Bar(y=names, x=vals, orientation="h", name=label,
-                             marker=dict(color=colors[g], line=dict(color="#FFFFFF", width=2)),
+                             marker=dict(color=(_alpha(INK, .55) if label == "Other" else colors[g % len(colors)]), line=dict(color="#FFFFFF", width=2)),
                              hovertemplate="%{y} · " + label + ": %{x:.2f} %<extra></extra>"))
     return _style(fig, "Stream compositions", f"Grouped, {basis} %", barmode="stack", bargap=0.35,
                   height=max(320, 110 + 42 * len(sids)),
@@ -990,6 +1019,89 @@ def erosion_figure(rows, sand_kg_d):
                   xaxis=dict(_AXIS, title=""), yaxis=dict(_AXIS, title="Erosion rate [mm/y]"), height=380)
 
 
+def emulsion_figure(row):
+    """Apparent viscosity of the oil-water mixture against water cut, with the inversion and the operating point."""
+    c = row["curve"]
+    xs = [100.0 * w for w in c["wc"]]
+    fig = go.Figure(go.Scatter(x=xs, y=c["mu"], mode="lines", name="Apparent viscosity", line=dict(color=TEAL, width=2.5),
+                               hovertemplate="%{x:.0f} % water: %{y:.3g} cP<extra></extra>"))
+    fig.add_vline(x=100.0 * c["inv"], line=dict(color=GREY, width=1.2, dash="dash"),
+                  annotation_text="inversion", annotation_position="top")
+    mu_now = row["Apparent viscosity [cP]"]
+    fig.add_trace(go.Scatter(x=[100.0 * c["now"]], y=[mu_now], mode="markers", name="Operating point",
+                             marker=dict(size=12, color=ORANGE), hovertemplate="%{x:.1f} %: %{y:.3g} cP<extra></extra>"))
+    return _style(fig, f"{row['Line']} — oil-water viscosity", "Brinkman dispersion, continuous phase swaps at the inversion",
+                  xaxis=dict(_AXIS, title="Water cut [vol %]"), yaxis=dict(_AXIS, title="Apparent viscosity [cP]"),
+                  height=360)
+
+
+def sizing_figure(rows, rec, P_min):
+    """Pipe-size sweep: steel mass (bars) and arrival pressure (line) against the inside diameter."""
+    ids = [r["ID [mm]"] for r in rows]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=ids, y=[r["Steel [t/km]"] for r in rows], name="Steel [t/km]",
+                         marker=dict(color=["#BFD9DB" if r["Feasible"] else "#E9C9BE" for r in rows], cornerradius=4),
+                         hovertemplate="%{x:.0f} mm: %{y:.1f} t/km<extra></extra>"))
+    arr = [(r["ID [mm]"], r["Arrival P [bar(a)]"]) for r in rows if r["Arrival P [bar(a)]"] is not None]
+    if arr:
+        fig.add_trace(go.Scatter(x=[a for a, _ in arr], y=[U.value("bar(a)", b, "Arrival P [bar(a)]") for _, b in arr],
+                                 name="Arrival pressure", mode="lines+markers", yaxis="y2",
+                                 line=dict(color=TEAL, width=2.5), hovertemplate="%{x:.0f} mm: %{y:.1f}<extra></extra>"))
+        fig.add_hline(y=U.value("bar(a)", P_min, "Arrival P [bar(a)]"), line=dict(color=ORANGE, width=1.5, dash="dash"),
+                      yref="y2", annotation_text="minimum arrival P", annotation_position="top left")
+    if rec:
+        fig.add_trace(go.Scatter(x=[rec["ID [mm]"]], y=[rec["Steel [t/km]"]], mode="markers", name="Recommended",
+                                 marker=dict(size=15, color="rgba(0,0,0,0)", line=dict(color=ORANGE, width=3)),
+                                 hoverinfo="skip"))
+    return _style(fig, "Flowline inside diameter", "Pale bars meet every limit; the ring marks the smallest that does",
+                  xaxis=dict(_AXIS, title="Inside diameter [mm]", type="category"),
+                  yaxis=dict(_AXIS, title="Steel [t/km]"),
+                  yaxis2=dict(overlaying="y", side="right", showgrid=False, title=f"Arrival pressure [{U.uP()}]"),
+                  height=400)
+
+
+def gaslift_figure(curves, alloc_rows):
+    """Oil rate against lift-gas rate per well, with the present and optimal operating points."""
+    fig = go.Figure()
+    for i, c in enumerate(curves):
+        col = SERIES[i % len(SERIES)]
+        pts = sorted((p[0], p[1]) for p in c["points"])
+        fig.add_trace(go.Scatter(x=[p[0] for p in pts], y=[p[1] for p in pts], mode="markers", name=c["Well"],
+                                 marker=dict(size=7, color=col), legendgroup=c["Well"],
+                                 hovertemplate=c["Well"] + ": %{x:.2f} MSm³/d → %{y:.0f} Sm³/d<extra></extra>"))
+        fig.add_trace(go.Scatter(x=[p[0] for p in c["curve"]], y=[p[1] for p in c["curve"]], mode="lines",
+                                 line=dict(color=col, width=2), showlegend=False, legendgroup=c["Well"], hoverinfo="skip"))
+    if alloc_rows:
+        fig.add_trace(go.Scatter(x=[r["Optimal lift gas [MSm³/d]"] for r in alloc_rows],
+                                 y=[r["Oil at the optimum [Sm³/d]"] for r in alloc_rows], mode="markers", name="Optimal split",
+                                 marker=dict(size=13, color="rgba(0,0,0,0)", line=dict(color=ORANGE, width=2.5)),
+                                 hovertemplate="%{x:.2f} MSm³/d → %{y:.0f} Sm³/d<extra></extra>"))
+    return _style(fig, "Gas-lift performance", "Oil rate at the present wellhead pressure; lines are the concave envelopes",
+                  xaxis=dict(_AXIS, title="Lift gas [MSm³/d]"), yaxis=dict(_AXIS, title="Oil rate [Sm³/d]"), height=400)
+
+
+def esp_figure(opts):
+    """Pump options: efficiency against Q/Q_bep, one marker per series and frequency."""
+    fig = go.Figure()
+    for i, o in enumerate(opts):
+        fig.add_trace(go.Bar(x=[f"{o['Series']} · {o['Frequency [Hz]']:g} Hz"], y=[o["Pump efficiency [%]"]],
+                             marker=dict(color=SERIES[i % len(SERIES)], cornerradius=4), showlegend=False,
+                             text=[f"{o['Stages']} st · {o['Motor [kW]']} kW"], textposition="outside", cliponaxis=False,
+                             hovertemplate="%{x}: %{y:.1f} %<extra></extra>"))
+    return _style(fig, "ESP options", "Pump efficiency at the intake flow; stages and motor size on the bars",
+                  xaxis=dict(_AXIS, title=""), yaxis=dict(_AXIS, title="Pump efficiency [%]", rangemode="tozero"), height=360)
+
+
+def network_figure(nodes, pipes):
+    """Pressure at each node, ordered by pressure."""
+    ns = sorted(nodes, key=lambda n: -n["Pressure [bar(a)]"])
+    fig = go.Figure(go.Bar(x=[n["Node"] for n in ns], y=[U.value("bar(a)", n["Pressure [bar(a)]"], "Pressure [bar(a)]") for n in ns],
+                           marker=dict(color=TEAL, cornerradius=4), showlegend=False,
+                           hovertemplate="%{x}: %{y:.1f}<extra></extra>"))
+    return _style(fig, "Node pressures", None, xaxis=dict(_AXIS, title=""),
+                  yaxis=dict(_AXIS, title=f"Pressure [{U.uP()}]", rangemode="tozero"), height=340)
+
+
 def route_figure(route, name):
     """Flowline route: water depth along the route (depth increasing downwards), low points marked."""
     pts = sorted((float(a), float(b)) for a, b in route)
@@ -1006,3 +1118,214 @@ def route_figure(route, name):
     return _style(fig, f"{name} — route", "Low points collect liquid (slugging, hydrates, corrosion)",
                   xaxis=dict(_AXIS, title="Distance along the route [km]"),
                   yaxis=dict(_AXIS, title=f"Water depth [{uL}]", autorange="reversed"), height=360)
+
+
+# ---- prognosis (v7) -----------------------------------------------------------------------------------------
+
+def strategy_figure(strat, kind):
+    """Left: NPV and recovery factor of each drainage option at its best well count (bars). Right: the production
+    profile of each option."""
+    rows, prof = strat["rows"], strat.get("profiles") or {}
+    gas = kind == "Gas"
+    key = "Gas [MSm³/d]" if gas else "Oil/condensate [Sm³/d]"
+    uR = U.unit("MSm³/d") if gas else U.unit("Sm³/d", "Std liq")
+    fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.12, column_widths=[0.45, 0.55],
+                        subplot_titles=("NPV at the best well count [MUSD]", f"Production rate [{uR}]"))
+    labels = [f"{r['Strategy']} ({r['Best wells']} wells)" for r in rows]
+    best = strat.get("best") or [None, None]
+    cols = [TEAL if r["Strategy"] == best[0] else GREY for r in rows]
+    fig.add_trace(go.Bar(y=labels, x=[r["NPV [MUSD]"] for r in rows], orientation="h", name="NPV", showlegend=False,
+                         marker=dict(color=cols, cornerradius=3),
+                         customdata=[[r["Recovery factor [%]"]] for r in rows],
+                         hovertemplate="%{y}<br>NPV %{x:,.0f} MUSD<br>RF %{customdata[0]:.1f} %<extra></extra>"),
+                  row=1, col=1)
+    for k, r in enumerate(rows):
+        a = prof.get(r["Strategy"]) or []
+        if not a:
+            continue
+        fig.add_trace(go.Scatter(x=[x["Year"] for x in a],
+                                 y=[U.value("MSm³/d", x[key]) if gas else U.value("Sm³/d", x[key], "Std liq") for x in a],
+                                 mode="lines", name=r["Strategy"], line=dict(color=SERIES[k % len(SERIES)], width=2.5),
+                                 hovertemplate="Year %{x}: %{y:,.3g}<extra>" + r["Strategy"] + "</extra>"), row=1, col=2)
+    fig.update_yaxes(autorange="reversed", row=1, col=1)
+    fig.update_xaxes(title="Year", row=1, col=2)
+    return _style_subplots(fig, "Drainage strategies", "Each option at its highest-NPV well count", height=420)
+
+
+def uncertainty_figure(unc):
+    """Left: NPV range per well count (P90-P10 whiskers, P50 and expected value). Right: P90 / P50 / P10 production."""
+    rows = unc["rows"]
+    gas = unc.get("kind") == "Gas"
+    uR = U.unit("MSm³/d") if gas else U.unit("Sm³/d", "Std liq")
+    fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.12, column_widths=[0.5, 0.5],
+                        subplot_titles=("NPV by well count: P90 - P50 - P10 [MUSD]",
+                                        f"Production rate for {unc['best']} wells [{uR}]"))
+    x = [r["Wells"] for r in rows]
+    p50 = [r["NPV P50 [MUSD]"] for r in rows]
+    fig.add_trace(go.Scatter(x=x, y=p50, mode="markers", name="P50",
+                             error_y=dict(type="data", symmetric=False,
+                                          array=[r["NPV P10 [MUSD]"] - r["NPV P50 [MUSD]"] for r in rows],
+                                          arrayminus=[r["NPV P50 [MUSD]"] - r["NPV P90 [MUSD]"] for r in rows],
+                                          color=TEAL, thickness=2.5, width=8),
+                             marker=dict(size=9, color=TEAL),
+                             hovertemplate="%{x} wells: P50 %{y:,.0f}<extra></extra>"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=x, y=[r["Expected NPV [MUSD]"] for r in rows], mode="lines+markers", name="Expected",
+                             line=dict(color=ORANGE, width=2, dash="dash"), marker=dict(size=7, symbol="diamond"),
+                             hovertemplate="%{x} wells: expected %{y:,.0f}<extra></extra>"), row=1, col=1)
+    fig.add_hline(y=0, line=dict(color=GREY, width=1, dash="dot"), row=1, col=1)
+    b = unc.get("bands") or {}
+    if b:
+        yrs = list(range(1, len(b["P50"]) + 1))
+        cv = (lambda v: U.value("MSm³/d", v)) if gas else (lambda v: U.value("Sm³/d", v, "Std liq"))
+        fig.add_trace(go.Scatter(x=yrs, y=[cv(v) for v in b["P10"]], mode="lines", line=dict(width=0), showlegend=False,
+                                 hoverinfo="skip"), row=1, col=2)
+        fig.add_trace(go.Scatter(x=yrs, y=[cv(v) for v in b["P90"]], mode="lines", line=dict(width=0),
+                                 fill="tonexty", fillcolor="rgba(0,144,154,0.2)", name="P90 - P10", hoverinfo="skip"),
+                      row=1, col=2)
+        fig.add_trace(go.Scatter(x=yrs, y=[cv(v) for v in b["P50"]], mode="lines", name="P50",
+                                 line=dict(color=TEAL, width=2.5),
+                                 hovertemplate="Year %{x}: %{y:,.3g}<extra>P50</extra>"), row=1, col=2)
+    fig.update_xaxes(title="Producing wells", dtick=1, row=1, col=1)
+    fig.update_xaxes(title="Year", row=1, col=2)
+    return _style_subplots(fig, "Uncertainty", f"{unc['n']} samples per well count", height=420)
+
+
+# ---- debottlenecking (v7.1) ---------------------------------------------------------------------------------
+
+def utilisation_figure(rows):
+    """Horizontal bars of the capacity utilisation of every checked item, with the 100 % limit."""
+    rr = sorted(rows, key=lambda r: r["Utilisation [%]"])
+    lab = [f"{r['Unit']}: {r['Check']}" for r in rr]
+    val = [r["Utilisation [%]"] for r in rr]
+    col = [CRITICAL if v > 100 else (ORANGE if v >= 90 else TEAL) for v in val]
+    fig = go.Figure(go.Bar(y=lab, x=val, orientation="h", marker=dict(color=col, cornerradius=3), showlegend=False,
+                           hovertemplate="%{y}: %{x:.0f} %<extra></extra>"))
+    fig.add_vline(x=100, line=dict(color=INK, width=1.5, dash="dash"))
+    _style(fig, "Capacity utilisation", "100 % is the limit of each item", height=max(280, 34 * len(rr) + 130))
+    fig.update_xaxes(title="Utilisation [% of the limit]", rangemode="tozero")
+    return fig
+
+
+def capacity_sweep_figure(sw):
+    """Utilisation of each check against the throughput factor; the 100 % line is the limit."""
+    fig = go.Figure()
+    xs = sw["factors"]
+    for k, r in enumerate(sw["series"]):
+        ys = r["util"]
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers", name=f"{r['Unit']}: {r['Check']}",
+                                 line=dict(color=SERIES[k % len(SERIES)], width=2.2 if k < 3 else 1.4),
+                                 marker=dict(size=6), connectgaps=False,
+                                 hovertemplate="%{x:.2f} × : %{y:.0f} %<extra>" + r["Unit"] + "</extra>"))
+    fig.add_hline(y=100, line=dict(color=INK, width=1.5, dash="dash"))
+    fig.add_vline(x=1.0, line=dict(color=GREY, width=1, dash="dot"))
+    _style(fig, "Throughput sweep", "The first line to cross 100 % is the bottleneck", height=440)
+    fig.update_xaxes(title="Throughput [× present rate]")
+    fig.update_yaxes(title="Utilisation [%]", rangemode="tozero")
+    return fig
+
+
+def profile_figure(times, series, time_unit, failed=()):
+    """Stacked panels (one per quantity, own y-axis) against time for a profile run.  series: {label: [values]};
+    failed: times of steps that did not solve (marked on the axis)."""
+    names = list(series)[:6]
+    n = max(1, len(names))
+    fig = make_subplots(rows=n, cols=1, shared_xaxes=True, vertical_spacing=min(0.08, 0.5 / n),
+                        subplot_titles=[s.split(" | ")[-1] if s.startswith("Overall") else s for s in names])
+    for i, lab in enumerate(names, start=1):
+        ys = [None if v is None else float(v) for v in series[lab]]
+        fig.add_trace(go.Scatter(x=list(times), y=ys, mode="lines+markers", name=lab, showlegend=False,
+                                 line=dict(color=SERIES[(i - 1) % len(SERIES)], width=2.5, shape="hv"),
+                                 marker=dict(size=7),
+                                 hovertemplate="t = %{x:.4g} " + time_unit + " → %{y:.5g}<extra></extra>"), row=i, col=1)
+    if failed:
+        fig.add_trace(go.Scatter(x=list(failed), y=[0] * len(failed), mode="markers", name="step not solved",
+                                 marker=dict(symbol="x", size=11, color=CRITICAL), yaxis="y",
+                                 hovertemplate="step at %{x:.4g} did not solve<extra></extra>"), row=1, col=1)
+    _style_subplots(fig, "Profile results", f"one steady-state solve per time step; time in {time_unit}",
+                    height=max(360, 190 * n + 90))
+    fig.update_xaxes(title_text=f"Time [{time_unit}]", row=n, col=1)
+    return fig
+
+
+def dynamic_figure(times, series, time_unit, events=()):
+    """Stacked panels (one per quantity, own y-axis) against time for a dynamic run; events are marked as dotted
+    vertical lines.  series: {label: [values]}; times already in ``time_unit``; events: [(time in the same unit, text)]."""
+    names = list(series)[:6]
+    n = max(1, len(names))
+    fig = make_subplots(rows=n, cols=1, shared_xaxes=True, vertical_spacing=min(0.07, 0.5 / n), subplot_titles=names)
+    for i, lab in enumerate(names, start=1):
+        ys = [None if v is None else float(v) for v in series[lab]]
+        fig.add_trace(go.Scatter(x=list(times), y=ys, mode="lines", name=lab, showlegend=False,
+                                 line=dict(color=SERIES[(i - 1) % len(SERIES)], width=2.4),
+                                 hovertemplate="t = %{x:.5g} " + time_unit + " → %{y:.5g}<extra></extra>"), row=i, col=1)
+    for t, txt in list(events)[:12]:
+        fig.add_vline(x=t, line=dict(color=GREY, width=1, dash="dot"))
+    _style_subplots(fig, "Dynamic results", f"time in {time_unit}" + (" - dotted lines mark the events" if events else ""),
+                    height=max(360, 190 * n + 90))
+    fig.update_xaxes(title_text=f"Time [{time_unit}]", row=n, col=1)
+    return fig
+
+
+def composite_figure(res):
+    """Hot and cold composite curves (actual temperatures) and the grand composite curve (shifted temperatures)."""
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("Composite curves", "Grand composite curve (shifted)"),
+                        horizontal_spacing=0.12)
+    uq, ut = U.unit("kW", power=False), U.uT()
+    hc, cc, gr = res.get("hot_curve"), res.get("cold_curve"), res.get("grand")
+    if hc:
+        fig.add_trace(go.Scatter(x=[U.value("kW", q, power=False) for q in hc["Q"]], y=[U.T(t) for t in hc["T"]],
+                                 mode="lines+markers", name="Hot streams (to cool)", line=dict(color=ORANGE, width=2.4),
+                                 marker=dict(size=6)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=[U.value("kW", q, power=False) for q in cc["Q"]], y=[U.T(t) for t in cc["T"]],
+                                 mode="lines+markers", name="Cold streams (to heat)", line=dict(color=BLUE, width=2.4),
+                                 marker=dict(size=6)), row=1, col=1)
+    if gr:
+        fig.add_trace(go.Scatter(x=[U.value("kW", q, power=False) for q in gr["Q"]], y=[U.T(t) for t in gr["T"]],
+                                 mode="lines", name="Grand composite", line=dict(color=TEAL, width=2.4), showlegend=False),
+                      row=1, col=2)
+    fig.update_xaxes(title_text="Heat flow [" + uq + "]", row=1, col=1, **{k: v for k, v in _AXIS.items() if k != "title"})
+    fig.update_xaxes(title_text="Net heat flow [" + uq + "]", row=1, col=2, **{k: v for k, v in _AXIS.items() if k != "title"})
+    fig.update_yaxes(title_text="T [" + ut + "]", **{k: v for k, v in _AXIS.items() if k != "title"})
+    return _style_subplots(fig, "Heat integration targets",
+                           f"ΔTmin {res['dTmin']:.0f} K — pinch at {res['pinch']:.0f} °C (shifted)" if res.get("pinch") is not None else "No pinch (one-sided problem)",
+                           height=430)
+
+
+def calibration_figure(res):
+    """Standardised residuals before / after calibration (error divided by the measurement σ), fit and validation rows."""
+    rows = [r for r in res["rows"] if r["z before"] is not None and r["z after"] is not None]
+    labels = [f"{r['Case']} · {r['Object']} · {r['Quantity']}" + (" (val.)" if r["Use"] == "validation" else "") for r in rows]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(y=labels, x=[r["z before"] for r in rows], orientation="h", name="Before", marker=dict(color=GREY, cornerradius=3)))
+    fig.add_trace(go.Bar(y=labels, x=[r["z after"] for r in rows], orientation="h", name="After", marker=dict(color=TEAL, cornerradius=3)))
+    fig.add_vline(x=2, line=dict(color=AXIS, dash="dot"))
+    fig.add_vline(x=-2, line=dict(color=AXIS, dash="dot"))
+    return _style(fig, "Model − plant, in measurement σ", "Within ±2 σ the model agrees with the plant (dotted lines)",
+                  height=max(320, 90 + 26 * len(rows)), barmode="group", bargap=0.3,
+                  xaxis=dict(_AXIS, title="(model − measured) / σ"), yaxis=dict(_AXIS, autorange="reversed", title=""))
+
+
+def parity_figure(res, quantity):
+    """Model against measurement for one quantity (before and after)."""
+    rows = [r for r in res["rows"] if r["Quantity"] == quantity and r["Before"] is not None and r["After"] is not None]
+    fig = go.Figure()
+    allv = [r["Measured"] for r in rows] + [r["Before"] for r in rows] + [r["After"] for r in rows]
+    if allv:
+        lo, hi = min(allv), max(allv)
+        pad = 0.05 * (hi - lo or abs(hi) or 1.0)
+        fig.add_trace(go.Scatter(x=[lo - pad, hi + pad], y=[lo - pad, hi + pad], mode="lines", name="model = plant",
+                                 line=dict(color=AXIS, dash="dash")))
+    fig.add_trace(go.Scatter(x=[r["Measured"] for r in rows], y=[r["Before"] for r in rows], mode="markers", name="Before",
+                             marker=dict(color=GREY, size=9, symbol="circle-open")))
+    fig.add_trace(go.Scatter(x=[r["Measured"] for r in rows], y=[r["After"] for r in rows], mode="markers", name="After",
+                             marker=dict(color=TEAL, size=9)))
+    return _style(fig, quantity, "Model against plant", height=330, xaxis=dict(_AXIS, title="Measured"), yaxis=dict(_AXIS, title="Model"))
+
+
+def optimiser_figure(res):
+    h = [x for x in res["history"] if x["objective"] is not None]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=list(range(1, len(h) + 1)), y=[x["objective"] for x in h], mode="lines+markers", name="Objective",
+                             line=dict(color=TEAL, width=2.4), marker=dict(size=6)))
+    return _style(fig, "Optimiser history", "Every point is one flowsheet solve", height=300,
+                  xaxis=dict(_AXIS, title="Evaluation"), yaxis=dict(_AXIS, title="Objective"))

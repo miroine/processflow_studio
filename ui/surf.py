@@ -11,9 +11,10 @@ from procsim import surf
 from procsim import subsea_design as sd
 from procsim import subsea_ops as so
 from procsim import flowassure as FA
+from procsim import flowassure2 as FA2
 from procsim.flowsheet import port_edges
 
-from .state import sol_is_current, bump, SHORT, fmt, qfmt
+from .state import sol_is_current, bump, SHORT, fmt, qfmt, valid_choice
 from . import charts
 from . import units as U
 
@@ -368,6 +369,7 @@ def screening_panel(model, sol):
                "held (well deliverability is not re-evaluated); an optional boost raises the inlet pressure at "
                "constant temperature (ideal booster). Screening only.")
     c = st.columns([2, 2, 2, 1.4, 1.4])
+    valid_choice("tb_fl", fls)
     fl_name = c[0].selectbox("Flowline", list(fls), key="tb_fl")
     dist_txt = c[1].text_input("Distances [km]", value="5, 15, 30, 50, 75", key="tb_dist")
     rate_txt = c[2].text_input("Rate factors [× current]", value="0.5, 1, 1.5", key="tb_rates")
@@ -482,6 +484,7 @@ def turndown_panel(model, sol):
                "severe riser-base slugging. The window is the continuous feasible range around the current rate; the "
                "ramp-up sweep-out is the liquid inventory at minimum rate minus that at maximum rate.")
     c = st.columns([2, 3, 1.6])
+    valid_choice("td_fl", fls)
     fl_name = c[0].selectbox("Flowline", list(fls), key="td_fl")
     rate_txt = c[1].text_input("Rate factors [× current]", value="0.1, 0.2, 0.35, 0.5, 0.7, 0.85, 1, 1.2, 1.4", key="td_rates")
     P_min = c[2].number_input(f"Min. arrival P [{U.uP()}]", value=float(U.P(40.0)), min_value=0.0, key="td_pmin",
@@ -682,6 +685,149 @@ def waxsand_panel(model, sol):
         st.plotly_chart(charts.erosion_figure(et, float(wp["sand_kg_d"])), width="stretch", key="ero_fig")
 
 
+
+def _set_fa2(key, wkey):
+    ss = st.session_state
+    ss.model.setdefault("fa2", {})[key] = ss[wkey]
+
+
+def _fa2_inputs(basis, items, ncol=4, tag=""):
+    ss = st.session_state
+    v = ss.widget_ver
+    cols = st.columns(ncol)
+    for i, (key, lab, kw) in enumerate(items):
+        wk = f"fa2_{key}{tag}_{v}"
+        cols[i % ncol].number_input(lab, value=float(basis[key]), key=wk, format="%.4g", on_change=_set_fa2,
+                                    args=(key, wk), **kw)
+
+
+def _fa2_frame(rows, drop=("uid", "curve")):
+    df = pd.DataFrame([{k: (None if isinstance(x, float) and math.isinf(x) else x) for k, x in r.items()
+                        if k not in drop} for r in rows])
+    return U.df_display(df)
+
+
+def regime_panel(model, sol):
+    ss = st.session_state
+    st.caption("OLGA-style steady-state screening next to the Beggs & Brill line model: a mechanistic flow regime and "
+               "holdup, CO₂ corrosion, oil-water emulsion viscosity, liquid loading, pigging, line pack, insulation "
+               "for a target cool-down time and a PVT table export. None of these is a transient simulation; the "
+               "methods are listed in the help and in docs/VALIDATION.md.")
+    b = FA2.settings(model)
+    (t_reg, t_cor, t_emu, t_load, t_pig, t_pack, t_ins, t_pvt) = st.tabs(
+        ["Flow regime", "CO₂ corrosion", "Emulsion", "Liquid loading", "Pigging", "Line pack", "Insulation", "PVT table"])
+    with t_reg:
+        _fa2_inputs(b, [("sigma", "Surface tension [N/m]", {"min_value": 0.001, "max_value": 0.2})])
+        rows = FA2.mechanistic_table(model, sol, float(b["sigma"]))
+        if not rows:
+            st.info("No line with flow to evaluate.")
+        else:
+            st.dataframe(_fa2_frame(rows), hide_index=True, width="stretch")
+            diff = max(rows, key=lambda r: abs(r["Holdup difference [-]"]))
+            st.caption(f"Largest holdup difference to Beggs & Brill: {diff['Line']} ({diff['At']}) "
+                       f"{diff['Holdup difference [-]']:+.3f}. Beggs & Brill tends to over-predict the liquid in wet-gas "
+                       "risers; the mechanistic value is closer to field data there, but neither replaces a "
+                       "transient simulator for slug tracking.")
+    with t_cor:
+        _fa2_inputs(b, [("life_y", "Design life [years]", {"min_value": 1.0}),
+                        ("allow_mm", "Corrosion allowance [mm]", {"min_value": 0.0}),
+                        ("pH", "Water pH (−1 = CO₂-saturated condensed water)", {}),
+                        ("inhib_eff", "Inhibitor efficiency [%]", {"min_value": 0.0, "max_value": 99.0}),
+                        ("avail", "Inhibitor availability [%]", {"min_value": 0.0, "max_value": 100.0})])
+        rows = FA2.corrosion_table(model, sol, b)
+        if not rows:
+            st.info("No CO₂ in the fluid package or no line to evaluate.")
+        else:
+            st.dataframe(_fa2_frame(rows), hide_index=True, width="stretch")
+            st.caption("de Waard-Lotz-Milliams (1993) rate with scale-temperature and pH corrections: the uninhibited "
+                       "rate of bare carbon steel at the line's worst end. It does not model protective iron-carbonate "
+                       "films, so it is conservative where scaling is expected. Use it to choose between an "
+                       "allowance, pH stabilisation, an inhibitor and a corrosion-resistant alloy.")
+    with t_emu:
+        rows = FA2.emulsion_table(model, sol)
+        if not rows:
+            st.info("No line carries both a hydrocarbon liquid and free water.")
+        else:
+            st.dataframe(_fa2_frame(rows), hide_index=True, width="stretch")
+            pick = rows[0] if len(rows) == 1 else None
+            if pick is None:
+                names = [r["Line"] for r in rows]
+                valid_choice("fa2_emu", names)
+                nm = st.selectbox("Line", names, key="fa2_emu")
+                pick = next(r for r in rows if r["Line"] == nm)
+            st.plotly_chart(charts.emulsion_figure(pick), width="stretch", key="fa2_emu_fig")
+    with t_load:
+        _fa2_inputs(b, [("sigma", "Surface tension [N/m]", {"min_value": 0.001, "max_value": 0.2})], tag="_load")
+        rows = FA2.loading_table(model, sol, float(b["sigma"]))
+        if not rows:
+            st.info("No well or upward line carries both gas and liquid.")
+        else:
+            st.dataframe(_fa2_frame(rows), hide_index=True, width="stretch")
+            st.caption("Turner (1969) droplet velocity, and Coleman (1991) without the 20 % factor. Evaluated at the "
+                       "inlet (the lowest gas velocity) and the outlet; the minimum stable rate is the rate at which "
+                       "the gas velocity equals the droplet velocity.")
+    with t_pig:
+        _fa2_inputs(b, [("v_pig", "Pig speed [m/s] (−1 = mean gas velocity)", {}),
+                        ("catcher_m3", "Receiver / slug catcher volume [m³]", {"min_value": 0.0})])
+        rows = FA2.pigging_table(model, sol, b)
+        if not rows:
+            st.info("No pipeline to pig.")
+        else:
+            st.dataframe(_fa2_frame(rows), hide_index=True, width="stretch")
+    with t_pack:
+        _fa2_inputs(b, [("P_min", "Minimum line pressure for draw-down [bar(a)]", {"min_value": 1.0})])
+        rows = FA2.line_pack_table(model, sol, b)
+        if not rows:
+            st.info("No gas line to evaluate.")
+        else:
+            st.dataframe(_fa2_frame(rows), hide_index=True, width="stretch")
+    with t_ins:
+        _fa2_inputs(b, [("target_h", "Target no-touch time [h]", {"min_value": 0.1}),
+                        ("k_ins", "Insulation conductivity [W/m·K] (0 = from the present U)", {"min_value": 0.0}),
+                        ("t_max", "Largest thickness tried [mm]", {"min_value": 10.0})])
+        rows = FA2.insulation_table(model, sol, b)
+        if not rows:
+            st.info("No flowline or riser with a cool-down model.")
+        else:
+            st.dataframe(_fa2_frame(rows), hide_index=True, width="stretch")
+            st.caption("Uses the cool-down model of the Cool-down tab (basis, wall and U convention); only the "
+                       "insulation resistance changes.")
+    with t_pvt:
+        names = {model["streams"][sid]["name"]: sid for sid in sol.streams
+                 if sid in model["streams"] and not sol.streams[sid].empty}
+        if not names:
+            st.info("No stream with flow.")
+        else:
+            valid_choice("fa2_pvt_stream", names)
+            c = st.columns([2, 1, 1, 1, 1, 1, 1])
+            nm = c[0].selectbox("Stream", list(names), key="fa2_pvt_stream")
+            sid = names[nm]
+            s0 = sol.streams[sid]
+            P0, T0 = float(s0.P), float(s0.T - 273.15)
+            P_lo = c[1].number_input("P from [bar]", value=float(max(round(P0 * 0.2), 1)), min_value=0.5, key="fa2_p_lo")
+            P_hi = c[2].number_input("P to [bar]", value=float(round(P0 * 1.2)), min_value=1.0, key="fa2_p_hi")
+            nP = int(c[3].number_input("P points", value=8, min_value=2, max_value=20, key="fa2_np"))
+            T_lo = c[4].number_input("T from [°C]", value=float(round(T0 - 60)), key="fa2_t_lo")
+            T_hi = c[5].number_input("T to [°C]", value=float(round(T0 + 20)), key="fa2_t_hi")
+            nT = int(c[6].number_input("T points", value=6, min_value=1, max_value=20, key="fa2_nt"))
+            if P_hi <= P_lo:
+                st.error("The pressure range must increase.")
+            else:
+                Ps = [P_lo + (P_hi - P_lo) * i / (nP - 1) for i in range(nP)]
+                Ts = [T_lo + (T_hi - T_lo) * i / max(nT - 1, 1) for i in range(nT)]
+                sig = (ss.sol_hash, sid, tuple(Ps), tuple(Ts))
+                if st.button("Build the PVT table", key="fa2_pvt_run", type="primary"):
+                    ss["fa2_pvt"] = {"sig": sig, "rows": FA2.pvt_table(sol.fp, s0.z, Ps, Ts)}
+                res = ss.get("fa2_pvt")
+                if res and res["sig"] == sig:
+                    df = pd.DataFrame(res["rows"])
+                    st.dataframe(df, hide_index=True, width="stretch")
+                    st.download_button("Download CSV (SI units)", FA2.pvt_csv(res["rows"]).encode("utf-8"),
+                                       file_name="pvt_table.csv", mime="text/csv", key="fa2_pvt_dl")
+                else:
+                    st.caption("Set the grid and press the button; the table is in SI units for use in other tools.")
+
+
 def _set_cool(key, wkey):
     ss = st.session_state
     ss.model.setdefault("cooldown", {})[key] = ss[wkey]
@@ -821,9 +967,9 @@ def surf_tab():
     sol = ss.sol if sol_is_current() else None
     st.markdown("#### Subsea production system (SURF)")
     units = surf_units(model)
-    t_sys, t_lay, t_capex, t_umb, t_tb, t_td, t_slug, t_cool, t_heat, t_wax, t_cat = st.tabs(
+    t_sys, t_lay, t_capex, t_umb, t_tb, t_td, t_slug, t_cool, t_heat, t_wax, t_reg, t_cat = st.tabs(
         ["System", "Field layout", "Equipment & CAPEX", "Umbilical & power", "Tie-back screening", "Turndown",
-         "Slugging", "Cool-down", "Heated lines", "Wax & sand", "Catalogue"])
+         "Slugging", "Cool-down", "Heated lines", "Wax & sand", "Regime & corrosion", "Catalogue"])
     with t_sys:
         if not units:
             st.info("No subsea equipment in this flowsheet. Drag wells, Xmas trees, templates, jumpers, flowlines, "
@@ -878,6 +1024,11 @@ def surf_tab():
             st.info("Solve the flowsheet first.")
         else:
             waxsand_panel(model, sol)
+    with t_reg:
+        if sol is None:
+            st.info("Solve the flowsheet first.")
+        else:
+            regime_panel(model, sol)
     with t_cat:
         catalogue_panel(model)
         with st.expander("Catalogue columns", expanded=False):
@@ -914,6 +1065,7 @@ def system_panel(model, sol, units):
     wells = [u for u in units if model["units"][u]["type"] == "well" and u in sol.results]
     if wells:
         names = {model["units"][u]["name"]: u for u in wells}
+        valid_choice("surf_budget_well", names)
         pick = st.selectbox("Pressure budget for well", list(names), key="surf_budget_well")
         steps = budget_steps(model, sol, names[pick])
         if steps:

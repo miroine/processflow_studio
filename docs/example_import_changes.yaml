@@ -1,0 +1,10 @@
+# Import on the Data tab (Oil stabilisation example). Units are the catalogue units: bar(a), °C, %, kW ...
+units:
+  VLV-100: {P_out: 22.5}
+  K-300 LP comp:
+    eff: 80
+  E-300:
+    T_out: 35
+    dP: 0.4
+  Well fluid:
+    composition: {C1: 0.45, C2: 0.07}     # fractions that are not listed keep their value

@@ -85,7 +85,9 @@ CATALOGUE = {
     "separator": {
         "label": "2-phase separator", "prefix": "V", "category": "Separation",
         "ports": {"in": {"feed": {"multi": True}}, "out": {"vapour": {"multi": False}, "liquid": {"multi": False}}},
-        "params": [_f("dP", "Pressure drop", "bar", 0.0), _f("duty", "Heat input", "kW", 0.0)],
+        "params": [_f("dP", "Pressure drop", "bar", 0.0), _f("duty", "Heat input", "kW", 0.0),
+                   _f("ID", "Vessel inner diameter for the gas-capacity check (0 = only report the required)", "mm",
+                      0.0, minv=0.0)],
     },
     "scrubber": {
         "label": "Gas scrubber", "prefix": "V", "category": "Separation",
@@ -101,7 +103,9 @@ CATALOGUE = {
         "label": "3-phase separator", "prefix": "V", "category": "Separation",
         "ports": {"in": {"feed": {"multi": True}},
                   "out": {"vapour": {"multi": False}, "oil": {"multi": False}, "water": {"multi": False}}},
-        "params": [_f("dP", "Pressure drop", "bar", 0.0), _f("duty", "Heat input", "kW", 0.0)],
+        "params": [_f("dP", "Pressure drop", "bar", 0.0), _f("duty", "Heat input", "kW", 0.0),
+                   _f("ID", "Vessel inner diameter for the gas-capacity check (0 = only report the required)", "mm",
+                      0.0, minv=0.0)],
     },
     "compressor": {
         "label": "Compressor", "prefix": "K", "category": "Rotating",
@@ -146,7 +150,7 @@ CATALOGUE = {
                       "Outlet temperature"),
                    _f("T_out", "Outlet temperature", "°C", 80.0, {"spec": "Outlet temperature"}),
                    _f("duty", "Duty", "kW", 1000.0, {"spec": "Duty"}),
-                   _f("VF_out", "Outlet vapour fraction", "-", 1.0, {"spec": "Outlet vapour fraction"}, 0.0, 1.0),
+                   _f("VF_out", "Outlet vapour fraction", "-", 1.0, {"spec": "Outlet vapour fraction"}, None, 0.0, 1.0),
                    _f("dP", "Pressure drop", "bar", 0.5)],
     },
     "cooler": {
@@ -156,7 +160,7 @@ CATALOGUE = {
                       "Outlet temperature"),
                    _f("T_out", "Outlet temperature", "°C", 30.0, {"spec": "Outlet temperature"}),
                    _f("duty", "Duty removed", "kW", 1000.0, {"spec": "Duty"}),
-                   _f("VF_out", "Outlet vapour fraction", "-", 0.0, {"spec": "Outlet vapour fraction"}, 0.0, 1.0),
+                   _f("VF_out", "Outlet vapour fraction", "-", 0.0, {"spec": "Outlet vapour fraction"}, None, 0.0, 1.0),
                    _f("dP", "Pressure drop", "bar", 0.5)],
     },
     "hx": {
@@ -317,9 +321,12 @@ def calc_valve(unit, ins, fp):
         raise UnitError(f"{unit['name']}: outlet pressure {P2:.2f} bar is above inlet {s.P:.2f} bar")
     fr = _ph(fp, s.z, P2, s.H, s.T)
     out = make_stream("", fp, s.F, s.z, fr)
-    return {"out": [out]}, {"Inlet T [°C]": s.T - K0, "Outlet T [°C]": fr.T - K0,
-                            "ΔP [bar]": s.P - P2, "ΔT (JT) [°C]": fr.T - s.T,
-                            "Outlet vapour fraction": fr.vf}, []
+    res = {"Inlet T [°C]": s.T - K0, "Outlet T [°C]": fr.T - K0,
+           "ΔP [bar]": s.P - P2, "ΔT (JT) [°C]": fr.T - s.T,
+           "Outlet vapour fraction": fr.vf}
+    from .process_units import valve_sizing
+    res.update(valve_sizing(unit, s, fr, P2))
+    return {"out": [out]}, res, []
 
 
 def calc_mixer(unit, ins, fp):
@@ -398,11 +405,18 @@ def _separate(unit, ins, fp, three):
         unit["_mix"] = mix
     if unit.get("type") in ("separator", "separator3"):
         # indicative gas-handling check for a vertical vessel with a mesh pad
-        sz = souders_brown(fp, mix)
-        for k in ("Souders-Brown K-factor [m/s]", "Max gas velocity [m/s]", "Required diameter [mm]",
-                  "Actual gas flow [m³/h]", "Liquid flow [m³/h]"):
+        idv = float(p.get("ID", 0.0) or 0.0)
+        sz = souders_brown(fp, mix, ID_mm=idv)
+        keys = ["Souders-Brown K-factor [m/s]", "Max gas velocity [m/s]", "Required diameter [mm]",
+                "Actual gas flow [m³/h]", "Liquid flow [m³/h]"]
+        if idv > 0:
+            keys += ["Selected diameter [mm]", "Actual gas velocity [m/s]", "Gas load [% of max]"]
+        for k in keys:
             if k in sz:
                 res[k] = sz[k]
+        if idv > 0 and sz.get("Gas load [% of max]", 0.0) > 100.0:
+            res["Warning"] = (f"Gas load {sz['Gas load [% of max]']:.0f} % of the Souders-Brown limit - liquid "
+                              f"carry-over expected (needs ≥ {sz['Required diameter [mm]']:.0f} mm)")
     for k, v in outs.items():
         res[f"{k.capitalize()} flow [kg/h]"] = v[0].F * v[0].MW
     en = [_energy(unit, duty)] if abs(duty) > 0 else []
@@ -721,6 +735,11 @@ def calc_compressor(unit, ins, fp):
                         "N0": curve.N0, "N": N, "Q": Q_m, "Q_process": Q_act, "head": head_poly,
                         "eff": 100 * eta_p if eta_p else None,
                         "control_line": (1.0 + sm_min / 100.0) if asc else None}
+    from .process_units import driver_results
+    dres, dwarn = driver_results(unit, W)
+    res.update(dres)
+    if dwarn:
+        warn.append(dwarn)
     if warn:
         res["Warning"] = "; ".join(warn)
     en = [_energy(unit, W, "work")]
@@ -1343,3 +1362,7 @@ CALC = {
 PROFILE_TYPES = ("pipe", "well", "jumper", "flowline", "riser", "injection_well")     # units that leave a line profile
 from . import surf as _surf   # noqa: E402,F401  (needs the helpers above; works whichever module loads first)
 from . import dehydration as _dehy   # noqa: E402,F401  (TEG contactor registers itself)
+from . import process_units as _pu   # noqa: E402,F401  (HYSYS-style units register themselves)
+from . import facilities as _fac   # noqa: E402,F401  (platform area, gas turbine, phase splitter)
+from . import process_ext as _pext   # noqa: E402,F401  (v7.7: chiller, membrane, molecular sieve)
+from . import surf_ext as _sext   # noqa: E402,F401  (v7.8: more subsea equipment)

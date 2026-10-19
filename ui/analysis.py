@@ -12,7 +12,7 @@ from procsim.streams import stream_properties, hydrate_risk, hydrate_state
 from procsim.transport import (hydrate_T_motiee, gas_gravity_dry, hydrate_T, MOTIEE, VDWP, required_inhibitor_wt, injection_rate,
                                aqueous_inhibitor_wt, hydrate_depression, INHIBITORS)
 
-from .state import sol_is_current, fmt, attention_items
+from .state import sol_is_current, fmt, attention_items, valid_choice
 from . import charts
 from . import units as U
 from .state import qfmt
@@ -79,6 +79,7 @@ def flow_assurance(model, sol):
     names = {s["name"]: sid for sid, s in model["streams"].items() if sid in sol.streams and not sol.streams[sid].empty}
     dp = [model["streams"][s]["name"] for s in default_path(model, sol)]
     st.markdown("##### P–T path against the hydrate curve")
+    valid_choice("fa_path", names, multi=True)
     sel = st.multiselect("Streams along the path (in order)", list(names.keys()), default=dp, key="fa_path")
     traj, gas_x, inh_x, Pmax = [], None, None, 10.0
     for n in sel:
@@ -110,13 +111,13 @@ def flow_assurance(model, sol):
     c1, c2 = st.columns([3, 1])
     with c2:
         want_env = st.toggle("Overlay phase envelope", value=False, key="fa_env",
-                             help="Envelope of the first stream in the path (≈1 500 flashes, a few seconds)")
+                             help="Envelope of the first stream in the path (traced, about a second)")
     if want_env and sel:
         from .panels import _cached_envelope
         s0 = sol.streams[names[sel[0]]]
         with st.spinner("Mapping the phase envelope…"):
             env = _cached_envelope(json.dumps(fp.to_dict()), tuple(np.round(s0.z, 12)), -60.0, 200.0,
-                                   float(min(max(Pmax * 1.3, 50.0), 300.0)))
+                                   float(min(max(Pmax * 1.3, 50.0), 300.0)), False)
     if not sel:
         st.caption("Pick the streams that make up the path.")
     else:
@@ -145,6 +146,7 @@ def dosing_calculator(model, sol, names, path):
         return
     coldest = min((n for n in (path or cands) if n in cands), key=lambda n: sol.streams[names[n]].T, default=cands[0])
     c1, c2, c3, c4 = st.columns(4)
+    valid_choice("dose_st", cands)
     sname = c1.selectbox("Design point (coldest point of the line)", cands, index=cands.index(coldest), key="dose_st")
     inh = c2.selectbox("Inhibitor", ["MEG", "MeOH"], key="dose_inh")
     lean = c3.number_input("Lean inhibitor purity [wt%]", value=90.0 if inh == "MEG" else 100.0, min_value=10.0,
@@ -205,7 +207,21 @@ def analysis_tab():
     cols = st.columns(4)
     for i, (lab, val) in enumerate(k):
         cols[i % 4].metric(lab, val)
-    t1, t2, t3, t4, t5 = st.tabs(["Mass balance", "Flow assurance", "Equipment", "Economics & CO₂", "Compositions"])
+    t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["Mass balance", "Flow assurance", "Equipment", "Economics & CO₂", "Compositions",
+                                              "Before / after", "Heat integration", "Process advisor"])
+    with t7:
+        from .advisor import heat_integration_panel
+        heat_integration_panel(model, sol)
+    with t8:
+        from .advisor import advisor_panel
+        advisor_panel(model, sol)
+    with t6:
+        from .phasing import compare_panel, phase_economics_panel
+        compare_panel()
+        if ss.model.get("phases"):
+            st.divider()
+            st.markdown("#### Cost and payback of the phases")
+            phase_economics_panel()
     with t5:
         compositions_panel(model, sol)
     with t4:
@@ -236,6 +252,10 @@ def analysis_tab():
                             key=f"an_pipe_{uid}")
         if sol.recycle_log:
             st.plotly_chart(charts.recycle_figure(sol.recycle_log), width="stretch", key="an_rcy")
+            from procsim import convdiag
+            for row in convdiag.summarise(sol):
+                if row["verdict"] != "converged":
+                    st.warning(f"Recycle {row['recycle']}: {row['verdict']} (flow error {row['flow_error']:.2g}). {row['hint']}")
         if sol.adjust_log:
             st.plotly_chart(charts.adjust_figure(sol.adjust_log), width="stretch", key="an_adj")
 
@@ -247,12 +267,16 @@ def compositions_panel(model, sol):
              if model["units"][s["dst"][0]]["type"] in ("product",) and s["name"] in names]
     feeds = [s["name"] for sid, s in model["streams"].items()
              if model["units"][s["src"][0]]["type"] == "feed" and s["name"] in names]
+    valid_choice("an_comp_sel", names, multi=True)
     sel = st.multiselect("Streams", list(names.keys()), default=(feeds + prods)[:8], key="an_comp_sel")
     basis = st.radio("Basis", ["mole", "mass"], horizontal=True, key="an_comp_basis")
     if sel:
         st.plotly_chart(charts.composition_figure(model, sol, [names[n] for n in sel], basis), width="stretch",
                         key="an_compfig")
     st.markdown("##### Phase envelope")
+    if not names:
+        return
+    valid_choice("ch_env_stream", names)
     pick = st.selectbox("Stream", list(names.keys()), key="ch_env_stream")
     from .panels import env_panel
     env_panel(sol.streams[names[pick]], sol.fp, "charts")

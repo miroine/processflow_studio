@@ -36,3 +36,9 @@ separator,Inline pipe separator,Compact gravity pipe separator,,,,,,,,,,,,,,,,,,
 process,Passive subsea cooler,Seawater-cooled tube bundle (natural convection),250,,,,,,,,,,,,,,,,,,,,25,,,Illustrative generic value
 process,Pressure intensifier,Hydraulically driven reciprocating booster for chemicals or hydraulics,,,,,,,,,,,,,,,85,,,,,,4,,,Illustrative generic value
 process,Chemical injection metering valve,Subsea CIMV with flow metering at the tree or manifold,,,5,,,,,,,,,,,,,,,,,,1.5,,,Illustrative generic value
+process,Subsea choke module,Retrievable production choke module (manifold / riser base),,,,,,,,,,,,,,,,,,,,,3,,,Illustrative generic value
+process,Subsea production manifold,Multi-slot production manifold with header and valves,,,,,,,,,,,,,,,,,,,,,18,,,Illustrative generic value
+process,Multiphase flow meter,Venturi / gamma multiphase meter,,,,,,,,,,,,,,,,,,,,,2.5,,,Illustrative generic value
+process,Pig launcher / receiver,Subsea pig launcher or receiver (PLR),,,,,,,,,,,,,,,,,,,,,6,,,Illustrative generic value
+process,Subsea hydrocyclone,De-oiling hydrocyclone skid,,,,,,,,,,,,,,,,,,,,,12,,,Illustrative generic value
+process,Subsea electric heater,Direct electric process heater module,,,,,,,,,,,,,,,,,,,,,15,,,Illustrative generic value

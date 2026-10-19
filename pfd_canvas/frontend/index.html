@@ -48,6 +48,16 @@
   .port.hot { fill: #2a7de1; opacity: 1; }
   .stream { fill: none; stroke-width: 2; cursor: pointer; }
   .streamhit { fill: none; stroke: transparent; stroke-width: 12; cursor: pointer; }
+  .ghost { opacity: .14; pointer-events: none; }
+  .grip { fill: var(--sel); fill-opacity: .55; stroke: var(--sel); cursor: nwse-resize; }
+  .platname { font-size: 13px; font-weight: 700; }
+  #toolbar select { font: inherit; font-size: 12px; min-height: 30px; border: 1px solid #c7c7c7; border-radius: 6px;
+    background: #fff; color: var(--ink); max-width: 190px; }
+  #toolbar input[type=color] { width: 30px; height: 30px; padding: 1px; border: 1px solid #c7c7c7; border-radius: 6px; background: #fff; cursor: pointer; }
+  #legend { position: absolute; left: 8px; top: 6px; font-size: 11px; background: rgba(255,255,255,.88); padding: 4px 8px;
+    border-radius: 5px; border: 1px solid var(--line); pointer-events: none; display: none; line-height: 1.5; }
+  #legend .chip { display: inline-block; width: 10px; height: 10px; border: 1.5px dashed #555; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
+  #legend .dim { color: var(--muted); font-size: 10px; }
   .selbox { fill: none; stroke: var(--sel); stroke-width: 1.2; stroke-dasharray: 4 3; }
   .statusbox { fill: none; stroke-width: 2.2; }
   @media (max-width: 560px) {
@@ -65,6 +75,16 @@
     <span class="title">PFD</span>
     <button id="bDelete" title="Delete selection (Del)">Delete</button>
     <button id="bFlip" title="Flip selected icons horizontally (F)">Flip</button>
+    <button id="bOrient" title="Turn a separator / scrubber vertical or horizontal (O)">Orient</button>
+    <button id="bSzDn" title="Make the selected element(s) smaller (−) - or Alt + mouse wheel over an element">Size −</button>
+    <button id="bSzUp" title="Make the selected element(s) bigger (+) - or Alt + mouse wheel over an element">Size +</button>
+    <button id="bSz1" title="Back to 100 % size">100 %</button>
+    <span class="sep"></span>
+    <select id="selPhase" title="Project phase of the selected items (and of the items you draw next): existing, new in a phase, or removed in a phase"></select>
+    <input type="color" id="inColor" value="#e8590c" title="Colour of the selected items"/>
+    <button id="bColorClr" title="Back to the automatic colour">Auto</button>
+    <button id="bGhost" class="on" title="Stage views: show items that are not in place as faint ghosts">Ghosts</button>
+    <span class="sep"></span>
     <button id="bDup" title="Duplicate selection with its specifications (Ctrl+D; Ctrl+C / Ctrl+V also work)">Duplicate</button>
     <button id="bUndo" title="Undo (Ctrl+Z)">Undo</button>
     <span class="sep"></span>
@@ -82,6 +102,7 @@
     <div id="palette"></div>
     <div id="canvasWrap">
       <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="legend"></div>
       <div id="status"></div>
       <div id="hint">Drag equipment from the palette · drag from a port to connect · drop on empty space for a feed/product</div>
     </div>

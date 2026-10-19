@@ -60,6 +60,7 @@ DEFAULTS = {
     "n_wells": 0.0, "rig": 0.0, "boost_mode": B_AS_IS, "boost_year": 5.0, "rating": True,
     # economics
     "gas_price": 0.25, "oil_price": 70.0, "fx": 10.5, "opex_pct": 4.0, "disc": 8.0, "capex_years": 2.0,
+    "fac_exp": 0.0,
 }
 # defaults that depend on the reservoir kind (used where the stored value is negative = automatic)
 KIND_DEFAULTS = {GAS: {"VRR": 0.0, "RF_bt": 1.0, "RF_rise": 0.2, "w_max": 100.0},
@@ -82,6 +83,7 @@ LABELS = {
     "gas_price": ("Gas price", "USD/Sm³"), "oil_price": ("Oil / condensate price", "USD/bbl"),
     "fx": ("Energy-cost currency per USD", "-"), "opex_pct": ("Fixed OPEX", "% of CAPEX per year"),
     "disc": ("Discount rate", "%/year"), "capex_years": ("Construction before first production", "years"),
+    "fac_exp": ("Facility cost scaling with plateau rate (exponent, 0 = fixed)", "-"),
 }
 
 
@@ -883,6 +885,9 @@ def economics(res, S, model, sol):
     N = res["N"]
     boost_later = res["boost_mode"] in (B_YEAR, B_AUTO)
     facility, per_well, boost_capex, extra_t = capex_split(model, sol, S, N, res["n_cfg"], boost_later)
+    fe = float(p.get("fac_exp", 0.0) or 0.0)
+    if fe > 0 and S["prim0"] > 0 and S["q_plat"] > 0:      # six-tenths-rule style scaling with the plateau rate
+        facility *= (S["q_plat"] / S["prim0"]) ** fe
     res["capex"] = {"Facilities [MUSD]": facility, "Wells [MUSD]": per_well * N, "Boosting (when installed) [MUSD]":
                     boost_capex if res["boost_start"] and boost_later else 0.0, "Extra templates": extra_t}
     years = sorted({s["year"] for s in res["steps"]})

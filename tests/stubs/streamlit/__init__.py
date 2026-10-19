@@ -206,6 +206,20 @@ def toggle(label, value=False, key=None, on_change=None, args=None, **kw):
     return v
 
 
+checkbox = toggle
+
+
+def color_picker(label, value="#000000", key=None, on_change=None, args=None, **kw):
+    ident = _register("color_picker", label, key)
+    _cb(ident, on_change, args)
+    if key is not None and key in session_state:
+        return session_state[key]
+    v = _value(ident, value)
+    if key is not None:
+        session_state[key] = v
+    return v
+
+
 def selectbox(label, options, index=0, key=None, format_func=str, on_change=None, args=None, **kw):
     options = list(options)
     ident = _register("selectbox", label, key)
@@ -214,7 +228,8 @@ def selectbox(label, options, index=0, key=None, format_func=str, on_change=None
         format_func(o)
     if options and not (0 <= index < len(options)):
         raise IndexError(f"selectbox {label}: index {index} out of range")
-    if key is not None and key in session_state and session_state[key] in options:
+    if key is not None and key in session_state and ident not in HOOK["values"]:
+        # like real Streamlit: a remembered value is returned even when it is no longer an option
         return session_state[key]
     v = _value(ident, options[index] if options else None)
     if key is not None:
@@ -242,7 +257,12 @@ def multiselect(label, options, default=None, key=None, format_func=str, **kw):
     for d in default or []:
         if d not in options:
             raise ValueError(f"multiselect default {d!r} not in options")
-    return _value(ident, list(default or []))
+    if key is not None and key in session_state and ident not in HOOK["values"]:
+        return list(session_state[key])          # stale entries come back, as in real Streamlit
+    v = _value(ident, list(default or []))
+    if key is not None:
+        session_state[key] = v
+    return v
 
 
 _FMT = re.compile(r"^%[0-9.]*[defgiu]$")
@@ -281,14 +301,25 @@ def text_input(label, value="", key=None, on_change=None, args=None, **kw):
     return v
 
 
+def text_area(label, value="", height=None, key=None, on_change=None, args=None, **kw):
+    ident = _register("text_area", label, key)
+    _cb(ident, on_change, args)
+    if key is not None and key in session_state:
+        return session_state[key]
+    v = _value(ident, value)
+    if key is not None:
+        session_state[key] = v
+    return v
+
+
 def slider(label, min_value=None, max_value=None, value=None, step=None, key=None, **kw):
     ident = _register("slider", label, key)
     return _value(ident, value)
 
 
 def file_uploader(label, type=None, key=None, **kw):
-    _register("file_uploader", label, key)
-    return None
+    ident = _register("file_uploader", label, key)
+    return HOOK["values"].get(ident)
 
 
 def data_editor(data, key=None, **kw):

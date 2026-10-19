@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .components import Component, LIBRARY, default_kij
+from .components import Component, LIBRARY, default_kij, POLAR_FAMILIES
 
 R = 8.314462618           # J/mol/K
 R_BAR = 8.314462618e-5    # m3 bar / mol / K
@@ -120,27 +120,29 @@ class FluidPackage:
         m = np.where(self.w <= 0.491,
                      0.37464 + 1.54226 * self.w - 0.26992 * self.w ** 2,
                      0.379642 + 1.48503 * self.w - 0.164423 * self.w ** 2 + 0.016666 * self.w ** 3)
-        self.m = m
+        m_over = np.array([getattr(c, "m_pr", 0.0) or 0.0 for c in comps], float)
+        self.m = np.where(m_over > 0, m_over, m)             # a calibrated alpha-function parameter wins
         self.ac = 0.45724 * R_BAR ** 2 * self.Tc ** 2 / self.Pc
         self.b = 0.07780 * R_BAR * self.Tc / self.Pc
         self.c_shift = 0.50033 * (0.25969 - zra) * R_BAR * self.Tc / self.Pc   # m3/mol (Peneloux form for PR)
+        self.c_shift = self.c_shift + 1e-6 * np.array([getattr(c, "vshift", 0.0) or 0.0 for c in comps], float)
         if kij is None:
             kij = np.array([[default_kij(a, b_) for b_ in comps] for a in comps], float)
         self.kij = np.array(kij, float)
         self.iw = self.keys.index("H2O") if "H2O" in self.keys else -1
         # polar components that belong to the aqueous phase (for phase labelling)
-        self.polar = np.array([c.key in ("H2O", "MeOH", "MEG") for c in self.comps])
+        self.polar = np.array([c.key in ("H2O", "MeOH", "MEG") or c.family in POLAR_FAMILIES for c in self.comps])
         self._kcache = {}
         self._tcache = {}
         self.hydrate_model = "Motiee (gas-gravity correlation)"     # see transport.HYDRATE_MODELS
         # Peneloux with a Rackett Z_RA works well for hydrocarbons but badly for
         # water; calibrate water's shift to its 15 degC density instead.
         for i, c in enumerate(self.comps):
-            if c.key in ("H2O", "MeOH", "MEG"):
+            if c.key in ("H2O", "MeOH", "MEG") or c.family in POLAR_FAMILIES:
                 idx = np.array([i])
                 _, Z, _ = self.lnphi(np.array([1.0]), T_STD, P_REF, idx, "L")
                 v = Z * R_BAR * T_STD / P_REF
-                self.c_shift[i] = v - c.MW / 1000.0 / c.rho_std
+                self.c_shift[i] = v - c.MW / 1000.0 / c.rho_std + 1e-6 * (getattr(c, "vshift", 0.0) or 0.0)
 
     # ------------------------------------------------------------------ io
     def to_dict(self):
@@ -157,7 +159,7 @@ class FluidPackage:
         comps = []
         hypos = hypos or {}
         for k in keys:
-            comps.append(LIBRARY[k] if k in LIBRARY else hypos[k])
+            comps.append(hypos[k] if k in hypos else LIBRARY[k])
         return FluidPackage(comps)
 
     def index(self, key):

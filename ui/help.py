@@ -184,6 +184,249 @@ the flowsheet with the feed rates set to the plateau. Results are stored with th
 report. Screening only: one tank, lift tables with the initial reservoir fluid (GOR / CGR changes alter the volumes,
 not the hydraulics), quarterly steps, illustrative prices.
 
+### HYSYS-style process units (v6.5)
+
+* **Amine contactor** (*Separation*): MEA 15 wt%, DEA 25 wt%, MDEA 40 wt% or activated MDEA 45 wt% against CO₂ and
+  H₂S specifications. The removals come from a 2×2 balance on the specifications; circulation follows from the
+  acid gas removed and the design rich-minus-lean loading; the heat of absorption warms the solvent; the regenerator
+  reboiler (heat) and rich-amine pump (work) are energy streams. A screening model: no tray-by-tray kinetics, no
+  degradation or foaming. Outlets: *sweet* and *acid*.
+* **Relief valve (PSV)** (*Safety*): API 520 required area for vapour (critical and sub-critical), liquid and
+  two-phase relief, API 526 orifice letter (several valves above T), capacity of the chosen orifice, back-pressure
+  correction. The *Fire case* takes the heat input from the wetted area of the vessel (API 521, 43.2·F·A^0.82;
+  bare, insulated or water-spray) and the latent heat of the contents.
+* **Flare** (*Safety*, no outlet): heat release (LHV from the formation enthalpies), Hajek-Ludwig flame length,
+  radiation at a receptor (point-source model with the transmissivity and radiated fraction you set), the distance
+  to the radiation limit, tip diameter at the chosen Mach number, and the CO₂ and SO₂ emitted.
+* **Component splitter**: a specified fraction of each component to the top outlet, optional outlet temperatures; the
+  duty is an energy stream. Use it for membranes, molecular sieves and idealised separations.
+* **Conversion reactor / Equilibrium reactor** (*Reactors*): reactions written as `C1 + 2 O2 -> CO2 + 2 H2O` in
+  the components of the fluid package. Conversion: the fraction of the first reactant of each reaction, limited by
+  availability. Equilibrium: one reaction, K(T) from ΔG° and ΔH° at 298 K with the ideal-gas heat capacities of the
+  package (Δ Cp integrated), mole-fraction equilibrium. Both with *Outlet temperature* (duty out) or *Adiabatic*.
+  Enthalpies include the heats of formation, so the duty is the true heat of reaction plus sensible heat.
+* **Valve**: required Cv / Kv (IEC 60534 for liquid, gas and wet gas), choked-flow check, and the opening for a rated
+  Cv with an equal-percentage or linear characteristic. **Compressor**: electric motor or gas turbine driver (fuel
+  gas, CO₂, ambient derating 0.7 %/K above 15 °C, margin and a warning when the driver is too small).
+  Examples: *Amine sweetening*, *Pressure relief*, *Steam reforming*.
+
+### OLGA-style flow assurance (v6.6) — SURF tab, *Regime & corrosion*
+
+* **Flow regime**: the mechanistic regime and holdup beside Beggs & Brill at each line's inlet and outlet.
+  Taitel & Dukler (1976) for near-horizontal lines (equilibrium stratified layer; stratified → intermittent / annular
+  / dispersed bubble), Taitel, Barnea & Dukler (1980) for inclined and vertical lines; holdups from the stratified
+  balance, Butterworth's fit of Lockhart-Martinelli (annular), Bendiksen drift flux (slug, bubble). Slug frequency
+  and length are those of the *Slugging* tab.
+* **CO₂ corrosion**: de Waard-Lotz-Milliams (1993) rate (kinetics in series with mass transfer, scale-temperature and
+  pH corrections), allowance needed over the design life, the pH or inhibitor efficiency that would meet it, and a
+  sour-service flag (pH₂S above 0.003 bar). It is the open-literature model, not NORSOK M-506.
+* **Emulsion**: Brinkman viscosity of the oil-water dispersion with the inversion water cut of Arirachakaran et al.
+  (1989); assumes a stable emulsion.
+* **Liquid loading**: Turner and Coleman droplet velocities, margin and minimum stable gas rate for wells and
+  upward lines.
+* **Pigging**: run time, liquid swept ahead of the pig, arrival rate and time, pressure to push the slug, flags for
+  stall, wear and receiver size.
+* **Line pack**: gas inventory (real-gas law) and the volume available by drawing the line down to a minimum pressure.
+* **Insulation**: the thickness that gives a target no-touch time, with the Cool-down model.
+* **PVT table**: densities, viscosities, Z, Bg and enthalpy over a P-T grid of any stream, as a CSV in SI units.
+
+### Topside templates and debottlenecking (v7.1)
+
+* **Six topside examples** (Example selector, names end with *(topside)*): *HP compressor bypass* (a tee splits the gas between
+  the compressor and a let-down bypass valve; change the split fraction), *Debottlenecking*, *Two parallel trains*
+  (two compressor trains and two scrubber-liquid recycle loops from one inlet), *Water handling and reinjection*
+  (degasser, overboard split, seawater make-up, pump and injection wells), *Gas mixing* (three gases let down to a
+  header, an Adjust tunes the rich-gas flow to a Wobbe-index target) and *Flare system* (HP and LP headers, PSVs, header
+  lines, knock-out drums, flares).
+* **Gas quality** on every gas stream (vapour fraction ≥ 0.5): gross calorific value (dry, 15 °C, ideal gas, from the heats of
+  combustion of the library components), relative density, Wobbe index and CO₂ mol%. They can be Adjust targets.
+* **Separators** have an optional vessel diameter: the gas load against the Souders-Brown limit is then reported (and warned
+  about above 100 %), as scrubbers already did.
+* **Debottlenecking** (Design tab): the utilisation of every unit with a capacity - scrubber / separator gas load, compressor
+  flow against stonewall, driver power against rating, valve opening against 85 %, erosional ratio of lines - and a throughput
+  sweep that re-solves the flowsheet at several rates, finds the factor at which each reaches 100 % and ranks them. Limits within
+  3 % of the first are reported together. Units without a capacity (coolers, heaters, a separator without a diameter) are not
+  checked; surge (turndown) is not part of it.
+
+### Profile simulation (v7.2) — *Profile* tab
+
+Runs the flowsheet for a **time profile** instead of one operating point.
+
+* **Table**: one row per time step with *Time*, and per feed the rate, pressure and temperature (units follow the feed's flow
+  basis; bar(a); °C). Any other numeric unit parameter (a separator pressure, a compressor speed) can be added as
+  *Unit | parameter*. A blank cell keeps the flowsheet value. Generate a starting table (linear or exponential decline of rate
+  and pressure, temperature change), edit any cell, or upload / download a CSV.
+* **Run**: every row is solved as a complete **steady-state** flowsheet, recycles and Adjust loops included. A row that does not
+  solve (for example a feed pressure that falls below a fixed downstream pressure, as when a reservoir declines below a set choke outlet) is
+  marked with the reason and skipped in the charts; the others still run. Nothing is carried from one step to the next, so this is a
+  quasi-steady profile (the plant at each step's conditions), **not** a dynamic simulation - there is no hold-up, no inventory and
+  no start-up path between steps.
+* **Results**: pick any stream property, unit result or overall quantity (gas and liquid products, power, CO₂) to chart against
+  time and tabulate; cumulative gas, liquid, power and CO₂ integrate each step's steady result over its duration (each step is held
+  until the next row's time, the last repeats the previous duration). Download everything as CSV.
+* The single-step solution on the *Flowsheet* tab is unchanged; the profile never alters the flowsheet or triggers a re-solve.
+  Each step is a full solve (about as long as one normal solve), so 100 steps take 100 solves.
+
+### Data - import, batch edit, export (v7.4) — *Data* tab
+
+* **Import** (CSV, Excel, YAML, or a complete flowsheet): the file's layout is recognised from its columns - *Unit / Parameter / Value* rows, one
+  row per unit with parameter columns, feed compositions (long or one column per component), a *Time* + `Unit | parameter` profile table, or dynamic
+  events (*Time [s], Event, Target, Value, Ramp [s]*). An Excel workbook is read sheet by sheet; a sheet it does not recognise (for example a
+  results sheet) is ignored, and you can override how a sheet is treated. Values are in the catalogue units shown beside each parameter (bar(a),
+  °C, kW …) whatever your display units. Parameters can be named by key (`P_out`) or label (`Outlet pressure`); select options are matched
+  without regard to capitals; decimal commas and `;` / tab delimiters are accepted.
+* **Change plan**: every value is listed with old and new value and a status - *ok*, *warning* (applied; e.g. the parameter is not used with the unit's
+  current specification, or a cell is repeated), *unchanged*, *skipped* (blank cell) or *error* (unknown unit, parameter or option, text instead of a
+  number, outside the minimum / maximum, two units with the same name). Errors are never applied; you can apply the valid rows. One **Undo edit**
+  reverts the whole import.
+* **Batch edit**: *One operation on many units* (choose unit types and / or a name pattern such as `K-*; Cooler`, a parameter, and Set / Multiply /
+  Add / Reset to default), *A table of one unit type* (edit cells like a spreadsheet), *Feed compositions* (grid of all feeds). The same plan and
+  undo apply.
+* **Export**: Excel workbook (one formatted sheet per table), CSV (one table, or a zip of all), the flowsheet or only the parameters as YAML, the
+  flowsheet as JSON. Tables: Parameters, Feed compositions, Streams, Stream compositions, Unit results, Energy streams, Overall, Messages, and -
+  when you have run them - Profile results and Dynamic results. Stream properties are in the metric units named in the headers. The *Parameters*
+  and *Feed compositions* sheets round-trip: edit them in Excel and import the workbook again.
+* **Python editor**: a short script gets `tables` (dict of DataFrames), `pandas` as `pd`, `numpy` as `np` and `math`; edit the tables in place,
+  replace, add or drop them, `print()` to see values. The edited tables replace the export tables (switch on the Export tab). If the script edits the
+  *Parameters* or *Feed compositions* table, the changes can be applied back to the flowsheet through the same checked plan. Scripts run on a copy in a
+  separate process, are stopped after 30 s, have no file or network access, and may import only math, statistics, numpy, pandas, re, datetime, json,
+  itertools, collections, functools, decimal, fractions, textwrap and random; private (`_x`) attributes, file writers (`to_csv` ...), `read_*` and sub-modules such as `pd.io` are
+  hidden, and the child process audits file, process and network calls. This is defence in depth, **not** a certified sandbox, so the editor is off unless the host enables it: environment variable `PFS_PYTHON_EDITOR=on`, or the Streamlit secret `python_editor = "on"`
+  with, strongly recommended on a public app, `python_editor_password`.
+* Limits: structured parameters (curves, reaction tables) are not editable in tables - use the property view or YAML with the same shape as the current
+  value; the Profile table's times use the Profile tab's time unit; dynamic event targets are checked on the Dynamic tab, not at import.
+
+### Dynamic simulation (v7.3) — *Dynamic* tab
+
+A **lumped, time-domain** model built from the solved steady-state flowsheet (seconds to hours).
+
+* **What it models**: separators, scrubbers and mixers as well-mixed holdups (component inventory and internal energy; pressure,
+  temperature and phases from a Peng-Robinson U-V flash at every step); pipes as chains of 2 - 60 isothermal cells with
+  hydrostatic head; valves (equal-percentage, rangeability 50, actuator lag); compressors (head from the performance map and speed,
+  speed lag and coast-down, check valve, surge collapse); pumps; PSV / blowdown orifices; heaters and coolers (outlet temperature)
+  as quasi-steady units. Feeds and products are boundaries.
+* **Starting point**: every valve, compressor and pump coefficient is calibrated to the steady solution, so with no event nothing
+  moves. Vessel volumes default to 3 minutes of liquid residence at 50 % level (mixers 20 s); change them in *Vessels and lines*.
+* **Controllers**: PI with anti-windup, error in % of span. Defaults are created for level (liquid / oil outlet valve), water
+  level, pressure (gas outlet valve) and anti-surge (compressor with the anti-surge valve switched on; reverse acting, acts on the
+  surge margin). Edit the set-point, Kc and Ti, or un-tick *Active* to hold a valve.
+* **Events**: a table of time, event, target and value (what the value means is listed under the table). Times are in the unit you
+  pick. A ramp [s] smooths a feed change.
+* **Run**: the step adapts (largest step is yours; use 1 s or less with compressors); a step that would change pressure by more
+  than 5 %, temperature by 10 K or level by 3 % is retried smaller. Results are charted in stacked panels with the events marked, and
+  can be downloaded as CSV. The mole balance (initial + fed − discharged − final) is shown and should be ~1e-10.
+* **Limits**: no pressure waves or momentum (no water hammer or surge in the line); no slip in pipes (no slugging, no liquid
+  accumulation by slip); vessels are well mixed (no stratification, carry-over or foaming); valves are ideal characteristics;
+  liquid-full vessels, columns, heat exchangers, reactors and similar units are not supported - the tab names the unit that stops
+  the model; at a splitter the pressure downstream is taken from the first destination. Time-varying Profile tables are not applied.
+  Use it to size a controller, a blowdown valve or an anti-surge response in a first pass, then confirm with a validated dynamic
+  simulator.
+* The dynamic settings are saved with the flowsheet; running a simulation does not re-solve or alter the flowsheet.
+
+### Prognosis (v7.0) — *Prognosis* tab
+
+Built on the Field life model; it answers "which strategy, how many wells, what recovery factor, how sure?".
+
+* **Drainage strategy**: oil — depletion, partial and full pressure support by water injection (voidage replacement
+  0 / 0.5 / 1) and a larger facility; gas — facility size (plateau 75 / 100 / 125 % of today's rate, facility cost scaled
+  with the 0.6 power, the "six-tenths rule"); when the flowsheet has subsea boosting, when it starts. Each option is swept
+  over the well counts and kept at its highest-NPV count.
+* **Uncertainty**: in-place volume, aquifer size, water breakthrough and price are sampled (Latin hypercube,
+  triangular low / base / high) and every sample is run for every well count. Results: P90 (low case, 10th percentile),
+  P50 and P10 (high case) of recovery factor and NPV, the chance of a negative NPV, the well count with the highest
+  expected NPV and the most robust one (best P90 NPV).
+* The deliverability tables of a well count are reused by all its samples; the first run per well count takes about
+  two minutes, further samples a few seconds each. Recovery factor of a gas field is mostly set by the abandonment
+  pressure, so its range is narrow; the in-place volume mainly moves the plateau length and the NPV.
+* Limits: one tank, the same placeholder economics as the Field life tab, independent inputs, facility cost scaling
+  by a simple exponent. Treat the numbers as ranking and ranges, not as a reserves estimate.
+
+### Design tools (v6.7) — *Design* tab
+
+* **Pipe sizing**: the flowline (and its riser) re-solved at a list of inside diameters at the present rate: arrival
+  pressure, erosional ratio, hydrate margin, riser-base slugging and liquid inventory, with the wall (thin-wall Barlow
+  with a design factor and a corrosion allowance) and the steel mass per km. The recommended diameter is the smallest
+  that meets every limit.
+* **Gas-lift allocation**: the oil rate of each lifted well at its present wellhead pressure for several lift-gas
+  rates (the inflow and tubing model is re-solved at every point), the upper concave envelope of each curve and the
+  split of a limited gas supply that maximises the total oil (equal marginal gain). Wells that cannot flow at a
+  rate leave that point out.
+* **ESP sizing**: total dynamic head from the intake and wellhead pressures, mixture density and tubing friction;
+  free gas at the intake and a gas-handling verdict; pump options from a small catalogue of **generic illustrative**
+  curves at 50 and 60 Hz (affinity laws) with stages, shaft power and motor size. Replace the catalogue with vendor
+  data for a real design; viscosity derating is not applied.
+* **Pipe network**: any topology, with loops and meshes solved together — nodes with a fixed pressure (P), a supply or
+  withdrawal (Q) or none (J); pipes with length, diameter and roughness. Single-phase gas (isothermal, constant Z,
+  horizontal) or liquid (with elevation); Churchill friction at each pipe's Reynolds number; flows, node pressures,
+  velocities and the erosional ratio. The text is saved with the flowsheet. Multiphase lines belong in the flowsheet.
+
+### Stage-specific specs, cost table, sensitivity and cases (v7.9)
+
+* **Different value in a later phase**: select a unit, open *Appearance & project phase* and then *Different value in a later phase*. Choose the phase, the parameter and the new value; it replaces the Design-tab value in that stage and every later one (a later phase wins). Use it for what changes with the project - feed pressure after a booster, efficiency of a revamped machine, a new rate - so each stage solves with its own specification and the phase economics shows a production gain. Base values stay in the Parameters tab.
+* **Own cost table**: in *Cost and price assumptions*, import a CSV with columns `type, S_ref, C_ref, exponent` (C_ref in millions of the model currency). It replaces the generic curve for those types and is kept in the saved flowsheet only. **Download phase report** produces a printable page with the phase table, the stages and the flowsheet.
+* **Sensitivity** (Calibrate tab): moves chosen parameters ± x % one at a time and draws a tornado of one result.
+* **Advisor**: new sizing-range check flags duties and powers above (or far below) what one machine normally covers - generic screening limits, not vendor limits. **Recycle feedback** says if a loop stalls, converges slowly or needs more iterations.
+* **Connections that change over the phases (v7.9.1)**: draw a line into a single-connection port that is already used and the new line takes over from the first phase in which both of its ends exist; the old line is retired in that phase (it stays in place before it). With a phase chosen in the toolbar the takeover is in that phase. Any added item also has *In place until* in *Appearance & project phase* to retire it in a later phase. Two lines that would both exist today are still refused.
+* **Cases**: sidebar *Cases* keeps full variants (Base, High GOR ...) in one file; switching saves the open case and opens the other.
+
+### Calibration, more SURF equipment and phase economics (v7.8)
+
+* **Calibrate tab.** Plant data enter as rows: for each *case* (an operating condition) add *set* rows for what you impose (feed rate, inlet
+  temperature, a set-point) and *measure* rows for what was measured - a unit result, a stream property, a composition or an economics total - with its
+  uncertainty σ. Mark some cases *validation*: they are held out of the fit. Pick the parameters to tune (with bounds) and press **Calibrate**: the
+  result shows the parameters before and after with 95 % intervals, the residuals in σ, a parity plot per quantity and notes on parameters the data could not
+  determine. **Apply** writes the values into the flowsheet (one undo step, recorded in the report). Keep the parameters fewer than the independent
+  measurements; every iteration solves the flowsheet once per case and parameter.
+* **Optimise.** On the same tab, choose decision variables with bounds, constraints and an objective (an economics total or a result) and let the solver
+  search the calibrated flowsheet.
+* **Subsea equipment.** *Choke module* (Cv/opening, outlet pressure or ΔP, choked-flow and hydrate check), *manifold* (branches into a header, erosional
+  velocity), *multiphase flow meter* (rates, GVF, WLR and uncertainty, window check), *pig launcher / receiver* (transit time, liquid swept ahead of the
+  pig against the receiver capacity), *hydrocyclone* (oil removal, reject ratio, oil in the clean water) and *electric heater* (duty or outlet temperature,
+  electrical power into the subsea power demand).
+* **Phase economics.** In *Analysis → Before / after*, the phase table gives the CAPEX of the equipment tagged *new in phase n* (power-law cost × installation
+  factor + contingency; override single items), the change in energy + CO₂ cost, the production gain at your price per boe, the net annual benefit, simple payback
+  and NPV. Cost-table values are generic placeholders read as millions of the model currency.
+* **Heat integration** now prices the recovery potential with the utility and CO₂ assumptions of the Economics tab and gives a rough exchanger area and payback.
+* **Chiller cycle model.** Choose *Cycle (PR equation of state)* for a real refrigerant cycle (refrigerant, evaporator superheat, condenser sub-cooling,
+  isentropic efficiency, optional two-stage economiser): refrigerant flow, discharge temperature, compressor power and the resulting fraction of Carnot.
+* **Two-stage membrane.** *Configuration* → two stages: the stage 1 permeate is recompressed to the feed pressure and fed to stage 2, whose retentate
+  returns to the inlet. Methane loss falls at the price of the recompressor power (a work stream in the plant power balance).
+* **Typical values.** Open *Typical values* at the top of a unit's Design tab to fill the efficiencies, pressure drops, roughness, permeances … from a generic
+  textbook preset (not vendor data).
+
+* **Deliquifier** (Separation, v7.8.1): removes free hydrocarbon and water liquid from a gas stream (filter-separator / coalescer). Give a removal efficiency or a liquid carry-over in mg/Sm³; it reports the liquid load, the liquid left in the gas, the Souders-Brown allowable velocity and the vessel / element diameter, and warns when carry-over stays high. For downhole liquid unloading (plunger lift, foam, velocity string) use the well and flow-assurance views - this unit is the topside gas-liquid element.
+
+### Process units and analysis added in v7.7
+
+* **Chiller** (Heat transfer): a process cooler served by a refrigeration loop. Give the outlet temperature, the evaporator approach, the condensing
+  temperature and the cycle efficiency as a fraction of Carnot; the unit reports COP, compressor power and the heat rejected at the condenser (the power
+  joins the plant power balance).
+* **Membrane separator** (Separation): CO₂ / H₂S / H₂O removal in a cross-flow model with component permeances, a feed pressure and a permeate pressure.
+  Specify the area, or a CO₂ specification and let the unit find the area. It reports stage cut, CO₂ removal and methane loss; the pressure ratio often
+  limits the separation before the selectivity does.
+* **Molecular-sieve dryer** (Separation): dries the gas to a ppmv specification, sizes the sieve mass and bed volume from the dynamic loading and the
+  cycle time, and estimates the regeneration gas and heat.
+* **Heat integration** (Analysis tab): pinch targets for the heaters, coolers and air coolers. Choose ΔTmin; see the composite curves, the grand
+  composite curve, the minimum heating and cooling and the heat-recovery potential. Heat exchangers are left out (already integrated).
+* **Process advisor** (Analysis tab): rule-based review of the solved flowsheet - gas letdown across a valve (expander candidate), compression ratio and
+  discharge temperature, unused turbine exhaust heat, flaring, equipment near its limit, heat-integration potential, CO₂ and water in product gas.
+
+### Phasing, orientation and zoom (v7.6)
+
+* **Future installations.** Use the phase bar above the diagram to add phases ("Phase 1: HP compression" …). With the elements or streams
+  selected, choose *new in phase n* (＋, dashed frame in the phase colour) or *removed in phase n* (−, struck through) in the toolbar, or
+  set a free colour in the *Appearance* panel. New elements drawn while a phase is active in the toolbar are tagged automatically.
+* **Before / after.** The stage selector shows *Design* (everything, final stage solved), *Today*, or *After phase n*. Elements that are not in
+  place at the chosen stage are removed from the calculation and drawn as faint ghosts (toggle). The *Before / after* analysis tab compares the stages
+  side by side. Two streams may share a single-connection port when they are never in place together (bypass today, new line later). To swap the feed of a tee, mixer inlet or any single port in a later phase: tag the new equipment *new in phase n*, choose *New in Phase n* in the toolbar and draw the new connection onto the occupied port - the existing connection is retired (*removed in phase n*) automatically.
+  Specs are not re-tuned between stages.
+* **Orientation and zoom.** Separators and scrubbers can be vertical or horizontal (key **O**, or the Appearance panel); every element has its own zoom
+  (keys **+** / **−**, Alt+wheel over an element, or the scale in the Appearance panel). Ports and routing follow.
+* **New elements.** *Offshore platform* (a resizable drawing frame; dragging the header carries the equipment inside, Alt = frame only; fixed, floating,
+  FPSO, subsea, onshore pictograms; never part of the calculation), *Gas turbine* (fuel from a stream: shaft and electric power from the LHV, rating derated
+  above 15 °C, exhaust heat, CO₂; shows in the plant power balance) and *Phase splitter* (flash, then ideal split into gas, oil and water legs with optional
+  carry-over fractions).
+
 ### Process additions (v6.3)
 
 * **TEG dehydration contactor** (*Separation* palette): inlet scrubber + N theoretical stages of lean triethylene
@@ -191,8 +434,18 @@ not the hydraulics), quarterly steps, illustrative prices.
   equilibrium dew-point chart), Kremser absorption with the circulation rate (L TEG per kg water), the water dew point
   of the dried gas from the EOS, rich-glycol purity and the regenerator reboiler duty (charged as heating). An
   optional dew-point specification warns when missed. Example: *Gas dehydration: TEG contactor*.
-* **Traced phase envelope**: the stream *Phase envelope* tab adds traced bubble and dew points (bisection on the
-  phase count) with the **cricondenbar** (refined by bisection on pressure) and **cricondentherm**.
+* **Phase envelope (v7.5)**: the stream *Phase envelope* tab follows the saturation curve as one smooth path by
+  continuation (Michelsen): dew line, cricondentherm, cricondenbar and the **critical point** to the bubble line, with
+  optional lines of constant vapour fraction (10–90 %). Smooth by construction rather than contoured from a grid; if the
+  continuation fails the older grid method is used and the panel says so. Free water is left out of the envelope.
+* **Fluid package (v7.5)**: 163 library components (alkanes to C20, isomers, cyclics, aromatics, olefins, sulfur
+  compounds, alcohols, glycols, amines, light gases; data from ChemSep, Artistic License 2.0) with family filter and
+  search by name, formula or CAS. *Plus fraction* splits a C7+ (or Cn+) lump into single carbon numbers (Pedersen
+  exponential distribution, Søreide densities) and lumps them into equal-mass pseudo-components, conserving mole
+  fraction, molar mass and density. *EOS calibration* fits the Peng-Robinson alpha parameter *m* and the volume shift
+  (and optionally ω, Tc, Pc) of one component to vapour-pressure and liquid-density data, or the kij of a pair to
+  bubble pressures; the before/after deviations are shown before you apply the result. Calibrated parameters are
+  stored in the flowsheet file.
 * **Column free water**: *Free water* = decant from the feeds (feed knock-out) or also from the condenser (reflux-drum
   water boot) to the column's optional *water* outlet; the stage model stays VLE-only.
 * **↶ Undo edit** (sidebar) reverses the last change made in a property view (the canvas keeps Ctrl+Z).
@@ -309,6 +562,14 @@ compressors and maps, heat curves, column and pipe profiles, convergence) and gr
 
 ### Limitations
 
+* v7.8: calibration is a least-squares fit of unit parameters to steady-state measurements - no data reconciliation of measured *inputs*, no transient data, and
+  the result is only as good as the model structure; the optimiser is local (gradient-free, bounded) and each evaluation is a full flowsheet solve; phase
+  economics use generic power-law costs; the refrigerant cycle is a single-component PR model (ammonia and ethylene have the largest equation-of-state error);
+  the pig, hydrocyclone and flow-meter units are screening models; typical values are illustrative.
+* v7.7: the membrane has constant permeances (no pressure, temperature or plasticisation effects) and an isothermal outlet; the chiller
+  assumes a fixed Carnot fraction and no refrigerant model; the sieve uses a dynamic loading you set; the advisor and the pinch targets are screening.
+* Phasing (v7.6): stage views solve the same specs; the gas turbine is a screening model (constant efficiency, no part-load curve; fuel flow is set by the
+  connected stream); the phase splitter is an ideal split; the platform is a drawing area only.
 * Steady state only; no reactions, no electrolytes, no hydrate or wax prediction.
 * PR water solubility and aqueous-phase density are approximate (liquid water ≈ 3 % light at 100 °C);
   glycol/amine systems are not modelled.
@@ -317,8 +578,9 @@ compressors and maps, heat curves, column and pipe profiles, convergence) and gr
 * Hydrate temperatures come from a gas-gravity correlation; salts and H₂S/CO₂ effects are ignored, and the
   inhibitor correlations are screening tools (check high MEG concentrations with a rigorous hydrate model).
 * Columns are VLE-only (no free-water draw or liquid–liquid split on the trays); no side draws or pump-arounds yet.
-* The phase envelope is contoured from a P–T grid of flashes rather than traced, so the critical region is
-  approximate.
+* Phase envelope: the continuation can stall on strongly liquid-liquid-prone mixtures (the grid method is then used);
+  the hydrocarbon envelope ignores free water. Extended-library kij are generic family rules (set or fit them for
+  polar systems); ideal-gas Cp is a cubic fit, within about 3 % of the source over 200–1000 K.
 * SURF: the well model is steady-state nodal analysis (no transient, no gas lift yet); the choke uses a gas-based
   critical ratio; the slugging check is a screening criterion, not a transient simulation. Boosters have no
   performance map (fixed efficiency); CAPEX, umbilical and cable data are generic allowances (class 5). Slugging and

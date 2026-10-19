@@ -105,7 +105,7 @@ def wax_formers(fp, paraffin_frac=0.3):
     """[(index, fraction of the component that is n-paraffin)] for components heavier than C7."""
     out = []
     for i, c in enumerate(fp.comps):
-        if c.key in ("H2O", "MeOH", "MEG") or c.MW < 98.0:
+        if c.key in ("H2O", "MeOH", "MEG") or c.family not in ("hydrocarbon", "hypo") or c.MW < 98.0:
             continue
         frac = 1.0 if c.key.startswith("nC") else paraffin_frac
         out.append((i, frac))

@@ -34,6 +34,12 @@ class Component:
     family: str = "hydrocarbon"   # hydrocarbon | inert | acid | water | alcohol | hypo
     hypo: dict = field(default_factory=dict)  # NBP/SG for hypothetical components
     Vc: float = 0.0    # critical volume cm3/mol (0 -> estimated from Zc = 0.2905 - 0.085 omega)
+    cas: str = ""
+    formula: str = ""
+    # EOS calibration (v7.5): 0 = use the standard alpha-function correlation from omega / no extra shift
+    m_pr: float = 0.0       # PR alpha-function parameter m, overrides the omega correlation when > 0
+    vshift: float = 0.0     # extra Peneloux volume shift [cm3/mol] added to the Rackett-based shift
+    note: str = ""          # e.g. "calibrated 2026-10-07 on 12 points"
 
     @property
     def Vc_est(self):
@@ -87,6 +93,16 @@ _VC = {'N2': 89.2, 'CO2': 94.07, 'H2S': 98.5, 'H2O': 55.95, 'C1': 98.6, 'C2': 14
 LIBRARY: dict[str, Component] = {
     r[0]: Component(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], Vc=_VC[r[0]]) for r in _LIB
 }
+BASE_KEYS = tuple(LIBRARY)                  # the original 20 components (kept first in every list)
+
+# ---- extended library (ChemSep-derived, see components_ext.py) -------------------------------------------------------
+from . import components_ext as _X          # noqa: E402
+
+for _r in _X.ROWS:
+    if _r[0] not in LIBRARY:
+        LIBRARY[_r[0]] = Component(_r[0], _r[1], _r[2], _r[3], _r[4], _r[5], tuple(_r[6]), _r[7], _r[8], _r[9], Vc=_r[10],
+                                   cas=_r[11], formula=_r[12])
+POLAR_FAMILIES = ("water", "alcohol", "glycol", "amine")     # components that go to the aqueous phase when water is present
 
 
 def library_keys():
@@ -167,6 +183,10 @@ def default_kij(a: Component, b: Component) -> float:
         return 0.0
     if "H2O" in pair:
         other = b if a.key == "H2O" else a
+        if other.family in ("alcohol", "glycol") and other.key not in ("MeOH", "MEG"):
+            return -0.07 if other.family == "alcohol" else -0.06
+        if other.family == "amine":
+            return -0.10
         if other.key == "CO2":
             return 0.19
         if other.key == "H2S":
@@ -188,6 +208,15 @@ def default_kij(a: Component, b: Component) -> float:
         return 0.0
     if "MEG" in pair:
         return 0.20      # keeps glycol out of the hydrocarbon liquid, as observed in practice
+    if fa in ("glycol",) or fb in ("glycol",):
+        return 0.0 if (fa in POLAR_FAMILIES and fb in POLAR_FAMILIES) else 0.20
+    if fa in ("alcohol", "amine") or fb in ("alcohol", "amine"):
+        if fa in POLAR_FAMILIES and fb in POLAR_FAMILIES:
+            return 0.0
+        other = b if fa in ("alcohol", "amine") else a
+        if other.key in ("CO2", "H2S"):
+            return 0.05
+        return 0.10
     if "MeOH" in pair:
         return 0.05
     if "CO2" in pair:

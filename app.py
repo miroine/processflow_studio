@@ -21,7 +21,7 @@ import os                                              # noqa: E402
 import sys                                             # noqa: E402
 import traceback                                       # noqa: E402
 
-APP_VERSION = "6.4"
+APP_VERSION = "7.9.1"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _PKGS = ("procsim", "ui", "pfd_canvas", "fieldmap_canvas")
 if _ROOT not in sys.path:
@@ -68,8 +68,8 @@ def _import_project():
     from ui import panels
     from ui.fluid import fluid_tab, workbook_tab
     from ui import theme
-    import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units, ui.surf, ui.scenarios, ui.fieldlife   # noqa: E401,F401
-    import procsim.surf, procsim.subsea_design, procsim.subsea_ops, procsim.scenarios, procsim.fieldlife, procsim.flowassure, procsim.hydrate, procsim.envelope, procsim.dehydration, procsim.fieldmap   # noqa: E401,F401
+    import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units, ui.surf, ui.scenarios, ui.fieldlife, ui.design, ui.prognosis, ui.timeseries, ui.dynamic, ui.data, ui.phasing, ui.advisor, ui.calibrate   # noqa: E401,F401
+    import procsim.surf, procsim.subsea_design, procsim.subsea_ops, procsim.scenarios, procsim.fieldlife, procsim.flowassure, procsim.hydrate, procsim.envelope, procsim.dehydration, procsim.process_units, procsim.flowassure2, procsim.design, procsim.network, procsim.prognosis, procsim.debottleneck, procsim.gasquality, procsim.examples_topside, procsim.fieldmap, procsim.timeseries, procsim.dynamics, procsim.dyn_thermo, procsim.examples_dynamic, procsim.datatools, procsim.phasing, procsim.facilities, procsim.eoscal, procsim.process_ext, procsim.pinch, procsim.advisor, procsim.tuning, procsim.surf_ext, procsim.phasecost, procsim.refrigeration, procsim.typical   # noqa: E401,F401
     import procsim, ui
     if getattr(procsim, "__version__", None) != APP_VERSION or getattr(ui, "__version__", None) != APP_VERSION:
         raise ImportError(f"version mismatch: app.py {APP_VERSION}, procsim {getattr(procsim, '__version__', '?')}, "
@@ -137,19 +137,49 @@ with st.sidebar:
     if c2.button("New (blank)", width="stretch"):
         S.load_model(new_model())
         st.rerun()
-    up = st.file_uploader("Open flowsheet (.json)", type=["json"])
-    if up is not None and ss.get("_loaded_file") != (up.name, up.size):
+    up = st.file_uploader("Open flowsheet (.json)", type=["json"], key=f"open_json_{ss.get('open_ver', 0)}")
+    if ss.get("_open_msg"):
+        st.success(ss.pop("_open_msg"))
+    if up is not None:
         try:
-            m = json.loads(up.getvalue().decode("utf-8"))
-            if "units" not in m or "streams" not in m or "fluid" not in m:
-                raise ValueError("not a ProcessFlow Studio flowsheet")
-            ss["_loaded_file"] = (up.name, up.size)
+            from procsim.flowsheet import coerce_model
+            m = coerce_model(json.loads(up.getvalue().decode("utf-8-sig")))
             S.load_model(m)
+            ss["open_ver"] = ss.get("open_ver", 0) + 1          # empties the uploader: the same file can be opened again
+            ss["_open_msg"] = f"Opened {up.name}: {len(ss.model['units'])} units, {len(ss.model['streams'])} streams"
             st.rerun()
-        except Exception as e:
-            st.error(f"Could not open file: {e}")
+        except Exception as e:                                   # noqa: BLE001
+            if type(e).__name__ in ("RerunException", "StopException") or "Rerun" in type(e).__name__:
+                raise
+            st.error(f"Could not open {up.name}: {e}")
     st.download_button("Save flowsheet (.json)", data=json.dumps(ss.model, indent=1, default=float),
                        file_name="flowsheet.json", mime="application/json", width="stretch")
+    with st.expander("🗂 Cases (variants in this file)"):
+        from procsim import cases as CS
+        cur = CS.active(ss.model)
+        pick = st.selectbox("Open case", CS.names(ss.model), key=f"case_pick_{ss.widget_ver}")
+        if pick != cur:
+            S.load_model(CS.switch(ss.model, pick))
+            st.rerun()
+        nn = st.text_input("New case from the open one", key=f"case_new_{ss.widget_ver}", placeholder="e.g. High GOR")
+        c1, c2 = st.columns(2)
+        if c1.button("Add case", key="case_add", disabled=not nn.strip()):
+            try:
+                S.push_edit("add case")
+                CS.add_case(ss.model, nn)
+                ss.model = CS.switch(ss.model, nn.strip())
+                S.load_model(ss.model, fit=False)
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
+        if c2.button("Delete open case", key="case_del", disabled=len(CS.names(ss.model)) < 2):
+            others = [n for n in CS.names(ss.model) if n != cur]
+            old = ss.model
+            ss.model = CS.switch(old, others[0])
+            CS.delete(ss.model, cur)
+            S.load_model(ss.model, fit=False)
+            st.rerun()
+        st.caption("Each case is a full copy (flowsheet, phases, specifications); all travel in the saved .json.")
     st.divider()
 
     def _units_changed():
@@ -162,16 +192,16 @@ with st.sidebar:
     height = st.slider("Diagram height", 420, 1000, 620, 20)
     st.caption("Tips: wheel = zoom · drag background = pan · Shift-drag = box select · "
                "Del = delete · F = flip · Ctrl+D / Ctrl+C·V = duplicate with specs · Ctrl+Z = undo · "
-               "double-click = property view")
+               "double-click = property view · O = rotate separator · + / − = element zoom")
     theme.sidebar_credit()
 
 S.ensure_solved()
 theme.header()
 
 # ------------------------------------------------------------------ main
-tab_pfd, tab_an, tab_wb, tab_case, tab_sc, tab_surf, tab_life, tab_fluid, tab_help = st.tabs(
+tab_pfd, tab_an, tab_wb, tab_case, tab_sc, tab_surf, tab_design, tab_life, tab_prog, tab_prof, tab_dyn, tab_data, tab_cal, tab_fluid, tab_help = st.tabs(
     ["🧩 Flowsheet", "📈 Analysis", "📋 Workbook", "🔬 Case study", "⚖️ Scenarios", "🌊 Subsea (SURF)",
-     "📅 Field life", "🧪 Fluid package", "ℹ️ Help & methods"])
+     "🛠️ Design", "📅 Field life", "🎯 Prognosis", "⏱️ Profile", "🌀 Dynamic", "🔁 Data", "🎚️ Calibrate", "🧪 Fluid package", "ℹ️ Help & methods"])
 
 with tab_pfd:
     if ss.solve_error:
@@ -179,6 +209,7 @@ with tab_pfd:
     if ss.get("auto_paused") and ss.sol is not None:
         st.info(f"Auto-solve is paused: the last solve took {ss.sol.seconds:.1f} s (limit {ss.get('auto_limit', 10):g} s). "
                 "Edit freely, then press **▶ Solve** — or raise the limit in the sidebar.")
+    ui.phasing.phase_bar()
     pfd_canvas(S.canvas_structure(ss.model), S.catalogue_payload(), S.results_payload(), ss.nonce,
                selected=ss.selected, height=height, status=S.status_line(), fit=ss.fit, key="pfd")
     ss.fit = False
@@ -204,8 +235,26 @@ with tab_sc:
 with tab_surf:
     ui.surf.surf_tab()
 
+with tab_design:
+    ui.design.design_tab()
+
 with tab_life:
     ui.fieldlife.fieldlife_tab()
+
+with tab_prog:
+    ui.prognosis.prognosis_tab()
+
+with tab_prof:
+    ui.timeseries.profile_tab()
+
+with tab_dyn:
+    ui.dynamic.dynamic_tab()
+
+with tab_data:
+    ui.data.data_tab()
+
+with tab_cal:
+    ui.calibrate.calibrate_tab()
 
 with tab_fluid:
     fluid_tab()

@@ -1,8 +1,11 @@
-"""Traced hydrocarbon phase envelope: bubble and dew lines found by bisection on the phase count at a series of
-pressures, with the cricondenbar refined by bisection on pressure and the cricondentherm as the warmest dew point.
+"""Traced hydrocarbon phase envelope.
 
-Sharper than a contour of a coarse flash grid near the cricondenbar and cricondentherm. Free water is ignored
-(only hydrocarbon liquid counts as a second phase)."""
+``trace_envelope`` follows the saturation curve by continuation (``satline``: one smooth path over the dew line, the
+cricondentherm, the cricondenbar and the critical point to the bubble line, plus optional lines of constant vapour
+fraction).  If the continuation cannot be started or finishes badly it falls back to the older method kept here:
+bubble and dew lines found by bisection on the phase count at a series of pressures, with the cricondenbar refined by
+bisection on pressure and the cricondentherm as the warmest dew point.  Free water is ignored (only hydrocarbon liquid
+counts as a second phase)."""
 from __future__ import annotations
 
 import math
@@ -40,7 +43,7 @@ def _scan(fp, z, P, T_lo, T_hi, n):
     return Ts, flags, idx
 
 
-def trace_envelope(fp, z, P_max=300.0, T_min=120.0, T_max=750.0, nP=26, nT=34):
+def _trace_grid(fp, z, P_max=300.0, T_min=120.0, T_max=750.0, nP=26, nT=34):
     """{"bubble": [(T K, P bar)], "dew": [(T, P)], "cricondenbar": (T, P) or None, "cricondentherm": (T, P) or None}."""
     z = np.asarray(z, float)
     z = z / z.sum()
@@ -82,3 +85,33 @@ def trace_envelope(fp, z, P_max=300.0, T_min=120.0, T_max=750.0, nP=26, nT=34):
             cb = best
     ct = max(dew, key=lambda p: p[0]) if dew else None
     return {"bubble": bub, "dew": dew, "cricondenbar": cb, "cricondentherm": ct}
+
+
+def trace_envelope(fp, z, P_max=300.0, T_min=120.0, T_max=750.0, nP=26, nT=34, quality=(), dry=True):
+    """Phase envelope of the hydrocarbon phases of composition ``z``.
+
+    Returns a dict with ``path`` (ordered [(T K, P bar)]), ``bubble`` and ``dew`` (the two branches), ``critical``,
+    ``cricondenbar``, ``cricondentherm`` (each (T K, P bar) or None), ``isopleths`` ({vapour fraction: [(T, P)]}) and
+    ``method`` ('continuation' or 'grid')."""
+    from . import satline as SL
+    z = np.asarray(z, float)
+    try:
+        r = SL.trace_envelope(fp, z, dry=dry)
+        if not r["complete"]:
+            raise SL.SatError("the curve did not pass the critical point")
+        iso = {}
+        for b in quality:
+            try:
+                line = SL.trace_isopleth(fp, z, float(b), r, dry=dry)
+            except Exception:            # an isopleth is a nicety: never lose the envelope because of one
+                line = []
+            if len(line) > 3:
+                iso[float(b)] = line
+        r["isopleths"] = iso
+        r["method"] = "continuation"
+        return r
+    except Exception:
+        g = _trace_grid(fp, z, P_max, T_min, T_max, nP, nT)
+        path = sorted(g["bubble"], key=lambda p: p[1]) + sorted(g["dew"], key=lambda p: -p[1])
+        g.update({"path": path, "critical": None, "isopleths": {}, "method": "grid", "complete": False})
+        return g

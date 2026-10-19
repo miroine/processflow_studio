@@ -11,11 +11,12 @@ from procsim.flowsheet import new_model, normalize, build_fluid, solve, port_edg
 from procsim.unitops import CATALOGUE, default_params, energy_name
 from procsim.streams import stream_properties, hydrate_risk
 from procsim.examples import EXAMPLES, WET_GAS
+from procsim import phasing as PH
 
-ENERGY_DIR = {"compressor": "in", "pump": "in", "heater": "in", "expander": "out", "cooler": "out",
-              "aircooler": "out", "subsea_booster": "in", "subsea_pump": "in", "subsea_compressor": "in",
-              "intensifier": "in"}
-WORK_TYPES = ("compressor", "pump", "expander", "subsea_booster", "subsea_pump", "subsea_compressor", "intensifier")
+ENERGY_DIR = {"gas_turbine": "out", "compressor": "in", "pump": "in", "heater": "in", "expander": "out", "cooler": "out",
+              "aircooler": "out", "chiller": "out", "subsea_booster": "in", "subsea_pump": "in", "subsea_compressor": "in",
+              "intensifier": "in", "subsea_heater": "in"}
+WORK_TYPES = ("gas_turbine", "compressor", "pump", "expander", "subsea_booster", "subsea_pump", "subsea_compressor", "intensifier")
 
 
 # --------------------------------------------------------------- formatting
@@ -57,6 +58,22 @@ def _duty(v, power):
     return f"{fmt(U.value('kW', v, power=power), 0 if (power or not U.field()) else 2)} {U.unit('kW', power=power)}"
 
 
+def valid_choice(key, options, multi=False):
+    """Drop a remembered selectbox / multiselect value that is no longer among the options (e.g. a stream name from
+    the previously loaded example). Streamlit returns the stale session value as it is, which then fails as a
+    KeyError where it is looked up."""
+    ss = st.session_state
+    if key not in ss:
+        return
+    v = ss[key]
+    opts = list(options)
+    if multi:
+        if not isinstance(v, (list, tuple)) or any(x not in opts for x in v):
+            del ss[key]
+    elif v not in opts:
+        del ss[key]
+
+
 def qfmt(label, v, digits=None):
     """'value unit' in the current display system for a labelled SI quantity."""
     from . import units as U
@@ -88,7 +105,7 @@ def init_state():
 
 
 EDIT_HISTORY = 25
-_NOT_UNDONE = ("scenarios", "fieldlife_result")          # kept as they are when an edit is undone
+_NOT_UNDONE = ("scenarios", "fieldlife_result", "prognosis_result", "profile", "dynamics")          # kept as they are when an edit is undone
 
 
 def push_edit(label):
@@ -131,23 +148,79 @@ def load_model(m, fit=True):
     st.session_state.sol_hash = None
     st.session_state.edit_hist = []
     st.session_state.fm_svg = None
+    reset_tab_state()
     bump(fit)
 
 
+_TAB_PREFIXES = ("tor_", "ss_", "pc_", "pcp_", "opv_", "opo_", "opc_", "dyn_", "prof_", "_dynbase_", "_prof_", "_datbase_", "dat_ed", "dat_tbl", "dat_comp", "dat_prof_", "dat_ev_", "dat_bval",
+                 "dat_bparam", "dat_bpat", "dat_btypes", "dat_bop", "dat_bmode")
+_TAB_KEYS = ("_tornado", "_calib_result", "_opt_result", "_phasecost", "_cal_msg", "_data_run", "data_edited", "dyn_result", "prof_result", "_dyn_builds")
+
+
+def reset_tab_state():
+    """A new flowsheet was loaded: forget every value the Profile / Dynamic / Data tabs keep in widgets or caches, so that
+    nothing typed for the previous flowsheet (a unit with the same name, a time unit, a run length ...) leaks into this one."""
+    ss = st.session_state
+    for k in list(ss.keys()):
+        if isinstance(k, str) and (k.startswith(_TAB_PREFIXES) or k in _TAB_KEYS) and k not in ("dyn_ver", "dat_ver", "prof_ver"):
+            try:
+                del ss[k]
+            except Exception:
+                pass
+    for k in ("dyn_ver", "dat_ver", "prof_ver"):
+        ss[k] = ss.get(k, 0) + 1
+
+
+_DEFAULT_ORIENT = {"separator": "v", "scrubber": "v", "separator3": "h"}
+
+
+def _norm_structure(units, streams, from_model):
+    """The part of the model the canvas owns (positions, connections, look, project phase), in one comparable form.
+    ``from_model``: units carry ``params`` (platform size) - otherwise they come straight from the canvas."""
+    out_u, out_s = {}, {}
+    for k, u in units.items():
+        if u.get("type") not in CATALOGUE:
+            continue
+        d = {"type": u["type"], "name": u["name"], "x": u["x"], "y": u["y"], "flip": bool(u.get("flip"))}
+        o = u.get("orient")
+        if o and o != _DEFAULT_ORIENT.get(u["type"]) and u["type"] in _DEFAULT_ORIENT:
+            d["orient"] = o
+        sc = u.get("scale")
+        if sc and abs(float(sc) - 1.0) > 1e-6:
+            d["scale"] = round(float(sc), 3)
+        for f in ("phase", "change", "color", "until"):
+            if u.get(f):
+                d[f] = u[f]
+        if u["type"] == "platform":
+            p = u.get("params", {}) if from_model else u
+            d["w"], d["h"] = int(round(float(p.get("w", 520) or 520))), int(round(float(p.get("h", 320) or 320)))
+        out_u[k] = d
+    for k, t in streams.items():
+        d = {"name": t["name"], "src": list(t["src"]), "dst": list(t["dst"])}
+        for f in ("phase", "change", "color", "until"):
+            if t.get(f):
+                d[f] = t[f]
+        out_s[k] = d
+    return {"units": out_u, "streams": out_s}
+
+
 def canvas_structure(model):
-    units = {k: {"type": u["type"], "name": u["name"], "x": u["x"], "y": u["y"], "flip": bool(u.get("flip"))}
-             for k, u in model["units"].items()}
-    streams = {k: {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
-               for k, s in model["streams"].items()}
-    return {"units": units, "streams": streams}
+    d = _norm_structure(model["units"], model["streams"], True)
+    for k, u in model["units"].items():
+        if u["type"] == "platform" and k in d["units"]:
+            d["units"][k]["kind"], d["units"][k]["note"] = u["params"].get("kind", ""), u["params"].get("note", "")
+    d["phases"] = [dict(p) for p in PH.phase_list(model)]
+    d["stage"] = int(model.get("stage", -1))
+    return d
 
 
 SHORT = {"column": "Column", "hx": "Heat exchanger", "separator": "2-phase separator",
          "separator3": "3-phase separator", "feed": "Feed stream", "product": "Product stream", "splitter": "Tee",
-         "teg_contactor": "TEG contactor", "well": "Well", "injection_well": "Injection well", "xmas_tree": "Xmas tree", "template": "Template", "jumper": "Jumper / PLET",
+         "teg_contactor": "TEG contactor", "amine_contactor": "Amine contactor", "relief_valve": "Relief valve (PSV)", "flare": "Flare", "comp_splitter": "Component splitter", "conv_reactor": "Conversion reactor", "eq_reactor": "Equilibrium reactor", "well": "Well", "injection_well": "Injection well", "xmas_tree": "Xmas tree", "template": "Template", "jumper": "Jumper / PLET",
          "flowline": "Flowline", "riser": "Riser", "subsea_valve": "SSIV / HIPPS", "subsea_booster": "Subsea booster",
          "subsea_pump": "Subsea pump", "subsea_compressor": "Subsea compressor", "subsea_separator": "Subsea separator",
-         "subsea_cooler": "Subsea cooler", "intensifier": "Intensifier", "cimv": "Chemical injection"}
+         "subsea_cooler": "Subsea cooler", "intensifier": "Intensifier", "cimv": "Chemical injection", "subsea_choke": "Subsea choke", "subsea_manifold": "Subsea manifold", "mpfm": "Multiphase flow meter", "pig_station": "Pig launcher / receiver", "subsea_hydrocyclone": "Subsea hydrocyclone", "subsea_heater": "Subsea heater",
+         "chiller": "Chiller", "membrane": "Membrane", "mol_sieve": "Mol. sieve dryer", "platform": "Offshore platform", "gas_turbine": "Gas turbine", "phase_splitter": "Phase splitter", "deliquifier": "Deliquifier"}
 
 
 def catalogue_payload():
@@ -169,6 +242,20 @@ def default_feed_comp(model):
     return comp
 
 
+def _take_look(mu, u):
+    """Copy the canvas-owned appearance of a unit (orientation, element zoom, project phase, colour, platform size)."""
+    for f in ("orient", "scale", "phase", "change", "color", "until"):
+        if u.get(f):
+            mu[f] = u[f]
+        else:
+            mu.pop(f, None)
+    if mu.get("type") == "platform":
+        if u.get("w"):
+            mu["params"]["w"] = float(u["w"])
+        if u.get("h"):
+            mu["params"]["h"] = float(u["h"])
+
+
 def merge_canvas_event(ev):
     """Apply a canvas event to the session model. Returns True if the canvas must resync."""
     ss = st.session_state
@@ -184,6 +271,7 @@ def merge_canvas_event(ev):
         if uid in model["units"]:
             mu = model["units"][uid]
             mu["x"], mu["y"], mu["flip"] = u["x"], u["y"], bool(u.get("flip"))
+            _take_look(mu, u)
         else:
             src = (ev.get("copies") or {}).get(uid)
             if src in model["units"] and model["units"][src]["type"] == u["type"]:
@@ -196,6 +284,7 @@ def merge_canvas_event(ev):
                 p["composition"] = default_feed_comp(model)
             model["units"][uid] = {"type": u["type"], "name": u["name"], "x": u["x"], "y": u["y"],
                                    "flip": bool(u.get("flip")), "params": p}
+            _take_look(model["units"][uid], u)
     # unique unit names (canvas proposes names; Python has the last word)
     seen = set()
     for uid, u in model["units"].items():
@@ -205,8 +294,13 @@ def merge_canvas_event(ev):
                 n += 1
             u["name"] = f"{base} ({n})"
         seen.add(u["name"])
-    model["streams"] = {sid: {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
-                        for sid, s in jst.items()}
+    model["streams"] = {}
+    for sid, s in jst.items():
+        t = {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
+        for f in ("phase", "change", "color", "until"):
+            if s.get(f):
+                t[f] = s[f]
+        model["streams"][sid] = t
     # unique stream names
     used = {u["name"] for u in model["units"].values()}
     for sid, s in model["streams"].items():
@@ -223,15 +317,12 @@ def merge_canvas_event(ev):
     ss.selected = [i for i in ev.get("selected", []) if i in model["units"] or i in model["streams"]]
     if ev.get("event") == "export_svg" and ev.get("svg"):
         ss.svg = ev["svg"]
-    return canvas_structure(model) != _js_normal(js)
+    return _norm_structure(model["units"], model["streams"], True) != _js_normal(js)
 
 
 def _js_normal(js):
-    units = {k: {"type": u["type"], "name": u["name"], "x": u["x"], "y": u["y"], "flip": bool(u.get("flip"))}
-             for k, u in js.get("units", {}).items() if u.get("type") in CATALOGUE}
-    streams = {k: {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
-               for k, s in js.get("streams", {}).items()}
-    return {"units": units, "streams": streams}
+    return _norm_structure({k: u for k, u in js.get("units", {}).items() if u.get("type") in CATALOGUE},
+                           js.get("streams", {}), False)
 
 
 def process_canvas_value(key="pfd"):
@@ -255,11 +346,15 @@ def process_canvas_value(key="pfd"):
 def model_hash(model):
     m = copy.deepcopy(model)
     for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios", "heating", "fieldlife",
-              "fieldlife_result", "waxsand", "power"):   # post-processing settings and results: editing them never re-solves
+              "fieldlife_result", "waxsand", "power", "fa2", "design", "prognosis", "prognosis_result", "profile", "profile_result", "dynamics", "calibration", "calibration_applied", "calibration_summary", "phasecost", "phasecost_result", "cases", "case_active"):   # post-processing settings and results: editing them never re-solves
         m.pop(k, None)
+    m["units"] = {k: u for k, u in m["units"].items() if u["type"] != "platform"}      # drawing areas never change the solution
     for u in m["units"].values():
-        for k in ("x", "y", "flip"):
+        for k in ("x", "y", "flip", "orient", "scale", "color"):
             u.pop(k, None)
+    for t in m["streams"].values():
+        t.pop("color", None)
+    m["phases"] = [p["id"] for p in PH.phase_list(m)]                                    # names and colours are cosmetic
     return hashlib.sha1(json.dumps(m, sort_keys=True, default=str).encode()).hexdigest()
 
 
@@ -341,6 +436,14 @@ def _unit_label(u, res):
                 f"{qfmt('Gas [MSm³/d]', res.get('Gas rate [MSm³/d]', 0.0), 2)}")
     if t == "teg_contactor" and res.get("Water dew point of dried gas [°C]") is not None:
         return f"dew point {qfmt('Dew point [°C]', res['Water dew point of dried gas [°C]'], 1)}"
+    if t == "amine_contactor" and res.get("CO₂ in sweet gas [mol%]") is not None:
+        return f"CO₂ {qfmt('CO₂ in sweet gas [mol%]', res['CO₂ in sweet gas [mol%]'], 2)} · {qfmt('Reboiler duty [kW]', res['Reboiler duty [kW]'], 0)}"
+    if t == "relief_valve" and res.get("Selected orifice") is not None:
+        return f"orifice {str(res['Selected orifice']).split(' ')[0]} · {qfmt('Relieving load [kg/h]', res['Relieving load [kg/h]'], 0)}"
+    if t == "flare" and res.get("Heat release [MW]") is not None:
+        return f"{qfmt('Heat release [MW]', res['Heat release [MW]'], 0)} · flame {qfmt('Flame length [m]', res['Flame length [m]'], 0)}"
+    if t in ("conv_reactor", "eq_reactor") and res.get("Outlet T [°C]") is not None:
+        return f"→ {qfmt('Outlet T [°C]', res['Outlet T [°C]'], 0)}"
     if t == "injection_well" and res.get("Injection rate [Sm³/d]") is not None:
         return (f"{qfmt('Rate [Sm³/d]', res['Injection rate [Sm³/d]'], 0)} · margin "
                 f"{qfmt('Margin [bar]', res['Injection margin [bar]'], 0)}")
@@ -351,6 +454,18 @@ def _unit_label(u, res):
         return f"ID {qfmt('ID [mm]', res['Vessel ID [mm]'], 0)} · {qfmt('Vessel P [bar(a)]', res['Vessel P [bar(a)]'], 0)}"
     if t == "subsea_cooler" and res.get("Outlet T [°C]") is not None:
         return f"→ {qfmt('Outlet T [°C]', res['Outlet T [°C]'], 0)} · {qfmt('Duty [kW]', res['Duty rejected to sea [kW]'], 0)}"
+    if t == "subsea_choke" and res.get("ΔP [bar]") is not None:
+        return f"ΔP {qfmt('ΔP [bar]', res['ΔP [bar]'], 1)} · {qfmt('Outlet P [bar(a)]', res['Outlet P [bar(a)]'], 0)}"
+    if t == "subsea_manifold" and res.get("Header velocity [m/s]") is not None:
+        return f"{res['Branches flowing']} branches · {res['Header velocity [m/s]']:.1f} m/s"
+    if t == "mpfm" and res.get("GVF at line conditions [%]") is not None:
+        return f"GVF {res['GVF at line conditions [%]']:.0f} % · WLR {res['Water-liquid ratio [%]']:.0f} %"
+    if t == "pig_station" and res.get("Transit time [h]") is not None:
+        return f"{res['Transit time [h]']:.1f} h · slug {res['Liquid swept ahead of the pig [m³]']:.0f} m³"
+    if t == "subsea_hydrocyclone" and res.get("Oil in clean water [ppm vol]") is not None:
+        return f"oil in water {res['Oil in clean water [ppm vol]']:.0f} ppm"
+    if t == "subsea_heater" and res.get("Heat duty [kW]") is not None:
+        return f"→ {qfmt('Outlet T [°C]', res['Outlet T [°C]'], 0)} · {qfmt('Duty [kW]', res['Heat duty [kW]'], 0)}"
     if t == "intensifier" and res.get("Outlet P [bar(a)]") is not None:
         return f"→ {qfmt('Outlet P [bar(a)]', res['Outlet P [bar(a)]'], 0)} · 1:{res['Area ratio [-]']:.1f}"
     if t == "cimv" and res.get("Chemical rate [L/h]") is not None:
@@ -381,7 +496,18 @@ def _unit_label(u, res):
     if t == "scrubber" and res.get("Gas load [% of max]") is not None:
         return (f"{qfmt('Selected diameter [mm]', res['Selected diameter [mm]'], 0 if 'SI' in _sys() else 1)} · "
                 f"load {res['Gas load [% of max]']:.0f} %")
-    if t in ("separator", "separator3") and res.get("Vessel T [°C]") is not None:
+    if t == "gas_turbine" and res.get("Shaft power [kW]") is not None:
+        k_ = "Electric power [kW]" if res.get("Electric power [kW]") is not None else "Shaft power [kW]"
+        return f"{qfmt(k_, res[k_], 0)} · {res['Net efficiency (LHV) [%]']:.0f} %"
+    if t == "chiller" and res.get("Refrigeration power [kW]") is not None:
+        return f"{qfmt('Duty removed [kW]', res['Duty removed [kW]'], 0)} · COP {res['COP [-]']:.1f}"
+    if t == "membrane" and res.get("CO₂ in the retentate [mol%]") is not None:
+        return f"CO₂ {res['CO₂ in the feed [mol%]']:.1f} → {res['CO₂ in the retentate [mol%]']:.2f} %"
+    if t == "mol_sieve" and res.get("Water out [ppmv]") is not None:
+        return f"{res['Water out [ppmv]']:.1f} ppmv"
+    if t == "deliquifier" and res.get("Liquid left in the gas [mg/Sm³]") is not None:
+        return f"{res['Liquid left in the gas [mg/Sm³]']:.1f} mg/Sm³ left · ID {res['Required vessel / element diameter [mm]']:.0f} mm"
+    if t in ("separator", "separator3", "phase_splitter") and res.get("Vessel T [°C]") is not None:
         return f"{qfmt('Vessel T [°C]', res['Vessel T [°C]'], 1)} · {qfmt('Vessel P [bar(a)]', res['Vessel P [bar(a)]'], 1)}"
     if t == "recycle":
         return f"{res.get('Iterations', '')} it" if res.get("Converged") == "Yes" else "not converged"
@@ -415,9 +541,12 @@ def results_payload():
                                          + ([f"⚠ Below hydrate T ({qfmt('T [°C]', p['Hydrate T (inhibited) [°C]'], 1)} incl. inhibitor)"]
                                             if entry.get("warn") else []))
         out["streams"][sid] = entry
+    solved_stage = PH.resolve_stage(model)
     for uid, u in model["units"].items():
         e = {}
-        if sol and current:
+        if sol and current and not PH.present(u, model, solved_stage):
+            e["status"] = "inactive"                           # not in place in the stage that was solved
+        elif sol and current:
             e["status"] = sol.status.get(uid, "unsolved")
             res = sol.results.get(uid) or {}
             e["label"] = _unit_label(u, res)
@@ -431,7 +560,7 @@ def results_payload():
         t = u["type"]
         dirn = ENERGY_DIR.get(t)
         duty_val = None
-        if t in ("separator", "separator3") and abs(float(u["params"].get("duty", 0) or 0)) > 0:
+        if t in ("separator", "separator3", "phase_splitter") and abs(float(u["params"].get("duty", 0) or 0)) > 0:
             dirn = "in" if u["params"]["duty"] > 0 else "out"
         if t == "pipe" and u["params"].get("heat") == "Overall U to ambient" and float(u["params"].get("U", 0)) > 0:
             dirn = "out"

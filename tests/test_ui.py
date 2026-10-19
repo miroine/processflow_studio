@@ -239,7 +239,7 @@ st.HOOK["press"].add("envgo_charts")
 t = time.time()
 run()
 c.check("phase envelope computed and plotted", "env_charts" in ss and
-        any(any(type(tr).__name__ == "Contour" for tr in f.data) for f in st.HOOK["charts"]), "")
+        any(any(str(tr.kw.get("name", "")) == "Dew-point line" for tr in f.data) for f in st.HOOK["charts"]), "")
 print(f"  envelope {time.time() - t:.1f} s")
 
 # ---- 10. paste from the canvas copies specifications ----------------------------------------------
@@ -451,7 +451,7 @@ c.check("SURF example solved, every subsea unit ok",
         ss.sol is not None and all(ss.sol.status.get(k) == "ok" for k in surf_ids),
         str({ss.model["units"][k]["name"]: ss.sol.errors.get(k) for k in surf_ids if ss.sol.status.get(k) != "ok"}))
 c.check("canvas palette offers the SURF group",
-        sum(1 for v in a["catalogue"].values() if v["category"] == "Subsea (SURF)") == 15, "")
+        sum(1 for v in a["catalogue"].values() if v["category"] == "Subsea (SURF)") == 21, "")
 w1, tmp = uid_by_name("W-1"), uid_by_name("TMP-100 Template")
 c.check("well label shows wellhead P and T", a["results"]["units"][w1]["label"].startswith("WH"),
         a["results"]["units"][w1]["label"])
@@ -896,6 +896,312 @@ ss.selected = []
 run()
 c.check("v6.3 without UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
 
+# ---- 16l. v6.6: regime & corrosion tab (OLGA-style screening) ----------------------------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Subsea field (SURF)"))
+st.HOOK["press"].add("Load example")
+run()
+h0 = ss.sol_hash
+c.check("regime & corrosion tab renders without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("emulsion viscosity chart rendered", any("oil-water viscosity" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("corrosion inputs and PVT button present", any(k_ == "fa2_pvt_run" for _, _, k_ in st.HOOK["log"]) and
+        any(str(k_).startswith("fa2_life_y") for _, _, k_ in st.HOOK["log"]), "")
+pending.append((f"fa2_life_y_{ss.widget_ver}", 10.0))
+run()
+c.close("corrosion life saved with the flowsheet", ss.model["fa2"]["life_y"], 10.0, 1e-12)
+c.eq("flow-assurance settings do not re-solve", ss.sol_hash, h0)
+st.HOOK["press"].add("Build the PVT table")
+run()
+c.check("PVT table built and stored", bool(ss.get("fa2_pvt")) and len(ss["fa2_pvt"]["rows"]) == 48, str(len((ss.get("fa2_pvt") or {}).get("rows", []))))
+c.check("regime tab: no UI errors after the edits", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+
+# ---- 16m. v6.7: Design tab (size sweep, gas-lift allocation, ESP, pipe network) -----------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Subsea field (SURF)"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("design tab renders without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("pipe network solved and charted", any("Node pressures" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+pending.append(("ds_ids", "250, 300, 400"))
+st.HOOK["press"].add("Run the sweep")
+run()
+c.check("size sweep stored", bool(ss.get("ds_result")) and len(ss["ds_result"]["rows"]) == 3, str(ss.get("ds_result", {}).get("rows", [])[:1]))
+c.check("size sweep chart rendered", any("Flowline inside diameter" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("size sweep recommends a diameter", (ss["ds_result"]["rec"] or {}).get("ID [mm]") in (250.0, 300.0, 400.0), str(ss["ds_result"]["rec"]))
+c.check("ESP panel: no UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+h0 = ss.sol_hash
+pending.append((f"net_nodes_Gas_{ss.widget_ver}", "Plant, P, 70, 0\nJ, J, 0, 0\nF, Q, 1.0, 0\n"))
+pending.append((f"net_pipes_Gas_{ss.widget_ver}", "name, from, to, length_m, ID_mm, roughness_mm\nT, J, Plant, 20000, 250, 0.05\nF1, F, J, 5000, 200, 0.05\n"))
+run()
+c.check("network text saved with the flowsheet", "net_nodes_Gas" in ss.model.get("design", {}), str(ss.model.get("design")))
+c.eq("design settings do not re-solve", ss.sol_hash, h0)
+pending.append(("net_phase", "Liquid"))
+run()
+c.check("liquid network renders", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+pending.append(("net_phase", "Gas"))
+run()
+c.check("gas network renders again", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+pending.append((f"net_nodes_Gas_{ss.widget_ver}", "a, J, 0, 0\n"))
+st.HOOK["errors"].clear()
+run()
+c.check("a bad network is reported in the app (an error message), not raised", len(st.HOOK["errors"]) > 0, str(st.HOOK["errors"])[:200])
+st.HOOK["errors"].clear()
+pending.append((f"net_nodes_Gas_{ss.widget_ver}", "Plant, P, 70, 0\nJ, J, 0, 0\nF, Q, 1.0, 0\n"))
+run()
+
+# ---- 16n. v7.0: Prognosis tab (strategy comparison, uncertainty, summary) - stored results seeded, no long runs ----
+from ui.fieldlife import settings_key as _flk            # noqa: E402
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Subsea field (SURF)"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("prognosis tab renders without errors (nothing run yet)", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("prognosis run buttons present", any(k_ == "pg_run_strat" for _, _, k_ in st.HOOK["log"]) and
+        any(k_ == "pg_run_unc" for _, _, k_ in st.HOOK["log"]), "")
+h0 = ss.sol_hash
+_key = [ss.sol_hash, _flk(ss.model)]
+_ann = [{"Year": y, "Gas [MSm³/d]": 4.5 - 0.3 * y, "Oil/condensate [Sm³/d]": 0.0} for y in range(1, 11)]
+_rows = [{"Strategy": "Plateau 100 % (as in the flowsheet)", "Best wells": 4, "Recovery factor [%]": 51.0, "Plateau [years]": 3.0,
+          "Production years": 14, "NPV [MUSD]": 1000.0, "CAPEX [MUSD]": 900.0, "Unit cost [USD/boe]": 18.0,
+          "Boosting starts (year)": None},
+         {"Strategy": "Plateau 75 % (smaller facility)", "Best wells": 3, "Recovery factor [%]": 50.0, "Plateau [years]": 4.0,
+          "Production years": 15, "NPV [MUSD]": 900.0, "CAPEX [MUSD]": 800.0, "Unit cost [USD/boe]": 19.0,
+          "Boosting starts (year)": None}]
+_unc_rows = [{"Wells": n_, "Expected NPV [MUSD]": 900.0 + 50 * n_, "NPV P90 [MUSD]": 600.0 + 40 * n_, "NPV P50 [MUSD]": 880.0 + 50 * n_,
+              "NPV P10 [MUSD]": 1300.0 + 60 * n_, "P(NPV<0) [%]": 0.0, "RF P90 [%]": 50.0, "RF P50 [%]": 51.0, "RF P10 [%]": 52.0,
+              "Plateau P50 [years]": 3.0, "CAPEX [MUSD]": 900.0 + 50 * n_} for n_ in (3, 4)]
+_b = {"P90": [x["Gas [MSm³/d]"] * 0.8 for x in _ann], "P50": [x["Gas [MSm³/d]"] for x in _ann],
+      "P10": [x["Gas [MSm³/d]"] * 1.2 for x in _ann]}
+ss.model["prognosis_result"] = {
+    "strategy": {"rows": _rows, "best": ["Plateau 100 % (as in the flowsheet)", 4], "key": _key, "pset": "x",
+                 "profiles": {_rows[0]["Strategy"]: _ann, _rows[1]["Strategy"]: _ann}},
+    "unc": {"rows": _unc_rows, "samples": [], "per_run": [{"Wells": 3, "Sample": "s0", "NPV [MUSD]": 1.0}], "best": 4,
+            "robust": 3, "bands": _b, "bands_all": {}, "kind": "Gas", "n": 10, "ranges": {}, "active": [],
+            "in_place_auto": True, "rate_key": "Gas [MSm³/d]", "key": _key, "pset": "x"}}
+st.HOOK["errors"].clear()
+run()
+c.check("prognosis tab renders stored results without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("strategy chart rendered", any("Drainage strategies" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("uncertainty chart rendered", any("Uncertainty" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.eq("prognosis results do not re-solve", ss.sol_hash, h0)
+html = build_report(ss.model, ss.sol, None, "Prognosis")
+c.check("report has the prognosis section", "Prognosis (screening)" in html and "Drainage strategies" in html and "most robust" in html, "")
+ss.model["fieldlife"] = dict(ss.model.get("fieldlife") or {}, disc=9.0)
+c.check("prognosis results go stale when the field-life settings change",
+        "Prognosis (screening)" not in build_report(ss.model, ss.sol, None, "Prognosis"), "")
+ss.model["fieldlife"]["disc"] = 8.0
+ss.model.pop("prognosis_result", None)
+
+# ---- 16o. v7.1: topside examples and the debottlenecking panel ----------------------------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Debottlenecking (topside)"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("debottlenecking example loads and renders without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("utilisation chart rendered", any("Capacity utilisation" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("sweep button present", any(k_ == "db_run" for _, _, k_ in st.HOOK["log"]), "")
+h0 = ss.sol_hash
+ss["db_f"] = "1.0, 1.3"
+st.HOOK["press"].add("db_run")
+run()
+c.check("throughput sweep stored", bool(ss.get("db_result")) and len(ss["db_result"]["sw"]["series"]) >= 6, str(ss.get("db_result", {}).keys()))
+c.check("throughput sweep chart rendered", any("Throughput sweep" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("sweep summary shows the first limit", any("headroom" in t or "Already at the limit" in t for t in st.HOOK["texts"]), str(st.HOOK["texts"][-3:]))
+c.eq("debottlenecking does not re-solve or change the flowsheet", ss.sol_hash, h0)
+c.check("debottlenecking: no UI errors after the sweep", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+for nm_ in [n for n in EXAMPLES if "(topside)" in n]:
+    st.HOOK["errors"].clear()
+    st.HOOK["values"]["selectbox:Example:"] = nm_
+    st.HOOK["press"].add("Load example")
+    run()
+    bad_ = [u for u, v in ss.sol.status.items() if v in ("error", "missing", "unsolved")]
+    c.check(f"topside example loads and solves in the app: {nm_[:30]}", not st.HOOK["errors"] and not bad_, str(st.HOOK["errors"])[:200] + str(bad_))
+    if "Gas mixing" in nm_:
+        from procsim.streams import stream_properties as _sp
+        _sid = next(k_ for k_, d_ in ss.model["streams"].items() if d_["name"] == "Sales gas")
+        _w = _sp(ss.sol.streams[_sid], ss.sol.fp)["Wobbe index [MJ/Sm³]"]
+        c.close("gas mixing: the Adjust brings the sales gas to a Wobbe index of 50.5", _w, 50.5, 0.01)
+
+# ---- 16p. v7.2: Profile tab (one steady-state solve per time step) --------------------------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Oil stabilisation"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("profile tab renders on an example without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("profile tab offers the table, the fill and the run buttons",
+        {"prof_fill", "prof_run"} <= {k_ for _, _, k_ in st.HOOK["log"]}, "")
+h0 = ss.sol_hash
+ss["prof_n"] = 4
+ss["prof_fe"] = 0.6
+st.HOOK["press"].add("prof_fill")
+run()
+rows_ = ss.model.get("profile", {}).get("rows") or []
+c.eq("filling the table creates the requested steps", len(rows_), 4)
+c.close("last step rate = factor x flowsheet rate", rows_[-1]["Well fluid | flow"], 1800.0, 1e-9)
+c.check("the table is shown in an editor", any((k_ or "").startswith("prof_ed_") for _, _, k_ in st.HOOK["log"]), "")
+st.HOOK["errors"].clear()
+st.HOOK["press"].add("prof_run")
+run()
+res_ = (ss.get("prof_result") or {}).get("res")
+c.check("profile run stored", bool(res_) and len(res_["steps"]) == 4, str(ss.get("prof_result", {}).keys()))
+c.eq("every step solved", [s_["status"] for s_ in res_["steps"]], ["ok"] * 4)
+c.check("profile chart rendered", any("Profile results" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.eq("running a profile does not re-solve or change the flowsheet", ss.sol_hash, h0)
+c.check("profile: no UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("profile survives in the flowsheet but is not part of the solve hash", "profile" in ss.model and
+        __import__("ui.state", fromlist=["x"]).model_hash(ss.model) == h0, "")
+ss["prof_n"] = 5
+st.HOOK["press"].add("prof_fill")
+run()
+c.check("results are flagged as out of date after the table changes",
+        any("run the profile again" in t_ for t_ in st.HOOK["texts"]), str(st.HOOK["texts"][-4:]))
+st.HOOK["errors"].clear()
+st.HOOK["press"].add("New (blank)")
+run()
+c.check("profile tab on a blank flowsheet shows a hint, not an error", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+
+# ---- 16r. v7.3: Dynamic tab ------------------------------------------------------------------------------------------
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Dynamic: HP separator"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("dynamic tab renders on a dynamic example without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("dynamic tab offers a run button", "dyn_run" in {k_ for _, _, k_ in st.HOOK["log"]}, "")
+c.check("the example carries its dynamic settings", bool(ss.model.get("dynamics", {}).get("events")), "")
+h0 = ss.sol_hash
+st.HOOK["press"].add("dyn_run")
+run()
+res_ = (ss.get("dyn_result") or {}).get("res")
+c.check("dynamic run stored", bool(res_) and res_["status"] == "ok", str(res_ and res_["message"]))
+c.check("dynamic chart rendered", any("Dynamic results" in str(f.layout.get("title", "")) for f in st.HOOK["charts"]), "")
+c.check("dynamic: no UI errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.eq("running a dynamic simulation does not re-solve", ss.sol_hash, h0)
+c.check("dynamic settings are saved with the flowsheet but are not part of the solve hash", "dynamics" in ss.model and
+        __import__("ui.state", fromlist=["x"]).model_hash(ss.model) == h0, "")
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Dynamic: compressor"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("dynamic tab renders on the compressor example", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Oil stabilisation"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("dynamic tab on a flowsheet it cannot handle shows a hint, not an error", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+st.HOOK["errors"].clear()
+st.HOOK["press"].add("New (blank)")
+run()
+c.check("dynamic tab on a blank flowsheet shows a hint, not an error", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+
+# ---- 16s. v7.4: Data tab (import, batch edit, export, Python editor) ----------------------------------------------------
+os.environ["PFS_PYTHON_EDITOR"] = "on"
+
+
+class _Up:
+    def __init__(self, name, data):
+        self.name, self._d, self.size = name, data, len(data)
+
+    def getvalue(self):
+        return self._d
+
+
+def _uid(name):
+    return next(k_ for k_, u_ in ss.model["units"].items() if u_["name"] == name)
+
+
+st.HOOK["errors"].clear()
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Oil stabilisation"))
+st.HOOK["press"].add("Load example")
+run()
+c.check("data tab renders without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+keys_ = {k_ for _, _, k_ in st.HOOK["log"]}
+c.check("data tab offers the uploader, the downloads and the editor", {"dat_up", "dat_run", "dat_dl_xl", "dat_dl_zip", "dat_exp_csv"} <= keys_, str(sorted(k for k in keys_ if k and k.startswith("dat_"))))
+h0 = ss.sol_hash
+p0 = ss.model["units"][_uid("VLV-100")]["params"]["P_out"]
+n0 = len(ss.get("edit_hist") or [])
+st.HOOK["values"]["dat_up"] = _Up("changes.csv", b"Unit,Parameter,Value\nVLV-100,P_out,22.5\nE-300,T_out,35\n")
+st.HOOK["errors"].clear()
+run()
+c.check("importing a CSV shows the plan without changing the flowsheet", not st.HOOK["errors"] and ss.model["units"][_uid("VLV-100")]["params"]["P_out"] == p0, str(st.HOOK["errors"])[:300])
+c.check("the apply button is offered", "dat_imp_apply" in {k_ for _, _, k_ in st.HOOK["log"]}, "")
+st.HOOK["press"].add("dat_imp_apply")
+run()
+c.close("applying the import writes the value", ss.model["units"][_uid("VLV-100")]["params"]["P_out"], 22.5, 0)
+c.eq("and records one undo step", len(ss.get("edit_hist") or []), n0 + 1)
+c.check("the flowsheet was re-solved", ss.sol_hash != h0 and ss.sol is not None, "")
+S_ = __import__("ui.state", fromlist=["x"])
+S_.undo_edit()
+c.close("undo restores the value", ss.model["units"][_uid("VLV-100")]["params"]["P_out"], p0, 0)
+st.HOOK["values"]["dat_up"] = _Up("bad.csv", b"Unit,Parameter,Value\nNOPE,P_out,1\n")
+st.HOOK["errors"].clear()
+run()
+c.check("a file with an error is shown as a message, not raised", any("cannot be applied" in e_ for e_ in st.HOOK["errors"]), str(st.HOOK["errors"])[:300])
+st.HOOK["errors"].clear()
+st.HOOK["values"]["dat_up"] = _Up("c.yaml", b"units:\n  K-300 LP comp: {eff: 82}\n")
+run()
+st.HOOK["press"].add("dat_imp_apply")
+run()
+c.close("a YAML import applies", ss.model["units"][_uid("K-300 LP comp")]["params"]["eff"], 82.0, 0)
+st.HOOK["values"].pop("dat_up", None)
+# batch operation
+ss["dat_btypes"] = ["cooler"]
+ss["dat_bparam"] = "dP"
+ss["dat_bop"] = "Multiply by"
+ss["dat_bval"] = "2"
+st.HOOK["values"]["radio:Edit:"] = "One operation on many units"
+ss["dat_bmode"] = "One operation on many units"
+d0 = ss.model["units"][_uid("E-300")]["params"]["dP"]
+run()
+c.check("batch operation offers its apply button", "dat_bop_plan_apply" in {k_ for _, _, k_ in st.HOOK["log"]}, str(sorted(k for _, _, k in st.HOOK["log"] if k and "dat_b" in k)))
+st.HOOK["press"].add("dat_bop_plan_apply")
+run()
+c.close("batch multiply applied to the cooler", ss.model["units"][_uid("E-300")]["params"]["dP"], d0 * 2, 1e-12)
+ss["dat_bmode"] = "A table of one unit type"
+ss["dat_ttype"] = "cooler"
+st.HOOK["errors"].clear()
+run()
+c.check("the unit-type table editor renders", not st.HOOK["errors"] and any((k_ or "").startswith("dat_tbl_") for _, _, k_ in st.HOOK["log"]), str(st.HOOK["errors"])[:300])
+ss["dat_bmode"] = "Feed compositions"
+run()
+c.check("the composition editor renders", not st.HOOK["errors"] and any((k_ or "").startswith("dat_comp_") for _, _, k_ in st.HOOK["log"]), str(st.HOOK["errors"])[:300])
+# python editor
+ss["dat_code"] = "df = tables['Unit results']\ntables['Power only'] = df[df['Quantity'].str.contains('Power')]\nprint('ok', len(tables))\n"
+st.HOOK["press"].add("dat_run")
+run()
+ed_ = ss.get("data_edited")
+c.check("the script ran and its tables are kept", bool(ed_) and "Power only" in ed_["tables"], str(ss.get("_data_run", {}).get("error")))
+c.check("print output is available", "ok" in (ss.get("_data_run") or {}).get("stdout", ""), "")
+c.check("no UI errors after the script", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+ss["dat_code"] = "import os\n"
+st.HOOK["press"].add("dat_run")
+run()
+c.check("a forbidden script is refused with a message", not (ss.get("_data_run") or {}).get("ok", True) and "not allowed" in (ss.get("_data_run") or {}).get("error", ""), str((ss.get("_data_run") or {}).get("error")))
+st.HOOK["errors"].clear()
+os.environ.pop("PFS_PYTHON_EDITOR", None)
+run()
+c.check("with the editor switched off the tab explains how to enable it", not st.HOOK["errors"] and "dat_run" not in {k_ for _, _, k_ in st.HOOK["log"]}, "")
+st.HOOK["errors"].clear()
+st.HOOK["press"].add("New (blank)")
+run()
+c.check("data tab on a blank flowsheet shows hints, not errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+
+# ---- 16z. remembered choices from a previous example (Streamlit Cloud KeyError in compositions_panel) -------
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if "Gas lift" in n)
+st.HOOK["press"].add("Load example")
+run()
+for k_, v_ in (("ch_env_stream", "No such stream"), ("an_comp_sel", ["No such stream"]), ("fa_path", ["Gone"]),
+               ("dose_st", "Gone"), ("tb_fl", "Gone"), ("td_fl", "Gone"), ("surf_budget_well", "Gone"),
+               ("hy_rm", "Gone"), ("sc_base", "Gone"), ("sc_chart", "Gone"), ("sc_pick", "Gone"),
+               ("fa2_emu", "Gone"), ("fa2_pvt_stream", "Gone"), ("ds_fl", "Gone"), ("esp_stream", "Gone"), ("pg_opts", ["Gone"]), ("db_feeds", ["Gone"])):
+    ss[k_] = v_
+for uid_ in list(ss.model["units"])[:6]:
+    ss[f"cs_key_{uid_}"] = "no_such_param"
+st.HOOK["errors"].clear()
+run()
+c.check("stale choices from another example do not crash the app", not st.HOOK["errors"], str(st.HOOK["errors"])[:400])
+c.check("stale phase-envelope stream replaced by a valid one", ss.get("ch_env_stream") in
+        {s_["name"] for s_ in ss.model["streams"].values()}, str(ss.get("ch_env_stream")))
+
 # ---- 17. stale modules after an update (the Streamlit Cloud ImportError) ---------------------------
 import types   # noqa: E402
 stale = types.ModuleType("procsim.streams")          # an old streams module without hydrate_state
@@ -914,6 +1220,198 @@ sys._pfs_code_fp = -1                                 # files changed on disk si
 old_sol = ss.sol
 run()
 c.check("a code change invalidates the cached solution and re-solves", ss.sol is not old_sol and ss.sol is not None, "")
+
+# ---- 16t. v7.4.1: loading a flowsheet forgets the Profile / Dynamic / Data tab state -------------------------------------
+ss["dyn_unit"] = "h"
+ss["dyn_tend"] = 7.0
+ss["_data_run"] = {"ok": True, "tables": {}, "stdout": "", "error": ""}
+ss["data_edited"] = {"tables": {}}
+ss["dyn_result"] = {"sig": "x", "res": {}, "unit": "h"}
+v0_ = (ss.get("dyn_ver", 0), ss.get("dat_ver", 0))
+S_.load_model(EXAMPLES[next(n for n in EXAMPLES if n.startswith("Dynamic: HP separator"))]())
+c.check("load_model clears dynamic / data widget state", all(k_ not in ss for k_ in ("dyn_unit", "dyn_tend", "_data_run", "data_edited", "dyn_result")), "")
+c.check("load_model bumps the frozen-table versions", ss.get("dyn_ver", 0) > v0_[0] and ss.get("dat_ver", 0) > v0_[1], "")
+st.HOOK["errors"].clear()
+run()
+c.check("the app still renders after a load", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("dynamic: untouched vessel volumes are not pinned into the saved settings", not any("volume" in v_ for v_ in (ss.model.get("dynamics", {}).get("nodes") or {}).values()), str(ss.model.get("dynamics", {}).get("nodes"))[:200])
+
+# ---- 17b. v7.6: phasing - phase bar, stage views, canvas payload, before/after tab ------------------------------------
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Phasing (v7.6)"))
+st.HOOK["press"].add("Load example")
+st.HOOK["errors"].clear()
+run()
+a = canvas_args()
+c.check("phased example loads without errors", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+c.check("canvas receives the phases and the design-view stage", len(a["model"].get("phases", [])) == 1 and a["model"].get("stage") == -1,
+        str({k_: a["model"].get(k_) for k_ in ("phases", "stage")}))
+c.check("canvas receives the phase tags on units and streams", any(u_.get("phase") for u_ in a["model"]["units"].values()) and
+        any(t_.get("phase") for t_ in a["model"]["streams"].values()), "")
+c.check("platform, turbine and phase splitter are in the catalogue payload", all(t_ in a["catalogue"] for t_ in ("platform", "gas_turbine", "phase_splitter")), "")
+k2_ = uid_by_name("K-101 HP compressor")
+c.check("design view solves the future compressor", ss.sol.status.get(k2_) == "ok", str(ss.sol.status.get(k2_)))
+ss[f"stage_sel_{ss.widget_ver}"] = 0
+run()
+c.eq("today: stage stored in the model", ss.model.get("stage"), 0)
+c.check("today: the future compressor is not solved", k2_ not in ss.sol.status or ss.sol.status.get(k2_) in ("inactive", None), str(ss.sol.status.get(k2_)))
+c.check("stage change is sent to the canvas", canvas_args()["model"].get("stage") == 0, "")
+ss[f"stage_sel_{ss.widget_ver}"] = 1
+run()
+c.check("after phase 1: the compressor is solved again", ss.sol.status.get(k2_) == "ok", str(ss.sol.status.get(k2_)))
+# colour / orientation / scale from the canvas survive a round trip and do not trigger a re-solve
+sep_ = uid_by_name("PS-100 Inlet phase splitter")
+sol_before = ss.sol
+struct_ = canvas_args()["model"]
+struct_ = {"units": {k_: dict(v_) for k_, v_ in struct_["units"].items()}, "streams": struct_["streams"]}
+struct_["units"][sep_]["scale"] = 1.6
+struct_["units"][sep_]["color"] = "#aa3377"
+canvas_event("move", struct_)
+run()
+c.check("zoom and colour are stored from the canvas", ss.model["units"][sep_].get("scale") == 1.6 and ss.model["units"][sep_].get("color") == "#aa3377", "")
+c.check("zoom / colour changes do not re-solve", ss.sol is sol_before, "")
+ss[f"stage_sel_{ss.widget_ver}"] = -1
+run()
+st.HOOK["press"].add("Solve and compare")
+run()
+c.check("before / after tab renders", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+
+# orientation set on the canvas must survive the Appearance panel (a stale widget value used to revert it after a rerun)
+from procsim.flowsheet import add_unit as _au   # noqa: E402
+sepv_ = _au(ss.model, "separator", 400, 420, "V-ORI")
+S_.bump()
+run()
+for want_ in ("h", "v", "h"):
+    st_ = canvas_args()["model"]
+    st_ = {"units": {k_: dict(v_) for k_, v_ in st_["units"].items()}, "streams": st_["streams"]}
+    if want_ == "v":
+        st_["units"][sepv_].pop("orient", None)
+    else:
+        st_["units"][sepv_]["orient"] = want_
+    canvas_event("move", st_, selected=[sepv_])
+    run()
+    run()
+    run()
+    c.check(f"orientation '{want_}' set on the canvas is kept after reruns with the panel open",
+            (ss.model["units"][sepv_].get("orient") or "v") == want_, str(ss.model["units"][sepv_].get("orient")))
+
+# ---- 17c. v7.7: gas-conditioning example, heat integration and process advisor tabs -------------------------------------
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Gas conditioning (v7.7)"))
+st.HOOK["press"].add("Load example")
+st.HOOK["errors"].clear()
+st.HOOK["charts"].clear()
+run()
+c.check("gas conditioning example loads and solves", not st.HOOK["errors"] and ss.sol is not None and ss.sol.converged, str(st.HOOK["errors"])[:300])
+c.check("heat-integration tab draws the composite curves", any("Heat integration" in str(f_.layout.get("title", "")) for f_ in st.HOOK["charts"]), "")
+a = canvas_args()
+mb_ = uid_by_name("MB-100 CO2 membrane")
+c.check("membrane label shows the CO2 before / after", "CO₂" in a["results"]["units"][mb_]["label"], a["results"]["units"][mb_]["label"])
+ch_ = uid_by_name("CH-100 Chiller")
+c.check("chiller label shows duty and COP", "COP" in a["results"]["units"][ch_]["label"], a["results"]["units"][ch_]["label"])
+c.check("new types are in the catalogue payload", all(t_ in a["catalogue"] for t_ in ("chiller", "membrane", "mol_sieve")), "")
+
+# ---- 17d. v7.8: Calibrate tab - small compressor line, plant data rows, calibrate, apply ---------------------------------
+import copy as _copy
+from procsim import tuning as _TU
+from procsim.examples import WET_GAS as _WG
+from procsim.flowsheet import new_model as _nm, add_unit as _au, connect as _cn, solve as _sv
+_m = _nm()
+_f = _au(_m, "feed", 0, 0, "Gas", {"T_C": 30.0, "P_bar": 20.0, "flow_basis": "MSm³/d", "flow": 2.0, "composition": dict(_WG)})
+_k = _au(_m, "compressor", 100, 0, "K-1", {"spec": "Outlet pressure", "P_out": 60.0, "eff": 80.0})
+_o = _au(_m, "product", 200, 0, "Out")
+_cn(_m, _f, "out", _k, "in", "1")
+_cn(_m, _k, "out", _o, "in", "2")
+_tr = _copy.deepcopy(_m)
+_TU.set_param(_tr, "K-1", "eff", 70.0)
+_rows = []
+for _i, _fl in enumerate((1.5, 2.0, 2.5)):
+    _TU.set_param(_tr, "Gas", "flow", _fl)
+    _w = _sv(_tr).results[_TU.unit_id(_tr, "K-1")]["Power [kW]"]
+    _rows.append({"Case": f"day {_i + 1}", "Use": "validation" if _i == 2 else "fit", "Row": "set", "Kind": "unit", "Object": "Gas", "Quantity": "flow", "Value": _fl, "σ": None})
+    _rows.append({"Case": f"day {_i + 1}", "Use": "validation" if _i == 2 else "fit", "Row": "measure", "Kind": "unit", "Object": "K-1", "Quantity": "Power [kW]", "Value": _w, "σ": 0.01 * _w})
+S_.load_model(_m)
+ss.model["calibration"] = {"rows": _rows, "params": [{"unit": "K-1", "key": "eff", "lo": 50.0, "hi": 90.0}], "opt": {"vars": [], "constraints": [], "objective": {"kind": "economics", "obj": "", "q": "Power demand [kW]", "sense": "min"}}}
+st.HOOK["errors"].clear()
+run()
+c.check("calibrate tab renders", not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+st.HOOK["press"].add("▶ Calibrate")
+run()
+c.check("calibration runs from the tab", ss.get("_calib_result") is not None and not st.HOOK["errors"], str(st.HOOK["errors"])[:300])
+if ss.get("_calib_result"):
+    _e = ss["_calib_result"]["params"][0]
+    c.check("calibrated efficiency is close to the plant value", abs(_e["after"] - 70.0) < 1.0, str(_e["after"]))
+    st.HOOK["press"].add("✅ Apply the calibrated values to the flowsheet")
+    run()
+    c.check("apply writes the value to the model", abs(_TU.get_param(ss.model, "K-1", "eff") - 70.0) < 1.0, str(_TU.get_param(ss.model, "K-1", "eff")))
+    c.check("apply can be undone", bool(ss.get("edit_hist")), "")
+
+# ---- 17e. v7.8: subsea equipment example, typical values, phase economics, report sections ---------------------------------
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Subsea equipment (v7.8)"))
+st.HOOK["press"].add("Load example")
+st.HOOK["errors"].clear()
+run()
+c.check("subsea equipment example loads and solves", not st.HOOK["errors"] and ss.sol is not None and ss.sol.converged and not ss.sol.errors, str(ss.sol.errors if ss.sol else ""))
+a = canvas_args()
+for _t, _n in (("subsea_manifold", "MF-100 Manifold"), ("mpfm", "FT-100 Multiphase meter"), ("subsea_heater", "H-100 Electric heater"),
+               ("pig_station", "PG-100 Pig receiver"), ("subsea_choke", "CK-100 Choke module")):
+    c.check(f"{_t} has a canvas label", bool(a["results"]["units"][uid_by_name(_n)].get("label")), _n)
+_pg = uid_by_name("PG-100 Pig receiver")
+ss.selected = [_pg]
+run()
+c.check("typical-values panel renders for a pipe-like unit without error", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+_cp = [u_ for u_, d_ in ss.model["units"].items() if d_["type"] == "subsea_heater"][0]
+ss.selected = [_cp]
+run()
+c.check("typical-values presets exist for the electric heater", bool(__import__("procsim.typical", fromlist=["x"]).presets("subsea_heater")), "")
+st.HOOK["press"].add("Apply this preset")
+run()
+c.check("applying a preset keeps the model solvable", not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Phasing (v7.6)"))
+st.HOOK["press"].add("Load example")
+run()
+st.HOOK["press"].add("Compute the economics of the phases")
+st.HOOK["errors"].clear()
+run()
+c.check("phase economics computed in the Before / after tab", ss.get("_phasecost") is not None and not st.HOOK["errors"], str(st.HOOK["errors"])[:200])
+c.check("phase economics result is stored with the model for the report", bool(ss.model.get("phasecost_result")), "")
+from ui.report import build_report as _br   # noqa: E402
+_html = _br(ss.model, ss.sol, ss.svg, "v7.8 report")
+c.check("report carries the phase economics section", "Project phases: cost and payback" in _html, "")
+st.HOOK["values"]["selectbox:Example:"] = next(n for n in EXAMPLES if n.startswith("Gas conditioning (v7.7)"))
+st.HOOK["press"].add("Load example")
+run()
+_html = _br(ss.model, ss.sol, ss.svg, "v7.8 report")
+c.check("report builds its process sections without failure", "unavailable" not in _html, "")
+
+# ---- 17f. v7.8.1: opening a saved flowsheet from the sidebar -----------------------------------------------------------
+import json as _js, io as _io   # noqa: E401,E402
+class _Up:
+    def __init__(self, name, data):
+        self.name, self._d = name, data
+        self.size = len(data)
+    def getvalue(self):
+        return self._d
+_k0 = next(n for n in EXAMPLES if n.startswith("Gas conditioning (v7.7)"))
+_blob = _js.dumps(EXAMPLES[_k0](), default=float).encode()
+st.HOOK["press"].add("New (blank)")
+run()
+c.eq("blank before opening", len(ss.model["units"]), 0)
+_key = f"open_json_{ss.get('open_ver', 0)}"
+st.HOOK["values"][_key] = _Up("mycase.json", _blob)
+run()
+c.check("an uploaded flowsheet becomes the active case", len(ss.model["units"]) == len(EXAMPLES[_k0]()["units"]) and ss.sol is not None, str(len(ss.model["units"])))
+c.check("the canvas receives the opened flowsheet", len(canvas_args()["model"]["units"]) == len(ss.model["units"]), "")
+st.HOOK["press"].add("New (blank)")
+run()
+_key = f"open_json_{ss.get('open_ver', 0)}"
+st.HOOK["values"][_key] = _Up("mycase.json", _blob)
+run()
+c.check("the same file can be opened again after another case was loaded", len(ss.model["units"]) > 0, "")
+_key = f"open_json_{ss.get('open_ver', 0)}"
+st.HOOK["values"][_key] = _Up("broken.json", b'{"hello": 1}')
+st.HOOK["errors"].clear()
+run()
+c.check("a wrong file shows a plain error and leaves the case alone", len(ss.model["units"]) > 0, "")
 
 # ---- 18. blank flowsheet -----------------------------------------------------------------------
 st.HOOK["press"].add("New (blank)")

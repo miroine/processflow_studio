@@ -518,6 +518,61 @@ def multi_template_hub():
     return m
 
 
+SOUR_GAS = {"N2": 0.005, "CO2": 0.050, "H2S": 0.005, "C1": 0.800, "C2": 0.070, "C3": 0.040, "nC4": 0.015,
+            "nC5": 0.010, "H2O": 0.005}
+
+
+def amine_sweetening():
+    """Sour gas → inlet scrubber → amine contactor (MDEA, 2 mol% CO₂ / 4 ppmv H₂S specification) → sweet gas; the
+    acid gas goes to sulphur recovery. The regenerator reboiler and pump appear as energy streams."""
+    m = new_model(list(SOUR_GAS))
+    f = add_unit(m, "feed", 0, 60, "Sour gas", {"T_C": 35.0, "P_bar": 60.0, "flow_basis": "MSm³/d", "flow": 5.0,
+                                                "composition": dict(SOUR_GAS)})
+    a = add_unit(m, "amine_contactor", 220, 60, "T-200 amine contactor",
+                 {"amine": "MDEA (40 wt%)", "co2_spec": 2.0, "h2s_spec": 4.0})
+    d = add_unit(m, "product", 420, -20, "Sweet gas")
+    fl = add_unit(m, "product", 420, 150, "Acid gas to sulphur recovery")
+    connect(m, f, "out", a, "feed")
+    connect(m, a, "sweet", d, "in", "Sweet gas")
+    connect(m, a, "acid", fl, "in", "Acid gas")
+    return m
+
+
+def relief_and_flare():
+    """A high-pressure separator gas relieved through a PSV (API 520, set 66 bar, 10 % overpressure) to a flare
+    (radiation and flame length) - the relieving load comes from the inlet stream."""
+    G = {"N2": 0.010, "CO2": 0.020, "C1": 0.850, "C2": 0.070, "C3": 0.040, "nC4": 0.010}
+    m = new_model(list(G))
+    f = add_unit(m, "feed", 0, 60, "Blocked-outlet gas", {"T_C": 50.0, "P_bar": 60.0, "flow_basis": "kmol/h",
+                                                          "flow": 2000.0, "composition": dict(G)})
+    r = add_unit(m, "relief_valve", 200, 60, "PSV-100", {"P_set": 66.0})
+    fl = add_unit(m, "flare", 400, 60, "HP flare", {})
+    connect(m, f, "out", r, "in")
+    connect(m, r, "out", fl, "in", "To flare header")
+    return m
+
+
+def steam_reformer():
+    """Natural gas + steam through an equilibrium reactor (CH₄ + 2 H₂O ⇌ 4 H₂ + CO₂, 800 °C): conversion and furnace
+    duty; the product is cooled to 40 °C and the condensed water removed."""
+    K = ["C1", "H2O", "H2", "CO2"]
+    m = new_model(K)
+    f = add_unit(m, "feed", 0, 60, "Methane + steam", {"T_C": 400.0, "P_bar": 3.0, "flow_basis": "kmol/h",
+                                                      "flow": 1000.0, "composition": {"C1": 0.25, "H2O": 0.75}})
+    r = add_unit(m, "eq_reactor", 200, 60, "R-100 reformer", {"reaction": "C1 + 2 H2O -> 4 H2 + CO2",
+                                                              "spec": "Outlet temperature", "T_out": 800.0})
+    c = add_unit(m, "cooler", 380, 60, "E-100 quench", {"spec": "Outlet temperature", "T_out": 40.0})
+    s = add_unit(m, "separator", 540, 60, "V-100 knock-out")
+    g = add_unit(m, "product", 700, 20, "Synthesis gas")
+    w = add_unit(m, "product", 700, 160, "Condensate")
+    connect(m, f, "out", r, "feed")
+    connect(m, r, "out", c, "in")
+    connect(m, c, "out", s, "feed")
+    connect(m, s, "vapour", g, "in")
+    connect(m, s, "liquid", w, "in")
+    return m
+
+
 EXAMPLES = {
     "Two-stage gas compression with liquid recycle": compression_train,
     "Oil stabilisation: 3-stage separation + recompression": oil_stabilisation,
@@ -532,4 +587,20 @@ EXAMPLES = {
     "Gas lift and water injection (SURF): lifted oil wells, hilly route, seawater injectors": gaslift_injection,
     "Subsea hub (SURF): two templates, a satellite, PLEM, gas lift and water injection": multi_template_hub,
     "Gas dehydration: TEG contactor with a water dew-point specification": teg_dehydration,
+    "Amine sweetening: MDEA contactor with CO₂ / H₂S specifications and regenerator duty": amine_sweetening,
+    "Pressure relief: PSV sizing (API 520/526) and flare radiation": relief_and_flare,
+    "Steam reforming: equilibrium reactor, quench and knock-out": steam_reformer,
 }
+
+
+from .examples_topside import TOPSIDE_EXAMPLES   # noqa: E402  (v7.1: topside templates)
+
+EXAMPLES.update(TOPSIDE_EXAMPLES)
+
+from .examples_dynamic import DYNAMIC_EXAMPLES   # noqa: E402  (v7.3: dynamic-simulation examples)
+
+EXAMPLES.update(DYNAMIC_EXAMPLES)
+
+from .examples_phased import PHASED_EXAMPLES   # noqa: E402  (v7.6: phasing example)
+
+EXAMPLES.update(PHASED_EXAMPLES)
