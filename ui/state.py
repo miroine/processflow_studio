@@ -188,7 +188,7 @@ def _norm_structure(units, streams, from_model):
         sc = u.get("scale")
         if sc and abs(float(sc) - 1.0) > 1e-6:
             d["scale"] = round(float(sc), 3)
-        for f in ("phase", "change", "color"):
+        for f in ("phase", "change", "color", "until"):
             if u.get(f):
                 d[f] = u[f]
         if u["type"] == "platform":
@@ -197,7 +197,7 @@ def _norm_structure(units, streams, from_model):
         out_u[k] = d
     for k, t in streams.items():
         d = {"name": t["name"], "src": list(t["src"]), "dst": list(t["dst"])}
-        for f in ("phase", "change", "color"):
+        for f in ("phase", "change", "color", "until"):
             if t.get(f):
                 d[f] = t[f]
         out_s[k] = d
@@ -244,7 +244,7 @@ def default_feed_comp(model):
 
 def _take_look(mu, u):
     """Copy the canvas-owned appearance of a unit (orientation, element zoom, project phase, colour, platform size)."""
-    for f in ("orient", "scale", "phase", "change", "color"):
+    for f in ("orient", "scale", "phase", "change", "color", "until"):
         if u.get(f):
             mu[f] = u[f]
         else:
@@ -297,7 +297,7 @@ def merge_canvas_event(ev):
     model["streams"] = {}
     for sid, s in jst.items():
         t = {"name": s["name"], "src": list(s["src"]), "dst": list(s["dst"])}
-        for f in ("phase", "change", "color"):
+        for f in ("phase", "change", "color", "until"):
             if s.get(f):
                 t[f] = s[f]
         model["streams"][sid] = t

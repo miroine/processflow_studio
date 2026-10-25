@@ -105,6 +105,20 @@ def appearance_panel(obj_id):
             pid, ch = keymap[pick]
             PH.set_phase(m, [obj_id], pid, ch)
             changed = True
+        cur_ph = el.get("phase")
+        if cur_ph and el.get("change", "add") == "add":
+            ia = PH.phase_index(m, cur_ph)
+            later = [x for x in ph[ia:]]
+            untils = ["— (stays)"] + [f"Retired in {x['name']}" for x in later]
+            cu = next((f"Retired in {x['name']}" for x in later if x["id"] == el.get("until")), untils[0])
+            pu = c1.selectbox("In place until", untils, index=untils.index(cu), key=f"ap_un_{obj_id}_{ss.widget_ver}_{len(untils)}_{untils.index(cu)}",
+                              help="Retire this item again in a later phase (a temporary route or a unit replaced by a bigger one).")
+            if pu != cu:
+                if pu == untils[0]:
+                    el.pop("until", None)
+                else:
+                    el["until"] = later[untils.index(pu) - 1]["id"]
+                changed = True
         auto = c2.checkbox("Automatic colour", value=not el.get("color"), key=f"ap_auto_{obj_id}_{ss.widget_ver}_{bool(el.get('color'))}")
         if not auto:
             base = el.get("color") or PH.effective_color(el, m) or "#e8590c"

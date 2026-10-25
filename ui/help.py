@@ -366,6 +366,7 @@ Built on the Field life model; it answers "which strategy, how many wells, what 
 * **Own cost table**: in *Cost and price assumptions*, import a CSV with columns `type, S_ref, C_ref, exponent` (C_ref in millions of the model currency). It replaces the generic curve for those types and is kept in the saved flowsheet only. **Download phase report** produces a printable page with the phase table, the stages and the flowsheet.
 * **Sensitivity** (Calibrate tab): moves chosen parameters ± x % one at a time and draws a tornado of one result.
 * **Advisor**: new sizing-range check flags duties and powers above (or far below) what one machine normally covers - generic screening limits, not vendor limits. **Recycle feedback** says if a loop stalls, converges slowly or needs more iterations.
+* **Connections that change over the phases (v7.9.1)**: draw a line into a single-connection port that is already used and the new line takes over from the first phase in which both of its ends exist; the old line is retired in that phase (it stays in place before it). With a phase chosen in the toolbar the takeover is in that phase. Any added item also has *In place until* in *Appearance & project phase* to retire it in a later phase. Two lines that would both exist today are still refused.
 * **Cases**: sidebar *Cases* keeps full variants (Base, High GOR ...) in one file; switching saves the open case and opens the other.
 
 ### Calibration, more SURF equipment and phase economics (v7.8)
@@ -585,6 +586,15 @@ compressors and maps, heat curves, column and pipe profiles, convergence) and gr
   performance map (fixed efficiency); CAPEX, umbilical and cable data are generic allowances (class 5). Slugging and
   turndown are steady-state ("transient-lite"); the layout's well slots and bearings are schematic.
 * Results are for screening — check critical numbers against a commercial simulator.
+
+### 3D view
+
+Press **🧊 3D view** above the flowsheet to swap the 2D drawing for an interactive 3D plant (button again to return).
+* **Navigate:** drag to orbit, right-drag or Shift+drag to pan, wheel to zoom; the preset buttons give plan, side and iso views; double-click an item to fly to it.
+* **Inspect:** click any equipment or pipe — the panel gives what it is, how it is modelled, the solved results (power, duty, ΔP, rates) and, for pipes, pressure, temperature, velocity and mass flow with an indicative line size.
+* **Flow:** animated particles move along every pipe with speed scaled to the velocity and colour by service (gas, oil, water, glycol…); toggle flow, labels, X-ray (see inside vessels), night mode and auto-rotate.
+* **Stages:** the 3D view follows the phase selected for the flowsheet — items not yet built are hidden or ghosted.
+* **Limits:** shapes are generic and schematic, the layout is derived from your 2D drawing (items are pushed apart where they overlap), and pipe sizes are indicative only — not line sizing. On slow or software graphics the view lowers its quality automatically.
 
 ### About
 

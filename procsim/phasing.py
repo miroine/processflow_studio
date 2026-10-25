@@ -5,6 +5,7 @@ a unit or stream may carry
 
     phase   id of a project phase ("" = in place today and kept)
     change  "add" (in place from that phase on) or "remove" (in place until that phase)
+    until   (with "add") id of a later phase that retires the item again: in place from ``phase`` up to ``until``
     color   optional colour override for the drawing
 
 Stages: 0 = today, i = after phase i (i = 1 .. N).  ``model["stage"]`` selects the stage that is solved and shown;
@@ -64,6 +65,9 @@ def remove_phase(model, pid):
             if el.get("phase") == pid:
                 el.pop("phase", None)
                 el.pop("change", None)
+                el.pop("until", None)
+            elif el.get("until") == pid:
+                el.pop("until", None)
     if model.get("stage", -1) > n_phases(model):
         model["stage"] = -1
 
@@ -75,7 +79,8 @@ def present(el, model, stage):
         return True
     if el.get("change", "add") == "remove":
         return stage < i
-    return stage >= i
+    u = phase_index(model, el.get("until") or "")          # an added item may be retired by a later phase
+    return stage >= i and not (u > i and stage >= u)
 
 
 def presence(el, model):
@@ -153,6 +158,7 @@ def set_phase(model, ids, pid, change="add"):
         else:
             el.pop("phase", None)
             el.pop("change", None)
+        el.pop("until", None)
 
 
 def counts(model):

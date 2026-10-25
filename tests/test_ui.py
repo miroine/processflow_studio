@@ -1419,4 +1419,23 @@ run()
 c.eq("blank flowsheet", len(ss.model["units"]), 0)
 c.check("blank flowsheet status", "0 unit ops" in canvas_args()["status"], canvas_args()["status"])
 
+# ---- 19. 3D plant view: the button swaps the diagram for the 3D scene and back ---------------------------
+st.HOOK["press"].add("Load example")
+run()
+_n_canvas = len([x for x in st.HOOK["component_calls"] if x["name"] == "pfd_canvas"])
+st.HOOK["component_calls"].clear()
+st.HOOK["press"].add("🧊 View in 3D")
+run()
+_c3 = [x for x in st.HOOK["component_calls"] if x["name"] == "pfd_3d"]
+c.check("the 3D button swaps to the 3D component", bool(ss.get("view3d")) and len(_c3) >= 1, str(len(_c3)))
+c.check("the 2D canvas is not mounted in 3D mode", not [x for x in st.HOOK["component_calls"] if x["name"] == "pfd_canvas"], "")
+_sc = _c3[-1]["args"]["scene"]
+c.check("the 3D scene carries the units, pipes and port table", len(_sc["units"]) > 0 and len(_sc["streams"]) > 0 and "separator" in _c3[-1]["args"]["ports"], "")
+c.check("the 3D scene is solved and in the app's unit system", _sc["meta"]["solved"] and any(u["results"] for u in _sc["units"]), "")
+st.HOOK["component_calls"].clear()
+st.HOOK["press"].add("🧩 Back to the 2D diagram")
+run()
+c.check("the back button returns to the 2D canvas", not ss.get("view3d") and canvas_args() is not None, "")
+
+
 sys.exit(c.report())

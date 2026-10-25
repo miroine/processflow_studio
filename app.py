@@ -21,9 +21,9 @@ import os                                              # noqa: E402
 import sys                                             # noqa: E402
 import traceback                                       # noqa: E402
 
-APP_VERSION = "7.9.0"
+APP_VERSION = "7.10.0"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
-_PKGS = ("procsim", "ui", "pfd_canvas", "fieldmap_canvas")
+_PKGS = ("procsim", "ui", "pfd_canvas", "pfd_3d", "fieldmap_canvas")
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
@@ -68,8 +68,8 @@ def _import_project():
     from ui import panels
     from ui.fluid import fluid_tab, workbook_tab
     from ui import theme
-    import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units, ui.surf, ui.scenarios, ui.fieldlife, ui.design, ui.prognosis, ui.timeseries, ui.dynamic, ui.data, ui.phasing, ui.advisor, ui.calibrate   # noqa: E401,F401
-    import procsim.surf, procsim.subsea_design, procsim.subsea_ops, procsim.scenarios, procsim.fieldlife, procsim.flowassure, procsim.hydrate, procsim.envelope, procsim.dehydration, procsim.process_units, procsim.flowassure2, procsim.design, procsim.network, procsim.prognosis, procsim.debottleneck, procsim.gasquality, procsim.examples_topside, procsim.fieldmap, procsim.timeseries, procsim.dynamics, procsim.dyn_thermo, procsim.examples_dynamic, procsim.datatools, procsim.phasing, procsim.facilities, procsim.eoscal, procsim.process_ext, procsim.pinch, procsim.advisor, procsim.tuning, procsim.surf_ext, procsim.phasecost, procsim.refrigeration, procsim.typical   # noqa: E401,F401
+    import ui.analysis, ui.casestudy, ui.help, ui.report, ui.units, ui.surf, ui.scenarios, ui.fieldlife, ui.design, ui.prognosis, ui.timeseries, ui.dynamic, ui.data, ui.phasing, ui.advisor, ui.calibrate, ui.view3d   # noqa: E401,F401
+    import procsim.surf, procsim.subsea_design, procsim.subsea_ops, procsim.scenarios, procsim.fieldlife, procsim.flowassure, procsim.hydrate, procsim.envelope, procsim.dehydration, procsim.process_units, procsim.flowassure2, procsim.design, procsim.network, procsim.prognosis, procsim.debottleneck, procsim.gasquality, procsim.examples_topside, procsim.fieldmap, procsim.timeseries, procsim.dynamics, procsim.dyn_thermo, procsim.examples_dynamic, procsim.datatools, procsim.phasing, procsim.facilities, procsim.eoscal, procsim.process_ext, procsim.pinch, procsim.advisor, procsim.tuning, procsim.surf_ext, procsim.phasecost, procsim.refrigeration, procsim.typical, procsim.scene3d, procsim.cases, procsim.convdiag   # noqa: E401,F401
     import procsim, ui
     if getattr(procsim, "__version__", None) != APP_VERSION or getattr(ui, "__version__", None) != APP_VERSION:
         raise ImportError(f"version mismatch: app.py {APP_VERSION}, procsim {getattr(procsim, '__version__', '?')}, "
@@ -210,18 +210,23 @@ with tab_pfd:
         st.info(f"Auto-solve is paused: the last solve took {ss.sol.seconds:.1f} s (limit {ss.get('auto_limit', 10):g} s). "
                 "Edit freely, then press **▶ Solve** — or raise the limit in the sidebar.")
     ui.phasing.phase_bar()
-    pfd_canvas(S.canvas_structure(ss.model), S.catalogue_payload(), S.results_payload(), ss.nonce,
-               selected=ss.selected, height=height, status=S.status_line(), fit=ss.fit, key="pfd")
-    ss.fit = False
-    if ss.svg:
-        st.download_button("Download diagram (SVG)", data=ss.svg, file_name="pfd.svg", mime="image/svg+xml")
+    ui.view3d.toggle_button()
+    if ss.get("view3d"):
+        ui.view3d.view3d_panel(height)
+    else:
+        pfd_canvas(S.canvas_structure(ss.model), S.catalogue_payload(), S.results_payload(), ss.nonce,
+                   selected=ss.selected, height=height, status=S.status_line(), fit=ss.fit, key="pfd")
+        ss.fit = False
+        if ss.svg:
+            st.download_button("Download diagram (SVG)", data=ss.svg, file_name="pfd.svg", mime="image/svg+xml")
     bad = S.attention_items()
     if bad:
         with st.expander(f"⚠ {len(bad)} item(s) need attention", expanded=False):
             for n, v, e in bad:
                 st.markdown(f"- **{n}** — {panels.STATUS_TXT.get(v, v)}: {e}")
-    st.markdown("---")
-    panels.selection_view()
+    if not ss.get("view3d"):
+        st.markdown("---")
+        panels.selection_view()
 
 with tab_wb:
     workbook_tab()

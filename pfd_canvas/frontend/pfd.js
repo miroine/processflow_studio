@@ -226,7 +226,9 @@
   function presentAt(phases, el, stage) {
     const i = phaseIndex(phases, el && el.phase);
     if (!i) return true;
-    return el.change === "remove" ? stage < i : stage >= i;
+    if (el.change === "remove") return stage < i;
+    const u = phaseIndex(phases, el.until);              // an added item may be retired again by a later phase
+    return stage >= i && !(u > i && stage >= u);
   }
   function presenceOf(phases, el) {
     const out = new Set();
@@ -272,6 +274,7 @@
       cand = streamPresence(Object.assign({}, model, { units: model.units }), phases,
                             { phase: draw.phase, change: draw.change, src: [src, sp], dst: [dst, dp] });
     }
+    const retire = [];                       // [{sid, r}] connections that the new one replaces, with the stage index it takes over
     for (const sid of Object.keys(model.streams)) {
       const s = model.streams[sid];
       const sharesOut = s.src[0] === src && s.src[1] === sp, sharesIn = s.dst[0] === dst && s.dst[1] === dp;
@@ -279,13 +282,41 @@
       if (cand && !intersects(streamPresence(model, phases, s), cand)) continue;
       if (sharesOut && sharesIn) return res;
       if ((!cs.multi && sharesOut) || (!cd.multi && sharesIn)) {
-        // a connection that is in place today can be retired in the phase being drawn: the new route replaces it
-        if (phases && draw.phase && draw.change === "add" && !s.phase) { res.replace.push(sid); continue; }
+        let r = 0;
+        if (phases) {
+          if (draw.phase && draw.change === "add") r = phaseIndex(phases, draw.phase);
+          else if (!draw.phase) {
+            // no phase chosen: the new line starts in the first stage where both ends exist and the old line is also in place
+            const both = streamPresence(model, phases, { src: [src, sp], dst: [dst, dp] });
+            const ov = Array.from(streamPresence(model, phases, s)).filter((x) => both.has(x));
+            r = ov.length ? Math.min.apply(null, ov) : 0;
+          }
+        }
+        if (r > 0 && canRetire(phases, s, r)) { retire.push({ sid, r }); continue; }
         return res;
       }
     }
+    if (retire.length) {
+      const r = Math.min.apply(null, retire.map((x) => x.r));
+      if (!retire.every((x) => canRetire(phases, model.streams[x.sid], r))) return res;
+      res.replace = retire.map((x) => x.sid);
+      res.at = phases[r - 1].id;
+      res.tag = draw.phase ? null : { phase: res.at, change: "add" };
+    }
     res.ok = true;
     return res;
+  }
+  /** Can ``s`` be retired at stage index r (it must have been in place before)? */
+  function canRetire(phases, s, r) {
+    const i = phaseIndex(phases, s.phase);
+    if (!i || s.change === "remove") return true;
+    return i < r;
+  }
+  /** Retire connection ``s`` from phase pid on. */
+  function retireStream(s, pid) {
+    if (!s.phase) { s.phase = pid; s.change = "remove"; }
+    else if (s.change === "remove") s.phase = pid;
+    else s.until = pid;
   }
   function canConnect(model, catalogue, src, sp, dst, dp, ctx) {
     return portConflicts(model, catalogue, src, sp, dst, dp, ctx).ok;
@@ -760,7 +791,7 @@
   // ----------------------------------------------------------- node export
   if (typeof document === "undefined") {
     module.exports = { GEOM, portPos, energyPos, route, simplify, labelAnchor, nextName, nextStreamName,
-                       canConnect, portConflicts, ICON, geomOf, scaleOf, orientOf, hasOrient, extentOf, presentAt, presenceOf, phaseColor,
+                       canConnect, portConflicts, retireStream, ICON, geomOf, scaleOf, orientOf, hasOrient, extentOf, presentAt, presenceOf, phaseColor,
                        DEFAULT_ORIENT };
     return;
   }
@@ -786,7 +817,7 @@
   };
   const phases = () => (S.model && S.model.phases) || [];
   const stageNow = () => (S.model && Number.isInteger(S.model.stage) ? S.model.stage : -1);
-  const EL_FIELDS = ["phase", "change", "color"];
+  const EL_FIELDS = ["phase", "change", "color", "until"];
 
   const svg = document.getElementById("svg");
   const wrap = document.getElementById("canvasWrap");
@@ -1036,7 +1067,9 @@
   function phaseTitle(el) {
     const i = phaseIndex(phases(), el.phase);
     if (!i) return "";
-    return "\n" + (el.change === "remove" ? "Removed in " : "Added in ") + (phases()[i - 1].name || "phase " + i);
+    const u = el.change !== "remove" ? phaseIndex(phases(), el.until) : 0;
+    return "\n" + (el.change === "remove" ? "Removed in " : "Added in ") + (phases()[i - 1].name || "phase " + i) +
+           (u > i ? ", removed in " + (phases()[u - 1].name || "phase " + u) : "");
   }
 
   function drawStream(id, s, parent) {
@@ -1326,7 +1359,7 @@
       const onPort = !!(under && under.classList && under.classList.contains("port"));
       if (!target && onPort) {
         hint(phases().length && !parseDraw(S.draw).phase
-          ? "That port is in use: choose 'New in Phase n' in the toolbar to replace the existing connection in that phase"
+          ? "That port is in use by a connection that is in place today: choose 'New in Phase n' in the toolbar to replace it from that phase"
           : "Those ports cannot be connected");
         render(); return;
       }
@@ -1337,9 +1370,12 @@
         const dst = dir === "out" ? [target.id, target.port] : [uid, port];
         const pc = portConflicts(S.model, S.catalogue, src[0], src[1], dst[0], dst[1], phCtx());
         const dr = parseDraw(S.draw);
-        for (const old of pc.replace) { S.model.streams[old].phase = dr.phase; S.model.streams[old].change = "remove"; }
-        if (pc.replace.length) hint("The existing connection to that port is removed in the same phase");
-        S.model.streams[sid] = Object.assign({ name: terminalName(src, dst) || nextStreamName(S.model), src, dst }, parseDraw(S.draw));
+        for (const old of pc.replace) retireStream(S.model.streams[old], pc.at);
+        if (pc.replace.length) {
+          const pn = (phases().find((x) => x.id === pc.at) || {}).name || pc.at;
+          hint("The new line replaces the existing connection from " + pn + " on");
+        }
+        S.model.streams[sid] = Object.assign({ name: terminalName(src, dst) || nextStreamName(S.model), src, dst }, parseDraw(S.draw), pc.tag || {});
         S.selected = new Set([sid]);
         render(); send("connect");
       } else if (dist > 25) {

@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { --ink:#e8eef3; --muted:#9fb0bd; --glass:rgba(16,24,32,.72); --line:rgba(255,255,255,.14); --accent:#2dd4c4; --warn:#f5a524; --bad:#ff5d5d; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:transparent;
+    font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif; color:var(--ink); }
+  #wrap { position:relative; width:100%; height:100%; border-radius:12px; overflow:hidden; background:#0b121a; }
+  canvas#gl { position:absolute; inset:0; width:100%; height:100%; display:block; outline:none; touch-action:none; }
+  .glass { background:var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border:1px solid var(--line);
+    border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.35); }
+  #bar { position:absolute; left:10px; top:10px; display:flex; flex-wrap:wrap; gap:4px; padding:5px; max-width:calc(100% - 340px); }
+  #bar button { font:inherit; font-size:12px; font-weight:500; color:var(--ink); background:rgba(255,255,255,.06); border:1px solid var(--line);
+    border-radius:7px; padding:5px 10px; cursor:pointer; min-height:30px; }
+  #bar button:hover { border-color:var(--accent); color:var(--accent); }
+  #bar button.on { background:rgba(45,212,196,.18); border-color:var(--accent); color:var(--accent); }
+  #bar .sep { width:1px; background:var(--line); margin:3px 2px; }
+  #stage { position:absolute; right:10px; top:10px; padding:6px 12px; font-size:12px; display:flex; gap:8px; align-items:center; }
+  #stage b { color:var(--accent); font-weight:600; }
+  #info { position:absolute; right:10px; top:52px; bottom:46px; width:310px; padding:14px 14px 10px; overflow:auto; display:none; font-size:12.5px; line-height:1.45; }
+  #info h2 { margin:0 0 2px; font-size:16px; font-weight:650; letter-spacing:.01em; }
+  #info .sub { color:var(--muted); font-size:11.5px; margin-bottom:8px; }
+  #info .tag { display:inline-block; font-size:10.5px; padding:1px 8px; border-radius:20px; border:1px solid var(--line); margin:0 4px 6px 0; color:var(--muted); }
+  #info .tag.ok { color:#5ee0a0; border-color:#2f8f66; } #info .tag.warning { color:var(--warn); border-color:var(--warn); }
+  #info .tag.error, #info .tag.missing, #info .tag.unsolved { color:var(--bad); border-color:var(--bad); }
+  #info h3 { margin:12px 0 4px; font-size:10.5px; text-transform:uppercase; letter-spacing:.09em; color:var(--muted); font-weight:600; }
+  #info p { margin:0 0 6px; }
+  #info table { width:100%; border-collapse:collapse; font-size:12px; }
+  #info td { padding:3px 0; border-bottom:1px solid rgba(255,255,255,.07); vertical-align:top; }
+  #info td:last-child { text-align:right; font-variant-numeric: tabular-nums; color:#fff; padding-left:8px; }
+  #info td:first-child { color:var(--muted); }
+  #info .x { position:absolute; right:10px; top:8px; cursor:pointer; color:var(--muted); font-size:16px; }
+  #legend { position:absolute; left:10px; bottom:10px; padding:7px 11px; font-size:11.5px; display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  #legend i { display:inline-block; width:18px; height:6px; border-radius:3px; margin-right:5px; vertical-align:1px; }
+  #hint { position:absolute; right:10px; bottom:10px; padding:5px 10px; font-size:11px; color:var(--muted); }
+  #tip { position:absolute; pointer-events:none; padding:4px 9px; font-size:11.5px; display:none; white-space:nowrap; }
+  #msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:14px; text-align:center; padding:30px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="gl" tabindex="0"></canvas>
+  <div id="bar" class="glass">
+    <button data-v="iso" title="Isometric overview">Overview</button>
+    <button data-v="top" title="Plan view from above">Plan</button>
+    <button data-v="front" title="Elevation from the front">Elevation</button>
+    <span class="sep"></span>
+    <button id="bFlow" class="on" title="Animate the flow in the pipes">Flow</button>
+    <button id="bLabels" class="on" title="Tag labels">Tags</button>
+    <button id="bXray" title="Make the equipment shells see-through">X-ray</button>
+    <button id="bNight" title="Day / dusk lighting">Dusk</button>
+    <button id="bRot" title="Slow turntable rotation">Orbit</button>
+    <span class="sep"></span>
+    <button id="bShot" title="Save a PNG of the current view">PNG</button>
+  </div>
+  <div id="stage" class="glass"><span id="stageName"></span></div>
+  <div id="info" class="glass"><span class="x" id="infoX">✕</span><div id="infoBody"></div></div>
+  <div id="legend" class="glass"></div>
+  <div id="hint" class="glass">drag: rotate · right-drag / Shift: pan · wheel: zoom · click: inspect · double-click: fly to</div>
+  <div id="tip" class="glass"></div>
+  <div id="msg" style="display:none"></div>
+</div>
+<script src="three.min.js"></script>
+<script src="plant3d.js"></script>
+</body>
+</html>

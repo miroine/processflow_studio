@@ -50,7 +50,24 @@ const P = require(SRC);
     const ph = [{ id: "p1", name: "Phase 1" }];
     const mm = { units: { m: { type: "mixer", name: "MIX" }, t: { type: "splitter", name: "TEE" }, k: { type: "compressor", name: "K", phase: "p1", change: "add" } },
                  streams: { s1: { name: "1", src: ["m", "out"], dst: ["t", "in"] } } };
-    check("without a phase an occupied single inlet is refused", !P.canConnect(mm, fixture.catalogue, "k", "out", "t", "in", { phases: ph, draw: "" }));
+    {
+      const ra = P.portConflicts(mm, fixture.catalogue, "k", "out", "t", "in", { phases: ph, draw: "" });
+      check("without a phase the new route (from an element added in phase 1) takes over from phase 1 by itself",
+            ra.ok && ra.replace[0] === "s1" && ra.at === "p1" && ra.tag && ra.tag.phase === "p1" && ra.tag.change === "add", JSON.stringify(ra));
+    }
+    check("two lines that would both exist today stay refused", !P.canConnect({ units: { m: mm.units.m, t: mm.units.t, k2: { type: "compressor", name: "K2" } }, streams: mm.streams },
+          fixture.catalogue, "k2", "out", "t", "in", { phases: ph, draw: "" }));
+    {
+      // the old line was added in phase 1; a compressor added in phase 2 takes over from phase 2 and the old line ends there
+      const ph2 = [{ id: "p1", name: "Phase 1" }, { id: "p2", name: "Phase 2" }];
+      const m3 = { units: { m: { type: "mixer", name: "MIX", phase: "p1", change: "add" }, t: { type: "splitter", name: "TEE" },
+                            k: { type: "compressor", name: "K", phase: "p2", change: "add" } },
+                   streams: { s1: { name: "1", src: ["m", "out"], dst: ["t", "in"], phase: "p1", change: "add" } } };
+      const rb = P.portConflicts(m3, fixture.catalogue, "k", "out", "t", "in", { phases: ph2, draw: "" });
+      check("old line added in phase 1 is retired in phase 2 by a compressor added in phase 2", rb.ok && rb.at === "p2" && rb.tag.phase === "p2", JSON.stringify(rb));
+      P.retireStream(m3.streams.s1, rb.at);
+      check("retired line is in place in phase 1 only", P.presentAt(ph2, m3.streams.s1, 1) && !P.presentAt(ph2, m3.streams.s1, 2) && !P.presentAt(ph2, m3.streams.s1, 0), JSON.stringify(m3.streams.s1));
+    }
     const r = P.portConflicts(mm, fixture.catalogue, "k", "out", "t", "in", { phases: ph, draw: "p1:add" });
     check("with 'new in phase 1' the existing connection is retired instead", r.ok && r.replace.length === 1 && r.replace[0] === "s1", JSON.stringify(r));
     mm.streams.s1.phase = "p1"; mm.streams.s1.change = "remove";

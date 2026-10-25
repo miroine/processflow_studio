@@ -197,4 +197,33 @@ mc["phasecost_result"] = {k: v for k, v in r1.items() if k != "elements"}
 html = build_report(mc, solve(mc), None, "t")
 c.check("report has the phase stages table", "<h3>Stages</h3>" in html and "Today" in html, "")
 
+# ---- v7.9.1 an item added in one phase and retired in a later one
+mu = new_model()
+elu = {"phase": "p1", "change": "add", "until": "p2"}
+mu["phases"] = [{"id": "p1", "name": "Phase 1"}, {"id": "p2", "name": "Phase 2"}]
+c.check("add + until: in place in phase 1 only", [PH.present(elu, mu, k) for k in (0, 1, 2)] == [False, True, False], "")
+c.check("until on a removal is ignored", PH.present({"phase": "p2", "change": "remove", "until": "p1"}, mu, 1), "")
+mu["units"]["a"] = {"type": "valve", "name": "V", "params": {}, **elu}
+PH.remove_phase(mu, "p2")
+c.check("deleting the retiring phase keeps the item", "until" not in mu["units"]["a"] and PH.present(mu["units"]["a"], mu, 1), "")
+# end to end: HP compressor K-101 is in place in phase 1 only; K-102 replaces it in phase 2 (same ports)
+me = phased_hp_compression()
+normalize(me)
+me["phases"].append({"id": "p2", "name": "Phase 2", "color": "#0b7285"})
+k101, k100, e100 = byname(me, "K-101"), byname(me, "K-100"), byname(me, "Export cooler")
+k102 = add_unit(me, "compressor", 700, 200, "K-102")
+me["units"][k102]["params"].update(me["units"][k101]["params"], P_out=100.0)
+for sid in ("phA", "phB"):
+    me["streams"][sid]["until"] = "p2"
+me["units"][k101]["until"] = "p2"
+PH.set_phase(me, [k102], "p2", "add")
+me["streams"]["n1"] = {"name": "4c", "src": [k100, "out"], "dst": [k102, "in"], "phase": "p2", "change": "add"}
+me["streams"]["n2"] = {"name": "5b", "src": [k102, "out"], "dst": [e100, "in"], "phase": "p2", "change": "add"}
+normalize(me)
+c.check("both routes survive normalisation", {t["name"] for t in me["streams"].values()} >= {"4b", "5", "4c", "5b"}, str([t["name"] for t in me["streams"].values()]))
+kd2 = lambda sol, n: next((e.duty_kW for e in sol.energy if n in e.name), None)
+q1, q2 = solve(dict(me, stage=1)), solve(dict(me, stage=2))
+c.check("phase 1 runs K-101 only", q1.converged and kd2(q1, "K-101") and kd2(q1, "K-102") is None, str([e.name for e in q1.energy]))
+c.check("phase 2 runs K-102 instead", q2.converged and kd2(q2, "K-102") and kd2(q2, "K-101") is None, str([e.name for e in q2.energy] + list(q2.errors.values())))
+
 sys.exit(c.report())
