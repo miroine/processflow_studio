@@ -48,6 +48,8 @@ def _apply_edit(res):
         lay = SC.sanitize_layout(res.get("layout"))
         lay["origin"] = old.get("origin") or SC.scene_origin(ss.model)
         lay["ver"] = int(old.get("ver", 0))
+        touched = [str(t) for t in (res.get("touched") or []) if isinstance(t, str)][:500]
+        SC.apply_layout_to_2d(ss.model, lay, touched, lay["origin"])         # what you move in 3D moves in the 2D drawing too
         ss.model["layout3d"] = lay
     st.rerun()
 

@@ -158,6 +158,10 @@ and steps never jump over a feed ramp's breakpoint. UI: loading a flowsheet clea
 default vessel volumes are no longer pinned into the settings, the dynamic model assembly is cached between reruns and the default Python script
 works on an empty flowsheet.
 
+**v7.11.0:** 3D review tools: **colour by results** (pressure, temperature, velocity against the erosional limit, capacity utilisation) with a legend, a **clash / clearance check** (pipe through equipment, pipe-to-pipe wall clearance 150 mm, equipment spacing 1.5 m; bounding-box based), a **measure** tool, a **section plane**, **saved camera views** (kept with the layout), **quantities** (equipment count, pipe length and indicative steel mass per NPS, CSV download), inline block valves and optional **line tags**.
+
+**v7.10.3:** fixes the Realistic / Studio switch (and undo) failing after a Python rerun, 3D moves now also move the 2D drawing, and a linked **2D inset** (hover / click in either view).
+
 **v7.10.2:** editable 3D layout (move / rotate equipment, drag pipe runs and rack height, undo / redo, stored in the flowsheet file), Studio and Realistic looks with service-coloured pipes and flow stripes, and a much faster view (static meshes merged: about 3.5× fewer draw calls, static shadows, instanced supports).
 
 **v7.10.1:** more detailed (generic, non-vendor) 3D equipment — compressor train with motor, gearbox, coupling guards, barrel with bolted covers and seals, lube-oil console, anti-surge loop; API-style pump; shell-and-tube exchanger with a visible tube bundle (X-ray); vessels with instruments, relief valve, internals; and a reference-comparison sheet generator (`tests/make_reference_template.py`).

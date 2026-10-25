@@ -79,11 +79,11 @@ bad = {"units": {"a": {"x": 1.234567, "z": -2, "rot": 5}, "b": {"x": "q", "z": 1
 L = SC.sanitize_layout(bad)
 c.check("layout: only valid units kept, rotation wrapped, position rounded", list(L["units"]) == ["a"] and L["units"]["a"] == {"x": 1.235, "z": -2.0, "rot": 1}, str(L["units"]))
 c.check("layout: only valid routes kept", list(L["routes"]) == ["s"], str(L["routes"]))
-c.check("layout: origin and version survive, garbage becomes empty", L["origin"] == [10.0, 20.0] and L["ver"] == 3 and SC.sanitize_layout("x") == {"units": {}, "routes": {}, "origin": None, "ver": 0}, "")
+c.check("layout: origin and version survive, garbage becomes empty", L["origin"] == [10.0, 20.0] and L["ver"] == 3 and SC.sanitize_layout("x") == {"units": {}, "routes": {}, "origin": None, "ver": 0, "views": []}, "")
 mm = EXAMPLES[list(EXAMPLES)[0]]()
 normalize(mm)
 sc_a = SC.build_scene(mm)
-c.check("scene carries an empty layout and its version", sc_a["layout"] == {"units": {}, "routes": {}} and sc_a["meta"]["layoutVer"] == 0, str(sc_a["layout"]))
+c.check("scene carries an empty layout and its version", sc_a["layout"] == {"units": {}, "routes": {}, "views": []} and sc_a["meta"]["layoutVer"] == 0, str(sc_a["layout"]))
 uid0 = sc_a["units"][0]["id"]
 mm["layout3d"] = {"units": {uid0: {"x": 3, "z": 4, "rot": 2}}, "routes": {}, "origin": SC.scene_origin(mm), "ver": 2}
 sc_b = SC.build_scene(mm)
@@ -102,6 +102,25 @@ mm2 = copy.deepcopy(mm)
 mm2["layout3d"]["units"][uid0]["x"] = 99
 c.check("editing the 3D layout never invalidates the solution", _S.model_hash(mm2) == h1, "")
 c.check("the scene stays JSON-serialisable with a layout", bool(_j.dumps(sc_b)), "")
+
+# 3D moves are written back to the 2D drawing; a later 2D move overrides the stored 3D spot
+mq = EXAMPLES[list(EXAMPLES)[0]]()
+normalize(mq)
+org = SC.scene_origin(mq)
+ids = list(mq["units"])
+u1 = ids[1]
+xy2 = (mq["units"][ids[2]]["x"], mq["units"][ids[2]]["y"])
+lay = SC.sanitize_layout({"units": {u1: {"x": 10.0, "z": -5.0, "rot": 0}, ids[2]: {"x": 1.0, "z": 1.0}}, "origin": org})
+SC.apply_layout_to_2d(mq, lay, [u1], org)
+c.check("a touched unit moves in the 2D drawing by the 3D offset", abs(mq["units"][u1]["x"] - (org[0] + 10.0 / SC.M_PER_PX)) < 0.1 and abs(mq["units"][u1]["y"] - (org[1] - 5.0 / SC.M_PER_PX)) < 0.1, str(mq["units"][u1]))
+c.check("an untouched unit keeps its 2D position", (mq["units"][ids[2]]["x"], mq["units"][ids[2]]["y"]) == xy2, "")
+c.check("every stored spot is stamped with its 2D position", all("p2" in e for e in lay["units"].values()), "")
+mq["layout3d"] = dict(lay, ver=0)
+sq = SC.build_scene(mq)
+c.check("the stamped spot is used while the 2D position is unchanged", u1 in sq["layout"]["units"], "")
+mq["units"][u1]["x"] += 40
+sq = SC.build_scene(mq)
+c.check("a later 2D move wins over the stored 3D spot", u1 not in sq["layout"]["units"] and ids[2] in sq["layout"]["units"], "")
 
 # JS syntax and the vendored library
 import subprocess                                                           # noqa: E402

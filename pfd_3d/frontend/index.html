@@ -38,9 +38,19 @@
   #info .x { position:absolute; right:10px; top:8px; cursor:pointer; color:var(--muted); font-size:16px; }
   #legend { position:absolute; left:10px; bottom:10px; padding:7px 11px; font-size:11.5px; display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
   #legend i { display:inline-block; width:18px; height:6px; border-radius:3px; margin-right:5px; vertical-align:1px; }
+  #inset { position:absolute; left:10px; bottom:52px; padding:0; overflow:hidden; }
+  #insetHead { display:flex; justify-content:space-between; align-items:center; height:26px; padding:0 8px 0 10px; font-size:11.5px; color:var(--muted); border-bottom:1px solid var(--line); }
+  #insetHead b { color:var(--ink); font-weight:600; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #insetHead button { background:none; border:0; color:var(--muted); cursor:pointer; font-size:13px; padding:2px 5px; }
+  #insetHead button:hover { color:var(--accent); }
+  #inset canvas { display:block; }
   #hint { position:absolute; right:10px; bottom:10px; padding:5px 10px; font-size:11px; color:var(--muted); }
   #tip { position:absolute; pointer-events:none; padding:4px 9px; font-size:11.5px; display:none; white-space:nowrap; }
   #msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:14px; text-align:center; padding:30px; }
+  #clash .row{display:flex;gap:6px;align-items:flex-start;padding:3px 0;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.08)}
+  #clash .row i{width:9px;height:9px;border-radius:50%;flex:none;margin-top:3px}
+  #bClash.warn{background:#7a2323;color:#fff}
+  #boq h3{font-size:12px;margin:8px 0 2px;opacity:.8} #boq table{width:100%;border-collapse:collapse} #boq td{padding:1px 0;border-bottom:1px solid rgba(255,255,255,.07)} #boq td:last-child{text-align:right}
 </style>
 </head>
 <body>
@@ -58,6 +68,8 @@
     <button id="bNight" title="Day / dusk lighting">Dusk</button>
     <button id="bRot" title="Slow turntable rotation">Orbit</button>
     <select id="selTheme" title="Look of the scene"><option value="studio">Studio</option><option value="realistic">Realistic</option></select>
+    <select id="selColor" title="Colour the pipes and equipment by a result"><option value="none">Colour: service</option><option value="pressure">Pressure</option><option value="temperature">Temperature</option><option value="velocity">Velocity / limit</option><option value="util">Utilisation</option></select>
+    <button id="bPTags" title="Line (stream) tags on the pipes">Line tags</button>
     <span class="sep"></span>
     <button id="bEdit" title="Edit the layout: move and rotate equipment, drag pipe runs">✎ Edit layout</button>
     <span id="editTools" style="display:none;gap:4px;flex-wrap:wrap">
@@ -68,10 +80,25 @@
       <button id="bResetL" title="Back to the layout of the 2D drawing">Reset layout</button>
     </span>
     <span class="sep"></span>
+    <button id="bClash" title="Check pipes and equipment for clashes (bounding boxes)">✓ No clashes</button>
+    <button id="bMeasure" title="Measure the distance between two points (Esc to leave)">Measure</button>
+    <span id="measTxt" style="font-size:11px;opacity:.85"></span>
+    <button id="bSec" title="Cut the model with a plane">Section</button>
+    <span id="secTools" style="display:none;gap:4px;align-items:center">
+      <select id="secAxis"><option value="y">horizontal (height)</option><option value="x">vertical (E-W)</option><option value="z">vertical (N-S)</option></select>
+      <input id="secPos" type="range" min="0" max="100" value="100" style="width:90px">
+    </span>
+    <select id="selViews" title="Saved camera views"><option value="">Views…</option></select>
+    <button id="bViewSave" title="Save the current camera as a view">＋</button><button id="bViewDel" title="Delete the selected view" style="display:none">🗑</button>
+    <button id="bBoq" title="Quantities of equipment and piping">Quantities</button>
+    <button id="bInset" title="Show the 2D diagram next to the 3D view: hover or click an item in either one">2D inset</button>
     <button id="bShot" title="Save a PNG of the current view">PNG</button>
   </div>
   <div id="stage" class="glass"><span id="stageName"></span></div>
   <div id="info" class="glass"><span class="x" id="infoX">✕</span><div id="infoBody"></div></div>
+  <div id="inset" class="glass" style="display:none"><div id="insetHead"><b id="insetTitle">2D diagram</b><span><button id="insetSize" title="Change the size">⤢</button><button id="insetX" title="Close">✕</button></span></div><canvas id="map"></canvas></div>
+  <div id="clash" class="glass" style="display:none;position:absolute;right:330px;top:52px;width:300px;max-height:60%;overflow:auto;padding:8px 10px;font-size:12px"><span class="x" id="clashX" style="float:right;cursor:pointer">✕</span><b>Clashes</b><div id="clashList"></div><p class="sub" style="opacity:.7;margin:6px 0 0">Bounding-box check; equipment boxes include platforms and railings. Pipe wall clearance 150 mm, equipment spacing 1.5 m.</p></div>
+  <div id="boq" class="glass" style="display:none;position:absolute;right:12px;top:52px;width:300px;max-height:70%;overflow:auto;padding:8px 10px;font-size:12px"><span class="x" id="boqX" style="float:right;cursor:pointer">✕</span><b>Quantities (indicative)</b><div id="boqBody"></div><button id="boqCsv" style="margin-top:6px">Download CSV</button></div>
   <div id="legend" class="glass"></div>
   <div id="hint" class="glass">drag: rotate · right-drag / Shift: pan · wheel: zoom · click: inspect · double-click: fly to</div>
   <div id="tip" class="glass"></div>

@@ -180,16 +180,42 @@ def _bridge_logical(streams, recycles):
 
 
 
+def _layout_current(entry, unit):
+    """A stored 3D spot is dropped when the unit was moved in the 2D drawing afterwards (the newer edit wins)."""
+    if unit is None:
+        return True
+    p2 = entry.get("p2")
+    return not p2 or (abs(p2[0] - unit["x"]) <= 1.5 and abs(p2[1] - unit["y"]) <= 1.5)
+
+
+def apply_layout_to_2d(model, layout, touched, origin):
+    """Write the 3D position of the units the user moved back into the 2D drawing (pixels) and stamp every stored
+    spot with the unit's 2D position, so that a later 2D move overrides the 3D spot instead of being ignored."""
+    for uid in touched or []:
+        u, e = model["units"].get(uid), layout["units"].get(uid)
+        if u and e and u["type"] not in LOGICAL and u["type"] != "platform":
+            u["x"] = round(origin[0] + e["x"] / M_PER_PX, 1)
+            u["y"] = round(origin[1] + e["z"] / M_PER_PX, 1)
+    for uid, e in layout["units"].items():
+        u = model["units"].get(uid)
+        if u:
+            e["p2"] = [u["x"], u["y"]]
+    return layout
+
+
 def scene_origin(model):
     """Centre (2D pixels) of all drawn units - the origin of the scene frame."""
     pos = [(u["x"], u["y"]) for u in model["units"].values() if u["type"] not in LOGICAL and u["type"] != "platform"]
     return [sum(p[0] for p in pos) / len(pos), sum(p[1] for p in pos) / len(pos)] if pos else [0.0, 0.0]
 
 
+VEL_LIMIT = {"gas": 20.0, "liquid": 3.0, "water": 3.0, "two-phase": 12.0}   # indicative screening velocities [m/s], not a code limit
+
+
 def sanitize_layout(lay):
     """The hand-edited 3D layout stored in ``model["layout3d"]``: unit positions / rotations and pipe routes in scene metres.
     Anything malformed is dropped (the component value comes from a browser)."""
-    out = {"units": {}, "routes": {}, "origin": None, "ver": 0}
+    out = {"units": {}, "routes": {}, "origin": None, "ver": 0, "views": []}
     if not isinstance(lay, dict):
         return out
 
@@ -202,11 +228,21 @@ def sanitize_layout(lay):
     for k, v in (lay.get("units") or {}).items():
         if isinstance(v, dict) and num(v.get("x")) is not None and num(v.get("z")) is not None:
             out["units"][str(k)] = {"x": num(v["x"]), "z": num(v["z"]), "rot": int(num(v.get("rot", 0), 8) or 0) % 4}
+            p2 = v.get("p2")
+            if isinstance(p2, (list, tuple)) and len(p2) == 2 and num(p2[0], 1e6) is not None and num(p2[1], 1e6) is not None:
+                out["units"][str(k)]["p2"] = [num(p2[0], 1e6), num(p2[1], 1e6)]    # 2D position when the 3D spot was stored
     for k, pts in (lay.get("routes") or {}).items():
         if isinstance(pts, (list, tuple)) and 2 <= len(pts) <= 40:
             q = [[num(c, 5000.0) for c in p] for p in pts if isinstance(p, (list, tuple)) and len(p) == 3]
             if len(q) == len(pts) and all(None not in p for p in q):
                 out["routes"][str(k)] = q
+    out["views"] = []
+    for v in (lay.get("views") or [])[:12]:
+        if isinstance(v, dict) and isinstance(v.get("t"), (list, tuple)) and len(v["t"]) == 3:
+            t = [num(c, 5000.0) for c in v["t"]]
+            r, th, ph = num(v.get("r"), 5000.0), num(v.get("th"), 100.0), num(v.get("ph"), 100.0)
+            if None not in t and None not in (r, th, ph):
+                out["views"].append({"name": str(v.get("name", "View"))[:40], "t": t, "r": r, "th": th, "ph": ph})
     o = lay.get("origin")
     if isinstance(o, (list, tuple)) and len(o) == 2 and all(isinstance(c, (int, float)) for c in o):
         out["origin"] = [float(o[0]), float(o[1])]
@@ -228,6 +264,16 @@ def build_scene(model, sol=None, fmt=None, qfmt=None, solved_ok=True):
     if lay.get("origin"):                       # an edited layout keeps its own origin so that moving things in 2D does not shift it
         cx, cy = lay["origin"]
     cur = sol is not None and solved_ok
+    util = {}
+    if cur:
+        try:
+            from . import debottleneck as _DB
+            for row in _DB.utilisation(model, sol):
+                v = row.get("Utilisation [%]")
+                if isinstance(v, (int, float)) and _num(v) is not None and (row["uid"] not in util or v > util[row["uid"]][0]):
+                    util[row["uid"]] = (float(v), str(row.get("Check", "")))
+        except Exception:                                     # noqa: BLE001  (a capacity check must never break the 3D view)
+            util = {}
     out_u, out_s, plat = [], [], []
     for uid, u in units.items():
         t = u["type"]
@@ -255,6 +301,7 @@ def build_scene(model, sol=None, fmt=None, qfmt=None, solved_ok=True):
                       "orient": u.get("orient") or "", "scale": round(visual_scale(t, res) * float(u.get("scale", 1.0) or 1.0), 3),
                       "phase": u.get("phase") or "", "change": u.get("change") or "", "color": PH.effective_color(u, model) or "",
                       "status": status, "error": (sol.errors.get(uid, "") if cur else ""),
+                      "util": round(util[uid][0], 1) if uid in util else None, "utilCheck": util[uid][1] if uid in util else "",
                       "title": d[0], "what": d[1], "model": d[2], "results": rows[:24]})
     for sid, s in streams.items():
         st = sol.streams.get(sid) if cur else None
@@ -266,7 +313,7 @@ def build_scene(model, sol=None, fmt=None, qfmt=None, solved_ok=True):
             vol = _num(p.get("Actual vol flow [m³/h]")) or 0.0
             svc = service_of(s["src"][1], vf, p.get("Phase"))
             nps, di, vel = nominal_size(vol, svc)
-            e.update({"solved": True, "T": _num(p["Temperature [°C]"]), "P": _num(p["Pressure [bar(a)]"]), "mass": _num(p["Mass flow [kg/h]"]),
+            e.update({"solved": True, "velLimit": VEL_LIMIT.get(svc, 15.0), "T": _num(p["Temperature [°C]"]), "P": _num(p["Pressure [bar(a)]"]), "mass": _num(p["Mass flow [kg/h]"]),
                       "vol": vol, "vf": vf, "service": svc, "nps": nps, "d": round(di, 4), "vel": round(vel, 2),
                       "rho": _num(p.get("Mass density [kg/m³]")), "phaseTxt": p.get("Phase"),
                       "rows": [["Phase", str(p.get("Phase"))], ["Vapour fraction", f"{vf:.4f}" if vf is not None else ""],
@@ -278,6 +325,6 @@ def build_scene(model, sol=None, fmt=None, qfmt=None, solved_ok=True):
         out_s.append(e)
     out_s = _bridge_logical(out_s, {uid for uid, u in units.items() if u["type"] == "recycle"})
     return _plain({"units": out_u, "streams": out_s, "platforms": plat,
-                   "layout": {"units": lay["units"], "routes": lay["routes"]},
+                   "layout": {"units": {k: v for k, v in lay["units"].items() if _layout_current(v, model["units"].get(k))}, "routes": lay["routes"], "views": lay["views"]},
                    "meta": {"layoutVer": int(lay.get("ver", 0)), "stage": stage, "stageName": PH.stage_name(model, stage), "solved": bool(cur),
                             "phases": [{"id": p["id"], "name": p["name"], "color": PH.phase_color(model, p["id"])} for p in PH.phase_list(model)]}})
