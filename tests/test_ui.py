@@ -1437,5 +1437,36 @@ st.HOOK["press"].add("🧩 Back to the 2D diagram")
 run()
 c.check("the back button returns to the 2D canvas", not ss.get("view3d") and canvas_args() is not None, "")
 
+# ---- 19b. 3D layout edits come back from the component and persist in the model -------------------------
+from ui import state as S   # noqa: E402
+st.HOOK["press"].add("🧊 View in 3D")
+run()
+_uid = list(ss.model["units"])[1]
+_h_before = S.model_hash(ss.model)
+ss["plant3d"] = {"nonce": "t-1", "layout": {"units": {_uid: {"x": 12.5, "z": -3.0, "rot": 1}}, "routes": {}}}
+st.HOOK["component_calls"].clear()
+run()
+_lay = ss.model.get("layout3d") or {}
+c.check("a layout edit from the 3D view is stored in the model", _lay.get("units", {}).get(_uid, {}).get("x") == 12.5 and _lay["units"][_uid]["rot"] == 1, str(_lay)[:80])
+c.check("the stored layout has an origin so 2D moves do not shift it", isinstance(_lay.get("origin"), list) and len(_lay["origin"]) == 2, "")
+c.check("editing the 3D layout does not invalidate the solution", S.model_hash(ss.model) == _h_before and S.sol_is_current(), "")
+_c3 = [x for x in st.HOOK["component_calls"] if x["name"] == "pfd_3d"]
+c.check("the next scene carries the stored layout", bool(_c3) and _c3[-1]["args"]["scene"]["layout"]["units"].get(_uid, {}).get("x") == 12.5, "")
+_n = len(_c3)
+st.HOOK["component_calls"].clear()
+run()
+c.check("the same edit is applied only once (no rerun loop)", ss.get("_l3d_nonce") == "t-1", "")
+ss["plant3d"] = {"nonce": "t-2", "layout": {"units": {_uid: {"x": "bad", "z": 1}}, "routes": {}}}
+run()
+c.check("a malformed edit from the browser is dropped", ss.model["layout3d"]["units"] == {}, str(ss.model["layout3d"]["units"]))
+st.HOOK["press"].add("↺ Reset 3D layout")
+ss["plant3d"] = {"nonce": "t-3", "layout": {"units": {_uid: {"x": 1, "z": 1, "rot": 0}}, "routes": {}}}
+run()
+st.HOOK["press"].add("↺ Reset 3D layout")
+run()
+c.check("the reset button clears the layout and bumps its version", not ss.model["layout3d"]["units"] and ss.model["layout3d"]["ver"] >= 1, str(ss.model["layout3d"]))
+st.HOOK["press"].add("🧩 Back to the 2D diagram")
+run()
+
 
 sys.exit(c.report())

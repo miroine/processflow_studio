@@ -51,7 +51,7 @@ def value(model, sol, obj, quantity):
 def main(csv_path, out_path=None):
     base = os.path.dirname(os.path.abspath(csv_path))
     with open(csv_path, newline="", encoding="utf-8") as f:
-        cases = list(csv.DictReader(f))
+        cases = [c for c in csv.DictReader(f) if (c.get("reference") or "").strip()]   # rows without a reference are skipped
     cache, rows = {}, []
     for c in cases:
         fs = c["flowsheet"].strip()

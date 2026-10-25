@@ -15,8 +15,11 @@
   #bar { position:absolute; left:10px; top:10px; display:flex; flex-wrap:wrap; gap:4px; padding:5px; max-width:calc(100% - 340px); }
   #bar button { font:inherit; font-size:12px; font-weight:500; color:var(--ink); background:rgba(255,255,255,.06); border:1px solid var(--line);
     border-radius:7px; padding:5px 10px; cursor:pointer; min-height:30px; }
+  #bar button:disabled { opacity:.35; cursor:default; }
   #bar button:hover { border-color:var(--accent); color:var(--accent); }
   #bar button.on { background:rgba(45,212,196,.18); border-color:var(--accent); color:var(--accent); }
+  #bar select { font:inherit; font-size:12px; color:var(--ink); background:rgba(255,255,255,.08); border:1px solid var(--line); border-radius:7px; padding:4px 6px; min-height:30px; }
+  #bar select option { color:#111; }
   #bar .sep { width:1px; background:var(--line); margin:3px 2px; }
   #stage { position:absolute; right:10px; top:10px; padding:6px 12px; font-size:12px; display:flex; gap:8px; align-items:center; }
   #stage b { color:var(--accent); font-weight:600; }
@@ -49,10 +52,21 @@
     <button data-v="front" title="Elevation from the front">Elevation</button>
     <span class="sep"></span>
     <button id="bFlow" class="on" title="Animate the flow in the pipes">Flow</button>
+    <button id="bBeads" title="See-through pipes with moving beads instead of glowing stripes">Beads</button>
     <button id="bLabels" class="on" title="Tag labels">Tags</button>
     <button id="bXray" title="Make the equipment shells see-through">X-ray</button>
     <button id="bNight" title="Day / dusk lighting">Dusk</button>
     <button id="bRot" title="Slow turntable rotation">Orbit</button>
+    <select id="selTheme" title="Look of the scene"><option value="studio">Studio</option><option value="realistic">Realistic</option></select>
+    <span class="sep"></span>
+    <button id="bEdit" title="Edit the layout: move and rotate equipment, drag pipe runs">✎ Edit layout</button>
+    <span id="editTools" style="display:none;gap:4px;flex-wrap:wrap">
+      <button id="bSnap" class="on" title="Snap to a 1 m grid (pipes 0.5 m)">Snap</button>
+      <button id="bRotU" title="Rotate the selected equipment by 90° (R)">⟳ Rotate</button>
+      <button id="bUndo" title="Undo (Ctrl+Z)">↶</button><button id="bRedo" title="Redo (Ctrl+Y)">↷</button>
+      <button id="bAuto" title="Forget the hand-routed path of the selected pipe">Auto-route pipe</button>
+      <button id="bResetL" title="Back to the layout of the 2D drawing">Reset layout</button>
+    </span>
     <span class="sep"></span>
     <button id="bShot" title="Save a PNG of the current view">PNG</button>
   </div>

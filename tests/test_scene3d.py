@@ -71,6 +71,38 @@ c.check("platform is a deck outline", len(s1["platforms"]) == 1 and all(u["type"
 c.check("vessel diameter drives the visual scale", SC.visual_scale("separator", {"Required diameter [mm]": 3600.0}) > SC.visual_scale("separator", {"Required diameter [mm]": 1200.0}), "")
 c.check("unknown result leaves the scale at 1", SC.visual_scale("separator", {}) == 1.0 and SC.visual_scale("valve", {"x": 1}) == 1.0, "")
 
+
+# hand-edited layout (v7.10.2): sanitising, stable origin, injection into the scene, no re-solve
+import copy                                                                 # noqa: E402
+bad = {"units": {"a": {"x": 1.234567, "z": -2, "rot": 5}, "b": {"x": "q", "z": 1}, "c": {"x": 1e9, "z": 0}},
+       "routes": {"s": [[0, 0, 0], [1, 2, 3]], "t": [[0, 0]], "u": "x", "v": [[0, 0, 0]] * 41}, "origin": [10, 20], "ver": "3"}
+L = SC.sanitize_layout(bad)
+c.check("layout: only valid units kept, rotation wrapped, position rounded", list(L["units"]) == ["a"] and L["units"]["a"] == {"x": 1.235, "z": -2.0, "rot": 1}, str(L["units"]))
+c.check("layout: only valid routes kept", list(L["routes"]) == ["s"], str(L["routes"]))
+c.check("layout: origin and version survive, garbage becomes empty", L["origin"] == [10.0, 20.0] and L["ver"] == 3 and SC.sanitize_layout("x") == {"units": {}, "routes": {}, "origin": None, "ver": 0}, "")
+mm = EXAMPLES[list(EXAMPLES)[0]]()
+normalize(mm)
+sc_a = SC.build_scene(mm)
+c.check("scene carries an empty layout and its version", sc_a["layout"] == {"units": {}, "routes": {}} and sc_a["meta"]["layoutVer"] == 0, str(sc_a["layout"]))
+uid0 = sc_a["units"][0]["id"]
+mm["layout3d"] = {"units": {uid0: {"x": 3, "z": 4, "rot": 2}}, "routes": {}, "origin": SC.scene_origin(mm), "ver": 2}
+sc_b = SC.build_scene(mm)
+c.check("scene passes the stored layout through and the version", sc_b["layout"]["units"][uid0]["rot"] == 2 and sc_b["meta"]["layoutVer"] == 2, "")
+c.check("the stored origin keeps unedited units where they were", [(u["x"], u["z"]) for u in sc_a["units"]] == [(u["x"], u["z"]) for u in sc_b["units"]], "")
+m3 = copy.deepcopy(mm)
+for u in m3["units"].values():
+    u["x"] += 500.0
+sc_c = SC.build_scene(m3)
+c.check("moving everything in 2D does not shift an edited 3D layout", all(abs(a["x"] - b["x"] - 500 * SC.M_PER_PX) < 0.01 for a, b in zip(sc_c["units"], sc_b["units"])), "")
+import json as _j                                                           # noqa: E402,F811
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "stubs"))
+import ui.state as _S                                                       # noqa: E402
+h1 = _S.model_hash(mm)
+mm2 = copy.deepcopy(mm)
+mm2["layout3d"]["units"][uid0]["x"] = 99
+c.check("editing the 3D layout never invalidates the solution", _S.model_hash(mm2) == h1, "")
+c.check("the scene stays JSON-serialisable with a layout", bool(_j.dumps(sc_b)), "")
+
 # JS syntax and the vendored library
 import subprocess                                                           # noqa: E402
 r = subprocess.run(["node", "--check", os.path.join(ROOT, "pfd_3d", "frontend", "plant3d.js")], capture_output=True, text=True) if os.system("which node >/dev/null 2>&1") == 0 else None

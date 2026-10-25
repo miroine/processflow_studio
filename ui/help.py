@@ -589,12 +589,13 @@ compressors and maps, heat curves, column and pipe profiles, convergence) and gr
 
 ### 3D view
 
-Press **🧊 3D view** above the flowsheet to swap the 2D drawing for an interactive 3D plant (button again to return).
+Press **🧊 View in 3D** above the flowsheet to swap the 2D drawing for an interactive 3D plant (button again to return).
 * **Navigate:** drag to orbit, right-drag or Shift+drag to pan, wheel to zoom; the preset buttons give plan, side and iso views; double-click an item to fly to it.
-* **Inspect:** click any equipment or pipe — the panel gives what it is, how it is modelled, the solved results (power, duty, ΔP, rates) and, for pipes, pressure, temperature, velocity and mass flow with an indicative line size.
-* **Flow:** animated particles move along every pipe with speed scaled to the velocity and colour by service (gas, oil, water, glycol…); toggle flow, labels, X-ray (see inside vessels), night mode and auto-rotate.
+* **Inspect:** click any equipment or pipe — the panel gives what it is, how it is modelled, the solved results and, for pipes, pressure, temperature, velocity and mass flow with an indicative line size.
+* **Flow:** glowing stripes travel along every flowing pipe (speed scaled to the velocity); **Beads** switches to see-through pipes with moving beads. Pipe colour follows the service (gas amber, oil orange, water blue, two-phase violet). Also: tags, X-ray (see inside vessels, exchangers and compressors), dusk lighting, auto-rotate, PNG export and a **Studio / Realistic** look.
+* **Edit the layout (✎ Edit layout):** drag equipment on the ground (1 m snap), **R** or *Rotate* turns it by 90°, select a pipe and drag its teal handles to move a run sideways and the orange handle to change the rack height; *Auto-route pipe* forgets a hand route, *Undo / Redo* (Ctrl+Z / Ctrl+Y) and *Reset layout* (or the button under the view) go back to the layout of the 2D drawing. Moving equipment re-routes its pipes automatically. The layout is stored in the flowsheet file; it does not change the process model or invalidate the solution.
 * **Stages:** the 3D view follows the phase selected for the flowsheet — items not yet built are hidden or ghosted.
-* **Limits:** shapes are generic and schematic, the layout is derived from your 2D drawing (items are pushed apart where they overlap), and pipe sizes are indicative only — not line sizing. On slow or software graphics the view lowers its quality automatically.
+* **Limits:** shapes are detailed but generic (no vendor drawings), the first layout is derived from your 2D drawing (items are pushed apart where they overlap), and pipe sizes are indicative only — not line sizing. Hand-routed pipes are not checked for clashes. On slow or software graphics the view lowers its quality automatically.
 
 ### About
 

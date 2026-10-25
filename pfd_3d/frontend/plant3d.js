@@ -19,12 +19,15 @@
     $("msg").textContent = "3D view needs WebGL, which this browser does not provide.";
     return;
   }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.outputColorSpace = T.SRGBColorSpace;
   renderer.toneMapping = T.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = T.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false;           // static scene: the shadow map is re-rendered only when something moved
+  let shadowFrames = 3;
+  const shadowsDirty = (n) => { shadowFrames = Math.max(shadowFrames, n || 2); };
 
   const scene = new T.Scene();
   const camera = new T.PerspectiveCamera(38, 1, 0.1, 2000);
@@ -32,6 +35,7 @@
   scene.add(world);
 
   const sky = { day: ["#9ec7ea", "#e9f1f7", "#c9d4dc"], dusk: ["#1a2740", "#e08a5a", "#2b2f3d"] };
+  let themeName = "studio";
   function skyTexture(c) {
     const cv = document.createElement("canvas"); cv.width = 2; cv.height = 256;
     const g = cv.getContext("2d"), gr = g.createLinearGradient(0, 0, 0, 256);
@@ -74,8 +78,20 @@
     seabed: PAINT(0xb9a67e, 1.0, 0), subsea: PAINT(0xd9a21b, 0.5, 0.25),
     liq: new T.MeshStandardMaterial({ color: 0x3b82c4, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.55 }),
   };
-  const SERVICE = { gas: 0x8fc3e6, liquid: 0xd48a22, water: 0x2f7de0, "two-phase": 0xa9b86a };
-  const FLOWCOL = { gas: 0xa8ecff, liquid: 0xffb743, water: 0x4d9aff, "two-phase": 0xffffff };
+  const SERVICE = { gas: 0xf2b01e, liquid: 0xc8521e, water: 0x1f8fe0, "two-phase": 0x8e5bd6 };
+  const FLOWCOL = { gas: 0xfff1b8, liquid: 0xffc9a0, water: 0xa9ddff, "two-phase": 0xe9dcff };
+  // ---- look: "studio" (clean, saturated, light - the look of commercial plant-design viewers) and "realistic" (outdoor, muted)
+  const PAL_REAL = { vessel: 0xaeb9c4, vesselDk: 0x6d7a88, steel: 0x8c969f, steelDk: 0x4b535c, galv: 0xb8c0c7, conc: 0x9a9a94, yellow: 0xe8b923, orange: 0xe0662b, blue: 0x2f6fb2, red: 0xb8322a, green: 0x3c8f5f, white: 0xe6eaee, black: 0x20252b, motor: 0x2c6fa8, ins: 0xc8ced4, copper: 0xb87333 };
+  const THEMES = {
+    studio: { sky: ["#d3e1ef", "#f1f6fb", "#c4d1dd"], pad: "#dde4ea", grid: "rgba(110,130,150,.6)", ground: 0xb9c5cf, fog: 0xe7eef4, hemi: 0.95, sun: 1.8, exposure: 1.0, env: 0.9, tint: 1.0,
+      pal: { vessel: 0xc9d8e8, vesselDk: 0x8ea4ba, steel: 0xa2b0be, steelDk: 0x566a7d, galv: 0xdbe2e9, conc: 0xcfd2d6, yellow: 0xffc21a, orange: 0xff7a1a, blue: 0x1f78d2, red: 0xe03a3a, green: 0x1fa66d, white: 0xf5f8fb, black: 0x252a31, motor: 0x1f6fd0, ins: 0xe8edf1, copper: 0xdb8b4b } },
+    realistic: { sky: null, pad: "#7b7f7d", grid: null, ground: 0x4b504c, fog: 0xc9d6df, hemi: 0.55, sun: 2.4, exposure: 1.05, env: 0.7, tint: 0.3, pal: PAL_REAL },
+  };
+  const TINT = { separator: 0xb5d1f0, scrubber: 0xb5d1f0, separator3: 0xa9c8ee, phase_splitter: 0xb5d1f0, deliquifier: 0xb5d1f0, comp_splitter: 0xcdd8e4, column: 0xd2dce6, teg_contactor: 0xe6d6a6, amine_contactor: 0xbfe2d0,
+    conv_reactor: 0xf2b27c, eq_reactor: 0xf2b27c, mol_sieve: 0xe4cba1, heater: 0xf5a98a, cooler: 0x8fc8f2, chiller: 0x82d6d8, hx: 0xa2d3cb, compressor: 0x4f80d2, expander: 0x8a6cd9, pump: 0x2fa896,
+    subsea_separator: 0xe3b53a, subsea_booster: 0xe3b53a, subsea_pump: 0xe3b53a, subsea_compressor: 0xe3b53a, subsea_hydrocyclone: 0xe3b53a, subsea_heater: 0xe3b53a, subsea_cooler: 0xe3b53a };
+  const TINTED = new Set(), tintCache = new Map();
+  function applyPalette() { const th = THEMES[themeName]; for (const k in th.pal) if (M[k]) M[k].color.setHex(th.pal[k]); tintCache.forEach((m) => { TINTED.delete(m); m.dispose(); }); tintCache.clear(); }
   const STATUS = { ok: null, warning: 0xf5a524, error: 0xff4d4d, missing: 0xff4d4d, unsolved: 0xff4d4d };
 
   // ------------------------------------------------------------------ small geometry helpers
@@ -122,6 +138,48 @@
     p.position.y = 0.035; g.add(p); return p;
   }
 
+
+  // ---- detail helpers (v7.10.1): instrumentation, bolted covers, fins, coupling guards, tube bundles
+  function instr(g, x, y, z, kind) {            // transmitter (or gauge) on a root-valve stub
+    const st = cyl(0.025, 0.32, M.steel, 8); st.position.set(x, y + 0.16, z); g.add(st);
+    g.add(at(cyl(0.05, 0.07, M.red, 10), x, y + 0.1, z));
+    if (kind === "gauge") { const d = cyl(0.09, 0.05, M.white, 20); d.rotation.x = Math.PI / 2; d.position.set(x, y + 0.42, z + 0.03); g.add(d); }
+    else { g.add(at(box(0.11, 0.16, 0.11, M.blue), x, y + 0.42, z)); g.add(at(cyl(0.04, 0.06, M.black, 8), x, y + 0.54, z)); }
+  }
+  function boltRing(g, r, n, x, y, z, axis) {   // bolted flange: n bolt heads on a circle
+    const grp = new T.Group();
+    for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2; const b = cyl(0.025, 0.07, M.black, 6); b.position.set(Math.cos(a) * r, 0, Math.sin(a) * r); grp.add(b); }
+    grp.position.set(x, y, z); if (axis === "x") grp.rotation.z = Math.PI / 2; g.add(grp); return grp;
+  }
+  function finRing(g, r, L, n, x, y, z, m) {    // cooling fins along a horizontal machine
+    for (let i = 0; i < n; i++) { const f = cyl(r * 1.04, 0.025, m, 28); f.rotation.z = Math.PI / 2; f.position.set(x - L / 2 + (i + 0.5) * L / n, y, z); g.add(f); }
+  }
+  function couplingGuard(g, x, y, z, len, r) {  // yellow half-round guard over a shaft coupling
+    const c = mesh(new T.CylinderGeometry(r, r, len, 24, 1, true, 0, Math.PI), M.yellow); c.rotation.z = Math.PI / 2; c.rotation.x = -Math.PI / 2; c.position.set(x, y, z); g.add(c);
+    const e = box(0.04, r * 1.0, r * 2, M.yellow); e.position.set(x - len / 2, y - r * 0.5, z); g.add(e); const e2 = e.clone(); e2.position.x = x + len / 2; g.add(e2);
+  }
+  function gridPlate(g, w, d, y) { const p = box(w, 0.05, d, M.galv); p.position.y = y; g.add(p); for (let i = 0; i < 8; i++) g.add(at(box(w, 0.012, 0.012, M.steelDk), 0, y + 0.03, -d / 2 + (i + 0.5) * d / 8)); }
+  function anchorBolts(g, w, d, y) { for (const sx of [-1, 1]) for (const sz of [-1, 1]) { g.add(at(cyl(0.035, 0.18, M.black, 6), sx * (w / 2 - 0.1), y + 0.1, sz * (d / 2 - 0.1))); g.add(at(cyl(0.06, 0.04, M.steelDk, 6), sx * (w / 2 - 0.1), y + 0.02, sz * (d / 2 - 0.1))); } }
+  function psvOnTop(g, x, y, z, r0) {            // relief valve + tail pipe on a vessel top
+    const n = cyl(0.1, 0.35, M.steel, 14); n.position.set(x, y + 0.17, z); g.add(n); g.add(at(flange(0.1, M.steelDk), x, y + 0.36, z));
+    const b = box(0.28, 0.28, 0.28, M.red); b.position.set(x, y + 0.62, z); g.add(b);
+    const o = cyl(0.14, 0.55, M.steel, 14); o.rotation.z = Math.PI / 2; o.position.set(x + 0.4, y + 0.62, z); g.add(o);
+    g.add(at(cyl(0.1, 0.5, M.vesselDk, 14), x, y + 0.98, z));
+  }
+  function tubeBundle(L, r, n, plateEvery) {     // X-ray content of a shell & tube exchanger
+    const grp = new T.Group(); grp.userData.internal = true;
+    const tg = new T.CylinderGeometry(0.018, 0.018, L, 6), im = new T.InstancedMesh(tg, M.copper, n), mtx = new T.Matrix4(), q = new T.Quaternion().setFromEuler(new T.Euler(0, 0, Math.PI / 2));
+    const rings = Math.ceil(Math.sqrt(n)); let k = 0;
+    for (let j = 0; j < rings * 2 && k < n; j++) for (let i = 0; i < rings * 2 && k < n; i++) {
+      const y = (j - rings + 0.5) * r * 0.78 / rings * 1.05, z = (i - rings + 0.5) * r * 0.78 / rings * 1.05; if (y * y + z * z > r * r * 0.52) continue;
+      mtx.compose(new T.Vector3(0, y, z), q, new T.Vector3(1, 1, 1)); im.setMatrixAt(k++, mtx);
+    }
+    im.count = k; grp.add(im);
+    for (let x = -L / 2 + plateEvery; x < L / 2; x += plateEvery) { const b = cyl(r * 0.97, 0.025, M.galv, 28); b.rotation.z = Math.PI / 2; b.position.x = x; b.scale.set(1, 1, 1); grp.add(b); }
+    const ts = cyl(r * 0.99, 0.08, M.steelDk, 32); ts.rotation.z = Math.PI / 2; ts.position.x = -L / 2; grp.add(ts); const ts2 = ts.clone(); ts2.position.x = L / 2; grp.add(ts2);
+    return grp;
+  }
+
   // ------------------------------------------------------------------ equipment archetypes
   // Each builder returns {g, W, H, yMid, ySpan, spin:[{o, axis, rate}], level:[...], ports?:{name:{p:[x,y,z], d:[x,y,z]}}}
   // Local frame: x = inlet -> outlet, y up, z towards the viewer.  Scale 1 = metres.
@@ -148,6 +206,18 @@
     ints.add(at(cyl(r * 0.95, 0.22, M.galv, 36), 0, y0 + H * 0.84, 0));
     ints.add(at(box(r * 1.2, 0.08, 0.5, M.yellow), -r * 0.45, y0 + H * 0.5, 0));
     g.add(ints);
+    // detail: skirt vent + anchor chairs, nameplate, bolted bridle, transmitters, PSV, davit, second platform, internals
+    g.add(at(box(0.5, 0.45, 0.08, M.black), 0, 0.3, r * 0.94 + 0.02));
+    for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2 + 0.2; g.add(at(box(0.16, 0.3, 0.12, M.steelDk), Math.cos(a) * r * 0.97, 0.08, Math.sin(a) * r * 0.97)); }
+    g.add(at(box(0.3, 0.2, 0.02, M.galv), r * 0.6, y0 + H * 0.12, r * 0.8 + 0.02));
+    for (const f of [0.3 - 0.17, 0.3 + 0.17]) { const dy = H * f; g.add(at(cyl(0.035, 0.22, M.steel, 8), r * 0.5, y0 + dy, r + 0.24).rotateX(Math.PI / 2)); }
+    instr(g, -r * 0.2, y0 + H * 0.5, r + 0.0, "tx"); instr(g, r * 0.2, y0 + H * 0.62, r, "gauge");
+    psvOnTop(g, r * 0.45, y0 + H + r * 0.46 - 0.05, 0);
+    const dv = cyl(0.03, 1.1, M.steelDk, 8); dv.position.set(-r * 0.4, y0 + H + r * 0.4 + 0.55, 0); g.add(dv); g.add(at(box(0.8, 0.04, 0.04, M.steelDk), -r * 0.4 + 0.35, y0 + H + r * 0.4 + 1.1, 0));
+    if (H > 7) { g.add(railing(r, y0 + H * 0.45)); }
+    boltRing(g, 0.3, 12, 0, y0 + H * 0.22, r + 0.4, "z").rotation.x = Math.PI / 2;
+    if (o.trays) { for (let i = 1; i < 12; i++) { const d = cyl(r * 0.96, 0.03, M.galv, 36); d.position.y = y0 + H * i / 12; ints.add(d); const dc = box(r * 0.5, H / 12 * 0.85, 0.05, M.steelDk); dc.position.set((i % 2 ? 1 : -1) * r * 0.62, y0 + H * (i + 0.5) / 12, 0); ints.add(dc); } }
+    else { ints.add(at(cyl(r * 0.3, 0.1, M.steelDk, 18), 0, y0 + 0.28, 0)); ints.add(at(box(r * 1.3, 0.04, 0.3, M.galv), 0, y0 + H * 0.2, 0)); }
     const topY = y0 + H + r * 0.5 + 0.55;
     return { g, W: D + 1.2, H: topY, yMid: y0 + H * 0.5, ySpan: H * 0.8, yLow: 0.35, lowR: r * 0.94, topR: r, level: [{ o: lv, base: y0 + H * 0.3 - H * 0.34 * 0.5, h: H * 0.34 }], radius: r };
   }
@@ -166,6 +236,17 @@
     const hl = r * 0.9; ints.add(at(box(L * 0.96, hl, Math.sqrt(Math.max(0.01, r * r - (r - hl) * (r - hl))) * 1.7, M.liq), 0, yc - r + hl / 2 + 0.02, 0));
     ints.add(at(box(0.06, r * 1.3, r * 1.9, M.galv), L * 0.18, yc - r * 0.35, 0));
     ints.add(at(box(0.06, r * 1.6, r * 1.9, M.galv), -L * 0.3, yc, 0));
+    // detail: inlet device, vortex breaker, mesh pad, weir, bolted manway, transmitters, PSV, nozzle stubs, insulation clips
+    ints.add(at(cyl(0.18, r * 1.2, M.steelDk, 12), -L * 0.42, yc + r * 0.35, 0));
+    ints.add(at(box(0.5, 0.3, 0.5, M.galv), L * 0.45, yc - r * 0.75, 0));
+    ints.add(at(box(0.4, r * 0.55, r * 1.8, M.galv), L * 0.36, yc + r * 0.55, 0));
+    boltRing(g, 0.3, 12, L * 0.1, yc + r + 0.3, 0, "y");
+    for (const x of [-L * 0.36, L * 0.36]) { g.add(at(cyl(0.1, 0.4, M.steel, 14), x, yc + r + 0.18, 0)); g.add(at(flange(0.1, M.steelDk), x, yc + r + 0.4, 0)); }
+    psvOnTop(g, L * 0.22, yc + r - 0.02, 0);
+    instr(g, -L * 0.15, yc + r - 0.05, r * 0.4, "tx"); instr(g, L * 0.0, yc + r - 0.02, -r * 0.4, "gauge");
+    g.add(at(cyl(0.1, 0.5, M.steel, 14), -L * 0.44, yc - r * 0.3, r + 0.2).rotateX(Math.PI / 2)); g.add(at(flange(0.1, M.steelDk), -L * 0.44, yc - r * 0.3, r + 0.5).rotateX(Math.PI / 2));
+    for (let i = 0; i < 9; i++) g.add(at(box(0.04, 0.08, 0.04, M.steelDk), -L * 0.45 + i * L * 0.11, yc + r + 0.02, 0));
+    g.add(at(box(0.3, 0.2, 0.02, M.galv), L * 0.3, yc + 0.2, r + 0.01));
     g.add(ints);
     return { g, W: L + 1.4, H: yc + r + 0.6, yMid: yc, ySpan: D * 0.6, yLow: 0.35, hz: true, level: [{ o: lv, base: yc - r * 0.25, h: 0.0, along: true }], radius: r, bottomY: 1.0 };
   }
@@ -180,6 +261,14 @@
     for (const x of [-0.28 * L, 0.3 * L]) { const f = cyl(r * 1.08, 0.1, M.steelDk, 36); f.rotation.z = Math.PI / 2; f.position.set(x, yc, 0); g.add(f); }
     const utility = cool ? M.blue : M.red;
     for (const x of [L * 0.18, L * 0.3]) { const n = cyl(0.1, 0.5, utility, 14); n.position.set(x, yc + r + 0.2, 0); g.add(n); const fl = flange(0.1, M.steelDk, yc + r + 0.45); fl.position.x = x; g.add(fl); }
+    // detail: channel nozzles, tubesheet bolts, vent / drain, slotted saddle holes, bundle (X-ray), drain pot, name plate
+    for (const [x, dy] of [[-L * 0.41, r + 0.2], [-L * 0.41, -r - 0.2]]) { g.add(at(cyl(0.12, 0.35, utility, 14), x, yc + dy, 0)); g.add(at(flange(0.12, M.steelDk), x, yc + dy + (dy > 0 ? 0.18 : -0.18), 0)); }
+    boltRing(g, r * 1.04, 20, -L * 0.28, yc, 0, "x"); boltRing(g, r * 1.04, 20, L * 0.3, yc, 0, "x");
+    g.add(at(cyl(0.035, 0.4, M.steel, 8), L * 0.1, yc + r + 0.2, 0)); g.add(at(cyl(0.035, 0.4, M.steel, 8), L * 0.3, yc - r - 0.15, 0));
+    instr(g, L * 0.2, yc + r - 0.02, 0, "gauge");
+    g.add(at(box(0.3, 0.2, 0.02, M.galv), -L * 0.05, yc + 0.1, r + 0.01));
+    for (const x of [-L * 0.34, L * 0.34]) g.add(at(cyl(0.04, 0.2, M.black, 6), x - 0.12, 0.35, r * 0.55));
+    const bun = tubeBundle(L * 0.74, r * 0.92, 90, L * 0.12); bun.position.set(L * 0.04, yc, 0); g.add(bun);
     return { g, W: L + 0.8, H: yc + r + 0.7, yMid: yc, ySpan: r * 1.2, yLow: 0.3, hz: true };
   }
   function airCooler(L) {
@@ -199,17 +288,46 @@
   }
   function compressor() {
     const g = new T.Group(), spin = [];
-    skid(g, 8.4, 2.8, 0.3, M.steelDk);
+    skid(g, 8.4, 2.8, 0.3, M.steelDk); anchorBolts(g, 8.4, 2.8, 0.3);
+    gridPlate(g, 1.6, 1.0, 0.31); g.children[g.children.length - 1].position.set(0, 0.31, 1.7);
+    // electric motor (TEFC): finned frame, fan cowl, terminal box, bearing housings, feet
     const mot = cyl(0.62, 2.5, M.motor, 32); mot.rotation.z = Math.PI / 2; mot.position.set(-2.9, 1.0, 0); g.add(mot);
-    for (let i = 0; i < 6; i++) g.add(at(box(0.04, 0.08, 1.15, M.steelDk), -3.6 + i * 0.42, 1.65, 0));
-    const mb = box(0.5, 0.18, 0.7, M.black); mb.position.set(-2.9, 1.68, 0); g.add(mb);
-    const shaft = cyl(0.12, 2.0, M.steel, 12); shaft.rotation.z = Math.PI / 2; shaft.position.set(-0.9, 1.0, 0); g.add(shaft); spin.push(SPIN(shaft, "x", 14));
+    finRing(g, 0.62, 2.2, 16, -2.9, 1.0, 0, M.motor);
+    g.add(at(cyl(0.5, 0.35, M.steelDk, 24), -4.3, 1.0, 0).rotateZ(Math.PI / 2));
+    const cowl = mesh(new T.SphereGeometry(0.5, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), M.steelDk); cowl.rotation.z = Math.PI / 2; cowl.position.set(-4.45, 1.0, 0); g.add(cowl);
+    for (const x of [-3.7, -2.1]) { g.add(at(box(0.5, 0.35, 1.0, M.steelDk), x, 0.5, 0)); }
+    const tb = box(0.6, 0.35, 0.55, M.black); tb.position.set(-2.9, 1.78, 0); g.add(tb); g.add(at(cyl(0.05, 0.4, M.steelDk, 8), -2.9, 2.05, 0));
+    for (const x of [-4.1, -1.7]) g.add(at(cyl(0.2, 0.3, M.vesselDk, 18), x, 1.0, 0).rotateZ(Math.PI / 2));
+    // couplings, guards, gearbox with split line and bolts
+    const shaft = cyl(0.12, 2.0, M.steel, 12); shaft.rotation.z = Math.PI / 2; shaft.position.set(-1.2, 1.0, 0); g.add(shaft); spin.push(SPIN(shaft, "x", 14));
+    couplingGuard(g, -1.65, 1.0, 0, 0.9, 0.34);
     const gear = box(1.2, 1.5, 1.4, M.vesselDk); gear.position.set(-0.55, 0.95, 0); g.add(gear);
+    g.add(at(box(1.22, 0.03, 1.42, M.black), -0.55, 0.95, 0));
+    for (let i = 0; i < 6; i++) { g.add(at(cyl(0.03, 0.05, M.black, 6), -1.05 + i * 0.2, 1.72, 0.55)); g.add(at(cyl(0.03, 0.05, M.black, 6), -1.05 + i * 0.2, 1.72, -0.55)); }
+    g.add(at(cyl(0.18, 0.2, M.steel, 14), -0.55, 1.78, 0)); g.add(at(cyl(0.25, 0.1, M.steelDk, 14), -0.55, 1.88, 0));
+    couplingGuard(g, 0.3, 1.0, 0, 0.7, 0.3);
+    // compressor barrel: bolted end covers, bearing housings, dry-gas-seal cartridges, nozzles with spool pieces
     const cs = cyl(0.85, 2.6, M.vessel, 36); cs.rotation.z = Math.PI / 2; cs.position.set(1.6, 1.05, 0); g.add(cs);
-    for (const x of [0.35, 2.85]) { const f = cyl(0.92, 0.12, M.steelDk, 36); f.rotation.z = Math.PI / 2; f.position.set(x, 1.05, 0); g.add(f); }
-    const vol = cyl(0.5, 1.2, M.vesselDk, 24); vol.position.set(0.9, 1.9, 0); g.add(vol); const vol2 = cyl(0.5, 1.2, M.vesselDk, 24); vol2.position.set(2.3, 1.9, 0); g.add(vol2);
-    const lube = cyl(0.45, 1.1, M.green, 20); lube.position.set(0.4, 0.8, 1.2); g.add(lube);
-    return { g, W: 8.4, H: 3.1, yMid: 1.0, ySpan: 0.3, yLow: 0.3, spin, ports: { in: { p: [0.9, 2.55, 0], d: [0, 1, 0] }, out: { p: [2.3, 2.55, 0], d: [0, 1, 0] } } };
+    for (const x of [0.35, 2.85]) { const f = cyl(0.92, 0.12, M.steelDk, 36); f.rotation.z = Math.PI / 2; f.position.set(x, 1.05, 0); g.add(f); boltRing(g, 0.87, 24, x, 1.05, 0, "x"); }
+    for (const x of [0.05, 3.15]) { g.add(at(cyl(0.34, 0.5, M.vesselDk, 24), x, 1.05, 0).rotateZ(Math.PI / 2)); g.add(at(cyl(0.28, 0.12, M.steel, 24), x + (x < 1 ? -0.3 : 0.3), 1.05, 0).rotateZ(Math.PI / 2)); }
+    for (const x of [0.9, 2.3]) { const vol = cyl(0.5, 1.2, M.vesselDk, 24); vol.position.set(x, 1.9, 0); g.add(vol); g.add(at(flange(0.5, M.steelDk, 2.5), x, 2.5, 0)); boltRing(g, 0.7, 16, x, 2.53, 0, "y"); }
+    for (const sz of [-1, 1]) for (const x of [0.6, 2.6]) g.add(at(box(0.4, 0.5, 0.2, M.steelDk), x, 0.55, sz * 0.7));
+    // anti-surge recycle: control valve + line + cooler stub, pressure & temperature instruments
+    const rc = cyl(0.09, 1.4, M.steel, 12); rc.rotation.z = Math.PI / 2; rc.position.set(1.6, 2.85, 0.5); g.add(rc);
+    for (const x of [0.9, 2.3]) g.add(at(cyl(0.09, 0.4, M.steel, 12), x, 2.62, 0.5));
+    g.add(at(mesh(new T.SphereGeometry(0.2, 14, 10), M.red), 1.6, 2.85, 0.5)); g.add(at(dome(0.22, M.green, 0.7), 1.6, 3.3, 0.5)); g.add(at(cyl(0.03, 0.4, M.steel, 8), 1.6, 3.1, 0.5));
+    instr(g, 0.9, 2.4, 0.5, "gauge"); instr(g, 2.3, 2.4, -0.5, "tx");
+    // lube-oil console: tank, duplex filters, coolers, pumps, seal-gas panel
+    g.add(at(box(2.0, 0.9, 0.9, M.green), 0.4, 0.75, 1.4)); g.add(at(box(2.04, 0.04, 0.94, M.steelDk), 0.4, 1.22, 1.4));
+    for (const x of [-0.2, 0.3]) g.add(at(cyl(0.16, 0.7, M.vessel, 16), x, 1.58, 1.4)); g.add(at(cyl(0.2, 0.9, M.blue, 16), 1.0, 1.65, 1.4).rotateZ(Math.PI / 2));
+    g.add(at(box(0.8, 0.9, 0.3, M.white), 2.3, 0.8, 1.4)); for (let i = 0; i < 4; i++) g.add(at(cyl(0.025, 0.5, M.steel, 6), 2.1 + i * 0.12, 1.1, 1.58));
+    g.add(at(cyl(0.025, 3.0, M.steel, 6), 1.6, 1.0, 0.9).rotateZ(Math.PI / 2));
+    // internals for X-ray: rotor with impellers
+    const ints = new T.Group(); ints.userData.internal = true;
+    const rot = cyl(0.14, 3.4, M.steel, 12); rot.rotation.z = Math.PI / 2; rot.position.set(1.6, 1.05, 0); ints.add(rot);
+    for (let i = 0; i < 6; i++) { const im = cyl(0.55, 0.12, M.copper, 20, 0.2); im.rotation.z = Math.PI / 2; im.position.set(0.75 + i * 0.32, 1.05, 0); ints.add(im); const dg = cyl(0.62, 0.03, M.galv, 20); dg.rotation.z = Math.PI / 2; dg.position.set(0.9 + i * 0.32, 1.05, 0); ints.add(dg); }
+    g.add(ints);
+    return { g, W: 8.4, H: 3.5, yMid: 1.0, ySpan: 0.3, yLow: 0.3, spin, ports: { in: { p: [0.9, 2.55, 0], d: [0, 1, 0] }, out: { p: [2.3, 2.55, 0], d: [0, 1, 0] } } };
   }
   function expander() {
     const g = new T.Group(), spin = [];
@@ -222,14 +340,32 @@
   }
   function pump(big) {
     const g = new T.Group(), spin = [], k = big ? 1.0 : 0.8;
-    skid(g, 3.4 * k, 1.3 * k, 0.2, M.steelDk);
+    skid(g, 3.4 * k, 1.3 * k, 0.2, M.steelDk);                                   // fabricated baseplate with drip rim
+    g.add(at(box(3.5 * k, 0.05, 1.4 * k, M.galv), 0, 0.22, 0)); anchorBolts(g, 3.4 * k, 1.3 * k, 0.2);
     const mot = cyl(0.42 * k, 1.5 * k, M.motor, 28); mot.rotation.z = Math.PI / 2; mot.position.set(-0.95 * k, 0.75 * k, 0); g.add(mot);
-    const fan = cyl(0.34 * k, 0.1, M.steelDk, 18); fan.rotation.z = Math.PI / 2; fan.position.set(-1.75 * k, 0.75 * k, 0); g.add(fan); spin.push(SPIN(fan, "x", 20));
-    const sh = cyl(0.07, 0.5 * k, M.steel, 10); sh.rotation.z = Math.PI / 2; sh.position.set(0, 0.75 * k, 0); g.add(sh); spin.push(SPIN(sh, "x", 22));
-    const vo = cyl(0.5 * k, 0.5 * k, M.vessel, 28); vo.rotation.x = Math.PI / 2; vo.position.set(0.5 * k, 0.75 * k, 0); g.add(vo);
-    const dis = cyl(0.17 * k, 0.7 * k, M.vessel, 16); dis.position.set(0.5 * k, 1.35 * k, 0); g.add(dis); { const fl = flange(0.17 * k, M.steelDk, 1.72 * k); fl.position.x = 0.5 * k; g.add(fl); }
-    const suc = cyl(0.2 * k, 0.7 * k, M.vessel, 16); suc.rotation.z = Math.PI / 2; suc.position.set(1.1 * k, 0.75 * k, 0); g.add(suc);
-    return { g, W: 3.6 * k, H: 2.0 * k, yMid: 0.75 * k, ySpan: 0.3, yLow: 0.2, spin, ports: { in: { p: [1.5 * k, 0.75 * k, 0], d: [1, 0, 0] }, out: { p: [0.5 * k, 1.8 * k, 0], d: [0, 1, 0] } } };
+    finRing(g, 0.42 * k, 1.3 * k, 14, -0.95 * k, 0.75 * k, 0, M.motor);
+    g.add(at(box(0.3 * k, 0.28 * k, 0.28 * k, M.black), -0.95 * k, 1.28 * k, 0));
+    for (const x of [-1.4 * k, -0.5 * k]) g.add(at(box(0.3 * k, 0.32 * k, 0.8 * k, M.steelDk), x, 0.4 * k, 0));
+    const fan = cyl(0.34 * k, 0.1, M.steelDk, 18); fan.rotation.z = Math.PI / 2; fan.position.set(-1.78 * k, 0.75 * k, 0); g.add(fan); spin.push(SPIN(fan, "x", 20));
+    g.add(at(cyl(0.3 * k, 0.18 * k, M.black, 18), -1.82 * k, 0.75 * k, 0).rotateZ(Math.PI / 2));
+    const sh = cyl(0.07, 0.5 * k, M.steel, 10); sh.rotation.z = Math.PI / 2; sh.position.set(-0.05 * k, 0.75 * k, 0); g.add(sh); spin.push(SPIN(sh, "x", 22));
+    couplingGuard(g, -0.05 * k, 0.75 * k, 0, 0.55 * k, 0.22 * k);
+    const br = cyl(0.17 * k, 0.4 * k, M.vesselDk, 18); br.rotation.z = Math.PI / 2; br.position.set(0.3 * k, 0.75 * k, 0); g.add(br);       // bearing housing
+    g.add(at(box(0.2 * k, 0.3 * k, 0.5 * k, M.steelDk), 0.3 * k, 0.4 * k, 0));
+    const vo = cyl(0.5 * k, 0.5 * k, M.vessel, 28); vo.rotation.x = Math.PI / 2; vo.position.set(0.7 * k, 0.75 * k, 0); g.add(vo);          // volute
+    boltRing(g, 0.45 * k, 16, 0.7 * k, 0.75 * k, 0.26 * k, "z").rotation.x = Math.PI / 2;
+    const dis = cyl(0.17 * k, 0.7 * k, M.vessel, 16); dis.position.set(0.7 * k, 1.35 * k, 0); g.add(dis); { const fl = flange(0.17 * k, M.steelDk, 1.72 * k); fl.position.x = 0.7 * k; g.add(fl); }
+    const suc = cyl(0.2 * k, 0.7 * k, M.vessel, 16); suc.rotation.z = Math.PI / 2; suc.position.set(1.25 * k, 0.75 * k, 0); g.add(suc); { const fl = flange(0.2 * k, M.steelDk, 0); fl.rotation.z = Math.PI / 2; fl.position.set(1.62 * k, 0.75 * k, 0); g.add(fl); }
+    g.add(at(box(0.28 * k, 0.22 * k, 0.6 * k, M.steelDk), 0.7 * k, 0.28 * k, 0));               // casing foot
+    // seal flush (API plan 11): small bore loop from discharge to the seal chamber; pressure gauge on discharge
+    const loop = mesh(new T.TorusGeometry(0.25 * k, 0.018, 6, 20, Math.PI), M.steel); loop.position.set(0.5 * k, 1.2 * k, 0.3 * k); loop.rotation.y = Math.PI / 2; g.add(loop);
+    g.add(at(cyl(0.02, 0.45 * k, M.steel, 6), 0.7 * k, 1.0 * k, 0.3 * k).rotateZ(Math.PI / 2));
+    instr(g, 0.85 * k, 1.5 * k, 0, "gauge");
+    const ints = new T.Group(); ints.userData.internal = true;
+    const imp = cyl(0.36 * k, 0.12, M.copper, 20); imp.rotation.x = Math.PI / 2; imp.position.set(0.7 * k, 0.75 * k, 0); ints.add(imp);
+    for (let i = 0; i < 6; i++) { const v = box(0.3 * k, 0.04, 0.08, M.copper); v.rotation.y = i * Math.PI / 3; v.position.set(0.7 * k, 0.75 * k, 0); ints.add(v); }
+    g.add(ints);
+    return { g, W: 3.6 * k, H: 2.0 * k, yMid: 0.75 * k, ySpan: 0.3, yLow: 0.2, spin, ports: { in: { p: [1.68 * k, 0.75 * k, 0], d: [1, 0, 0] }, out: { p: [0.7 * k, 1.8 * k, 0], d: [0, 1, 0] } } };
   }
   function gasTurbine() {
     const g = new T.Group(), spin = [];
@@ -384,6 +520,51 @@
     return { g, W: 4.4, H: 2.3, yMid: 0.95, ySpan: 0.2, yLow: 0.3 };
   }
 
+
+  // ---- draw-call reduction: bake the static meshes of one machine into one mesh per material
+  function mergeGeoms(list) {
+    let nv = 0, ni = 0;
+    for (const g of list) { nv += g.attributes.position.count; ni += g.index ? g.index.count : g.attributes.position.count; }
+    const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), idx = new Uint32Array(ni);
+    let vo = 0, io = 0;
+    for (const g of list) {
+      const n = g.attributes.position.count;
+      pos.set(g.attributes.position.array, vo * 3);
+      if (g.attributes.normal) nor.set(g.attributes.normal.array, vo * 3);
+      if (g.attributes.uv) uv.set(g.attributes.uv.array, vo * 2);
+      if (g.index) for (let i = 0; i < g.index.count; i++) idx[io + i] = g.index.array[i] + vo; else for (let i = 0; i < n; i++) idx[io + i] = vo + i;
+      io += g.index ? g.index.count : n; vo += n;
+    }
+    const out = new T.BufferGeometry();
+    out.setAttribute("position", new T.BufferAttribute(pos, 3)); out.setAttribute("normal", new T.BufferAttribute(nor, 3)); out.setAttribute("uv", new T.BufferAttribute(uv, 2));
+    out.setIndex(new T.BufferAttribute(idx, 1)); out.computeBoundingSphere(); out.computeBoundingBox();
+    return out;
+  }
+  function mergeStatic(arch) {
+    const g = arch.g; g.updateMatrixWorld(true);
+    const keep = new Set();
+    const protect = (o) => { if (!o) return; o.traverse((c) => keep.add(c)); let p = o.parent; while (p && p !== g) { keep.add(p); p = p.parent; } };
+    (arch.spin || []).forEach((q) => protect(q.o)); (arch.level || []).forEach((l) => protect(l.o)); protect(arch.flame); ((arch.plume && arch.plume.list) || []).forEach(protect);
+    g.traverse((c) => { if (c.userData && c.userData.internal) protect(c); });
+    const inv = new T.Matrix4().copy(g.matrixWorld).invert(), byMat = new Map(), drop = [];
+    g.traverse((c) => {
+      if (!c.isMesh || keep.has(c) || Array.isArray(c.material)) return;
+      const geo = c.geometry.clone(); geo.applyMatrix4(new T.Matrix4().multiplyMatrices(inv, c.matrixWorld));
+      if (!byMat.has(c.material)) byMat.set(c.material, []);
+      byMat.get(c.material).push(geo); drop.push(c);
+    });
+    for (const c of drop) { c.parent.remove(c); }
+    for (const [m, list] of byMat) { const geo = mergeGeoms(list); list.forEach((x) => x.dispose()); const me = new T.Mesh(geo, m); me.castShadow = true; me.receiveShadow = true; g.add(me); }
+    return arch;
+  }
+
+  function tintArch(arch, type) {              // body colour by equipment family (shared vessel paint -> a tinted copy)
+    const hex = TINT[type]; if (hex === undefined) return arch;
+    const key = themeName + ":" + type; let m = tintCache.get(key);
+    if (!m) { const th = THEMES[themeName]; m = M.vessel.clone(); m.color.setHex(0xaeb9c4).lerp(new T.Color(hex), th.tint); if (themeName === "studio") m.color.setHex(hex); m.metalness = themeName === "studio" ? 0.25 : 0.55; m.roughness = themeName === "studio" ? 0.42 : 0.38; tintCache.set(key, m); TINTED.add(m); }
+    arch.g.traverse((c) => { if (c.isMesh && c.material === M.vessel) c.material = m; });
+    return arch;
+  }
   const AIR = { aircooler: 1 };
   function archetype(u) {
     const t = u.type, key = t + ":" + (u.orient || "");
@@ -440,12 +621,13 @@
 
   // ------------------------------------------------------------------ state
   const S = { scene: null, ports: {}, units: {}, pipes: [], pickables: [], labels: [], mats: [], flow: true, labelsOn: true, xray: false,
-              dusk: false, rot: false, sel: null, hover: null, spin: [], sprites: [], boxes: [], size: 40, centre: new T.Vector3(), sig: "" };
+              dusk: false, rot: false, sel: null, hover: null, spin: [], sprites: [], boxes: [], size: 40, centre: new T.Vector3(), sig: "",
+              beads: false, edit: false, snap: true, recs: [], streams: [], handles: [], layout: { units: {}, routes: {} }, pyLayout: "", layoutVer: -1, hist: [], fut: [], nonce: 0, editChanged: false };
   const cam = { target: new T.Vector3(), theta: 0.9, phi: 1.0, radius: 60, vt: 0, vp: 0, fly: null };
 
   function sigOf(x) { const s = JSON.stringify(x); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return s.length + ":" + h; }
   function disposeTree(o) {
-    o.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material && !Object.values(M).includes(c.material)) { if (c.material.map) c.material.map.dispose(); c.material.dispose(); } });
+    o.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material && !Object.values(M).includes(c.material) && !TINTED.has(c.material)) { if (c.material.map) c.material.map.dispose(); if (c.material.emissiveMap) c.material.emissiveMap.dispose(); c.material.dispose(); } });
   }
 
   // ------------------------------------------------------------------ labels
@@ -481,9 +663,10 @@
     return { p: new T.Vector3(x, arch.bottomY !== undefined ? arch.bottomY : arch.yLow + 0.3, 0), d: new T.Vector3(0, -1, 0), stub: true };
   }
 
+  let pipeGroup = null;
   function clearWorld() {
     while (world.children.length) { const c = world.children.pop(); disposeTree(c); }
-    S.units = {}; S.pipes = []; S.pickables = []; S.spin = []; S.sprites = []; S.boxes = []; S.labels = [];
+    S.units = {}; S.pipes = []; S.pickables = []; S.spin = []; S.sprites = []; S.boxes = []; S.labels = []; S.recs = []; pipeGroup = null; clearHandles();
     S.sel = null; S.hover = null;
   }
 
@@ -492,23 +675,40 @@
     const padW = sz.x + 26, padD = sz.z + 26;
     S.centre.copy(c); S.size = Math.max(sz.x, sz.z, sz.y, 20);
     const cv = document.createElement("canvas"); cv.width = cv.height = 512; const g = cv.getContext("2d");
-    g.fillStyle = "#7b7f7d"; g.fillRect(0, 0, 512, 512);
-    for (let i = 0; i < 2600; i++) { const v = 128 + Math.random() * 40; g.fillStyle = `rgba(${v},${v},${v - 4},.35)`; g.fillRect(Math.random() * 512, Math.random() * 512, 2, 2); }
-    g.strokeStyle = "rgba(60,60,60,.55)"; g.lineWidth = 2; g.strokeRect(0, 0, 512, 512);
+    const th = THEMES[themeName];
+    g.fillStyle = th.pad; g.fillRect(0, 0, 512, 512);
+    if (th.grid) { g.strokeStyle = th.grid; g.lineWidth = 3; g.strokeRect(0, 0, 512, 512); g.lineWidth = 1; for (let i = 1; i < 4; i++) { g.beginPath(); g.moveTo(i * 128, 0); g.lineTo(i * 128, 512); g.moveTo(0, i * 128); g.lineTo(512, i * 128); g.stroke(); } }
+    else { for (let i = 0; i < 2600; i++) { const v = 128 + Math.random() * 40; g.fillStyle = `rgba(${v},${v},${v - 4},.35)`; g.fillRect(Math.random() * 512, Math.random() * 512, 2, 2); } g.strokeStyle = "rgba(60,60,60,.55)"; g.lineWidth = 2; g.strokeRect(0, 0, 512, 512); }
     const tx = new T.CanvasTexture(cv); tx.wrapS = tx.wrapT = T.RepeatWrapping; tx.colorSpace = T.SRGBColorSpace; tx.repeat.set(padW / 6, padD / 6); tx.anisotropy = 8;
     const pad = mesh(new T.PlaneGeometry(padW, padD), new T.MeshStandardMaterial({ map: tx, roughness: 0.95, metalness: 0 }), false);
     pad.rotation.x = -Math.PI / 2; pad.position.set(c.x, 0, c.z); pad.receiveShadow = true; world.add(pad);
-    const ground = mesh(new T.CircleGeometry(900, 48), new T.MeshStandardMaterial({ color: 0x4b504c, roughness: 1 }), false);
+    const ground = mesh(new T.CircleGeometry(900, 48), new T.MeshStandardMaterial({ color: THEMES[themeName].ground, roughness: 1 }), false);
     ground.rotation.x = -Math.PI / 2; ground.position.set(c.x, -0.06, c.z); world.add(ground);
     sun.position.set(c.x + R * 0.9, R * 1.5, c.z + R * 0.7); sun.target.position.copy(c);
     const e = R * 1.25; sun.shadow.camera.left = -e; sun.shadow.camera.right = e; sun.shadow.camera.top = e; sun.shadow.camera.bottom = -e;
     sun.shadow.camera.near = 1; sun.shadow.camera.far = R * 5; sun.shadow.camera.updateProjectionMatrix();
-    scene.fog = new T.Fog(S.dusk ? 0x202a3a : 0xc9d6df, R * 2.2, R * 9);
+    scene.fog = new T.Fog(S.dusk ? 0x202a3a : THEMES[themeName].fog, R * 2.2, R * 9);
+  }
+
+  function placeUnit(R) {                       // (re)position one machine: ports, label, footprint
+    const { u, arch, holder, sc_ } = R;
+    holder.rotation.y = (u.flip ? Math.PI : 0) + (u.rot || 0) * Math.PI / 2;
+    holder.position.set(u.x, 0, u.z); holder.updateMatrixWorld(true);
+    const ports = {};
+    for (const n of R.names) {
+      const q = portOf(arch, u, n);
+      ports[n] = { p: holder.localToWorld(q.p.clone().multiplyScalar(sc_)), d: q.d.clone().transformDirection(holder.matrixWorld).normalize(), stub: q.stub };
+    }
+    R.ports = ports;
+    R.box = new T.Box3().setFromObject(holder); R.top = R.box.max.y;
+    R.label.position.set(u.x, arch.H * sc_ + 1.6, u.z);
+    if (R.beacon) R.beacon.position.set(u.x, arch.H * sc_ + 0.5, u.z);
   }
 
   function build(sc) {
     clearWorld();
     const units = sc.units || [], streams = sc.streams || [];
+    S.streams = streams;
     const bb = new T.Box3();
     // platforms (deck outlines)
     for (const p of sc.platforms || []) {
@@ -518,19 +718,22 @@
       g.position.set(p.x, 0, p.z); world.add(g); bb.expandByObject(g);
       const lb = labelSprite(p.name, "platform / module", "#e8b923"); lb.position.set(p.x, 1.8, p.z + p.d / 2 + 0.5); world.add(lb); S.labels.push(lb);
     }
-    // equipment: pass 1 - shapes and footprints; pass 2 - keep neighbours apart (the 2D drawing is far tighter than a plot plan)
-    const obstacles = [];
+    // equipment: pass 1 - shapes and footprints; pass 2 - keep neighbours apart (the 2D drawing is far tighter than a plot plan);
+    // hand-placed machines (S.layout) are never moved by the clearance pass
     const recs = [];
     for (const u of units) {
-      const arch = archetype(u), g = arch.g;
+      const L = S.layout.units[u.id];
+      if (L) { u.x = L.x; u.z = L.z; u.rot = L.rot | 0; u.placed = true; } else { u.x = u.ox; u.z = u.oz; u.rot = 0; u.placed = false; }
+      const arch = mergeStatic(tintArch(archetype(u), u.type)), g = arch.g;
       const holder = new T.Group(); holder.add(g);
       const sc_ = Math.max(0.5, Math.min(2.2, u.scale || 1));
       g.scale.setScalar(sc_);
+      holder.rotation.y = (u.flip ? Math.PI : 0) + (u.rot || 0) * Math.PI / 2;
       holder.position.set(u.x, 0, u.z);
-      if (u.flip) holder.rotation.y = Math.PI;
       world.add(holder); holder.updateMatrixWorld(true);
       const fb = new T.Box3().setFromObject(holder);
-      recs.push({ u, arch, holder, sc_, hw: (fb.max.x - fb.min.x) / 2, hd: (fb.max.z - fb.min.z) / 2, cx: (fb.max.x + fb.min.x) / 2 - u.x, cz: (fb.max.z + fb.min.z) / 2 - u.z });
+      const names = new Set(); for (const s_ of streams) { if (s_.src[0] === u.id) names.add(s_.src[1]); if (s_.dst[0] === u.id) names.add(s_.dst[1]); }
+      recs.push({ u, arch, holder, sc_, names: [...names], hw: (fb.max.x - fb.min.x) / 2, hd: (fb.max.z - fb.min.z) / 2, cx: (fb.max.x + fb.min.x) / 2 - u.x, cz: (fb.max.z + fb.min.z) / 2 - u.z });
     }
     const GAP = 3.2;
     for (let it = 0; it < 120; it++) {
@@ -540,44 +743,49 @@
         const ax = A.holder.position.x + A.cx, az = A.holder.position.z + A.cz, bx = B.holder.position.x + B.cx, bz = B.holder.position.z + B.cz;
         const ox = A.hw + B.hw + GAP - Math.abs(ax - bx), oz = A.hd + B.hd + GAP - Math.abs(az - bz);
         if (ox > 0 && oz > 0) {
+          if (A.u.placed && B.u.placed) continue;
           moved = true;
-          if (ox < oz) { const d = (ax <= bx ? -1 : 1) * ox / 2; A.holder.position.x += d; B.holder.position.x -= d; }
-          else { const d = (az <= bz ? -1 : 1) * oz / 2; A.holder.position.z += d; B.holder.position.z -= d; }
+          const wa = A.u.placed ? 0 : (B.u.placed ? 1 : 0.5), wb = 1 - wa;
+          if (ox < oz) { const d = (ax <= bx ? -1 : 1) * ox; A.holder.position.x += d * wa; B.holder.position.x -= d * wb; }
+          else { const d = (az <= bz ? -1 : 1) * oz; A.holder.position.z += d * wa; B.holder.position.z -= d * wb; }
         }
       }
       if (!moved) break;
     }
     for (const R of recs) {
       const { u, arch, holder, sc_ } = R;
-      u.x = holder.position.x; u.z = holder.position.z; holder.updateMatrixWorld(true);
+      u.x = holder.position.x; u.z = holder.position.z;
       const pc = u.color || (STATUS[u.status] && u.type !== "feed" && u.type !== "product" ? "#" + STATUS[u.status].toString(16) : "");
       if (pc) plate(holder, R.hw * 1.8, R.hd * 1.8, new T.Color(pc));
-      const ports = {};
-      const names = new Set(); for (const s of streams) { if (s.src[0] === u.id) names.add(s.src[1]); if (s.dst[0] === u.id) names.add(s.dst[1]); }
-      for (const n of names) {
-        const q = portOf(arch, u, n);
-        const wp = holder.localToWorld(q.p.clone().multiplyScalar(sc_));
-        const wd = q.d.clone().transformDirection(holder.matrixWorld).normalize();
-        ports[n] = { p: wp, d: wd, stub: q.stub };
-      }
-      const label = labelSprite(u.name, u.title, u.color || null); label.position.set(u.x, arch.H * sc_ + 1.6, u.z); world.add(label); S.labels.push(label);
-      const tip = new T.Box3().setFromObject(holder); bb.union(tip);
-      obstacles.push({ x0: tip.min.x - 0.6, x1: tip.max.x + 0.6, z0: tip.min.z - 0.6, z1: tip.max.z + 0.6, top: tip.max.y, id: u.id });
-      const rec = { u, arch, holder, ports, label, top: tip.max.y, box: tip, flameLight: arch.flameLight };
-      S.units[u.id] = rec;
-      holder.traverse((c) => { if (c.isMesh) { c.userData.uid = u.id; S.pickables.push(c); } });
-      for (const sp of arch.spin || []) S.spin.push({ o: sp.o, axis: sp.axis, rate: sp.rate, on: u.status === "ok" || u.status === "warning" });
-      if (arch.flame) rec.flame = arch.flame;
-      if (arch.plume) rec.plume = arch.plume;
-      if (arch.level) rec.level = arch.level;
+      R.label = labelSprite(u.name, u.title, u.color || null); world.add(R.label); S.labels.push(R.label);
       if (STATUS[u.status] && u.type !== "feed" && u.type !== "product") {
         const bc = new T.Mesh(new T.SphereGeometry(0.32, 16, 12), new T.MeshBasicMaterial({ color: STATUS[u.status] }));
-        bc.position.set(u.x, arch.H * sc_ + 0.5, u.z); world.add(bc); S.sprites.push({ o: bc, kind: "beacon" });
+        world.add(bc); S.sprites.push({ o: bc, kind: "beacon" }); R.beacon = bc;
       }
+      placeUnit(R); bb.union(R.box);
+      R.flameLight = arch.flameLight; R.ports = R.ports;
+      S.units[u.id] = R; S.recs.push(R);
+      holder.traverse((c) => { if (c.isMesh) { c.userData.uid = u.id; S.pickables.push(c); } });
+      for (const sp of arch.spin || []) S.spin.push({ o: sp.o, axis: sp.axis, rate: sp.rate, on: u.status === "ok" || u.status === "warning" });
+      if (arch.flame) R.flame = arch.flame;
+      if (arch.plume) R.plume = arch.plume;
+      if (arch.level) R.level = arch.level;
     }
-    // pipes
+    buildPipes();
+    groundAndSun(bb.isEmpty() ? new T.Box3(new T.Vector3(-10, 0, -10), new T.Vector3(10, 5, 10)) : bb);
+    applyToggles(); shadowsDirty(3);
+  }
+
+  // ---- pipes: auto-routed along a rack, or along the hand-edited route stored in S.layout.routes
+  function clearHandles() { for (const h of S.handles) { if (h.parent) h.parent.remove(h); h.geometry.dispose(); h.material.dispose(); } S.handles = []; }
+  function buildPipes() {
+    if (pipeGroup) { world.remove(pipeGroup); disposeTree(pipeGroup); }
+    S.pickables = S.pickables.filter((o) => !(o.userData && o.userData.pipePart));
+    S.pipes = []; pipeGroup = new T.Group(); world.add(pipeGroup);
+    const streams = S.streams;
+    const obstacles = S.recs.map((R) => ({ x0: R.box.min.x - 0.6, x1: R.box.max.x + 0.6, z0: R.box.min.z - 0.6, z1: R.box.max.z + 0.6, top: R.box.max.y, id: R.u.id }));
     const maxTop = obstacles.reduce((a, o) => Math.max(a, o.top), 6);
-    const posts = new Set();
+    const posts = new Set(), inst = { posts: [], caps: [], fl: [], stubs: [] };
     streams.forEach((s, idx) => {
       const A = S.units[s.src[0]], B = S.units[s.dst[0]];
       if (!A || !B) return;
@@ -587,13 +795,32 @@
       // stagger several connections that share one port
       const shareA = streams.filter((o, j) => j < idx && o.src[0] === s.src[0] && o.src[1] === s.src[1]).length;
       const shareB = streams.filter((o, j) => j < idx && o.dst[0] === s.dst[0] && o.dst[1] === s.dst[1]).length;
-      const off = (n, d) => { const side = new T.Vector3(-d.z, 0, d.x); if (side.lengthSq() < 1e-6) side.set(1, 0, 0); return side.multiplyScalar(0.0).add(new T.Vector3(0, n * 0.55, 0)); };
-      const a = pa.p.clone().add(off(shareA, pa.d)), b = pb.p.clone().add(off(shareB, pb.d));
-      const path = routePipe(a, pa.d, b, pb.d, idx, rad, obstacles, maxTop, s.src[0], s.dst[0]);
-      makePipe(s, path, rad, A, B, pa, pb, posts);
+      const off = (n) => new T.Vector3(0, n * 0.55, 0);
+      const a = pa.p.clone().add(off(shareA)), b = pb.p.clone().add(off(shareB));
+      let path = null;
+      const rt = S.layout.routes[s.id];
+      if (rt && rt.length >= 3) {
+        const pts = rt.map((q) => new T.Vector3(q[0], q[1], q[2]));
+        if (pts[0].distanceTo(a) < 0.08 && pts[pts.length - 1].distanceTo(b) < 0.08) { pts[0].copy(a); pts[pts.length - 1].copy(b); path = pts; }
+      }
+      if (!path) path = routePipe(a, pa.d, b, pb.d, idx, rad, obstacles, maxTop, s.src[0], s.dst[0]);
+      makePipe(s, path, rad, A, B, pa, pb, posts, inst);
     });
-    groundAndSun(bb.isEmpty() ? new T.Box3(new T.Vector3(-10, 0, -10), new T.Vector3(10, 5, 10)) : bb);
-    applyToggles();
+    flushInstances(inst);
+    buildFlow(); applyPipeLook(); shadowsDirty(2);
+  }
+  function flushInstances(inst) {
+    const dm = new T.Object3D(), Y = new T.Vector3(0, 1, 0);
+    const mk = (geo, mat, arr, fn) => {
+      if (!arr.length) return;
+      const im = new T.InstancedMesh(geo, mat, arr.length);
+      arr.forEach((q, i) => { dm.position.set(0, 0, 0); dm.quaternion.identity(); dm.scale.set(1, 1, 1); fn(dm, q); dm.updateMatrix(); im.setMatrixAt(i, dm.matrix); });
+      im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false; pipeGroup.add(im);
+    };
+    mk(new T.BoxGeometry(1, 1, 1), M.galv, inst.posts, (d, q) => { d.position.set(q.x, q.h / 2, q.z); d.scale.set(0.16, q.h, 0.16); });
+    mk(new T.BoxGeometry(1, 1, 1), M.galv, inst.caps, (d, q) => { d.position.set(q.x, q.y, q.z); d.scale.set(0.9, 0.1, 0.18); });
+    mk(new T.CylinderGeometry(1, 1, 1, 18), M.steelDk, inst.fl, (d, q) => { d.position.copy(q.p); d.quaternion.setFromUnitVectors(Y, q.dir); d.scale.set(q.r, 0.1, q.r); });
+    mk(new T.CylinderGeometry(1, 1, 1, 14), M.steel, inst.stubs, (d, q) => { d.position.copy(q.p); d.quaternion.setFromUnitVectors(Y, q.dir); d.scale.set(q.r, 0.7, q.r); });
   }
 
   // ------------------------------------------------------------------ pipe routing
@@ -654,27 +881,33 @@
     out.push(pts[pts.length - 1].clone());
     return out;
   }
-  function makePipe(s, path, rad, A, B, pa, pb, posts) {
+  const STRIPE_PERIOD = 2.4;
+  let stripeBase = null;
+  function stripeTexture() {
+    if (stripeBase) return stripeBase;
+    const cv = document.createElement("canvas"); cv.width = 128; cv.height = 4; const g = cv.getContext("2d");
+    const gr = g.createLinearGradient(0, 0, 128, 0); gr.addColorStop(0, "#000"); gr.addColorStop(0.7, "#7a7a7a"); gr.addColorStop(0.88, "#fff"); gr.addColorStop(0.9, "#000"); gr.addColorStop(1, "#000");
+    g.fillStyle = gr; g.fillRect(0, 0, 128, 4);
+    stripeBase = new T.CanvasTexture(cv); stripeBase.wrapS = T.RepeatWrapping; stripeBase.wrapT = T.ClampToEdgeWrapping; stripeBase.colorSpace = T.SRGBColorSpace;
+    return stripeBase;
+  }
+  function makePipe(s, path, rad, A, B, pa, pb, posts, inst) {
     const dense = roundedPolyline(path, Math.max(0.45, rad * 3.2));
     const cum = [0]; for (let i = 1; i < dense.length; i++) cum.push(cum[i - 1] + dense[i].distanceTo(dense[i - 1]));
     const len = cum[cum.length - 1];
     const curve = new T.CatmullRomCurve3(dense, false, "centripetal");
-    const segs = Math.max(24, Math.min(600, Math.round(len / 0.35)));
+    const segs = Math.max(24, Math.min(400, Math.round(len / 0.45)));
     const flowing = s.solved && (s.mass || 0) > 0;
-    const col = new T.Color(SERVICE[s.service] || 0xcccccc);
-    const mat = new T.MeshPhysicalMaterial({ color: col, emissive: col, emissiveIntensity: 0.12, roughness: 0.3, metalness: 0.25, transparent: true, opacity: flowing ? 0.66 : 0.95, clearcoat: 0.7, clearcoatRoughness: 0.2, depthWrite: false, side: T.DoubleSide });
-    if (!flowing) { mat.color.set(0x8d969e); mat.metalness = 0.6; }
-    const tube = new T.Mesh(new T.TubeGeometry(curve, segs, rad, 16, false), mat);
-    tube.renderOrder = 5; tube.castShadow = false; tube.receiveShadow = false; tube.userData.sid = s.id;
-    world.add(tube); S.pickables.push(tube);
-    // flanges at both ends and every ~14 m, nozzle stubs on equipment
-    const addFl = (p, dir) => { const f = cyl(rad * 1.35, 0.1, M.steelDk, 20); f.position.copy(p); f.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), dir); world.add(f); f.userData.sid = s.id; S.pickables.push(f); };
-    addFl(dense[0].clone().addScaledVector(dense[1].clone().sub(dense[0]).normalize(), 0.05), dense[1].clone().sub(dense[0]).normalize());
-    const n = dense.length; addFl(dense[n - 1].clone().addScaledVector(dense[n - 2].clone().sub(dense[n - 1]).normalize(), 0.05), dense[n - 1].clone().sub(dense[n - 2]).normalize());
-    for (const [pp, un] of [[pa, A], [pb, B]]) if (pp.stub) {
-      const st = cyl(rad * 1.02, 0.7, M.steel, 16); st.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), pp.d); st.position.copy(pp.p).addScaledVector(pp.d, -0.3); world.add(st);
-      st.userData.uid = un.u.id; S.pickables.push(st);
-    }
+    const mat = new T.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.34, metalness: 0.3 });
+    let tex = null;
+    if (flowing) { tex = stripeTexture().clone(); tex.needsUpdate = true; tex.repeat.set(Math.max(1, len / STRIPE_PERIOD), 1); mat.emissiveMap = tex; }
+    const tube = new T.Mesh(new T.TubeGeometry(curve, segs, rad, 14, false), mat);
+    tube.castShadow = true; tube.receiveShadow = false; tube.userData.sid = s.id; tube.userData.pipePart = true;
+    pipeGroup.add(tube); S.pickables.push(tube);
+    // flanges at both ends, nozzle stubs on equipment (instanced: one draw call each)
+    const d0 = dense[1].clone().sub(dense[0]).normalize(), n = dense.length, d1 = dense[n - 1].clone().sub(dense[n - 2]).normalize();
+    inst.fl.push({ p: dense[0].clone().addScaledVector(d0, 0.05), dir: d0, r: rad * 1.35 }, { p: dense[n - 1].clone().addScaledVector(d1, -0.05), dir: d1, r: rad * 1.35 });
+    for (const pp of [pa, pb]) if (pp.stub) inst.stubs.push({ p: pp.p.clone().addScaledVector(pp.d, -0.3), dir: pp.d.clone(), r: rad * 1.02 });
     // supports under long horizontal runs
     for (let i = 1; i < path.length; i++) {
       const p = path[i - 1], q = path[i], hrz = Math.abs(p.y - q.y) < 0.01 && p.y > 2.2;
@@ -683,11 +916,10 @@
       for (let d = 2.5; d < L; d += 6) {
         const x = p.x + (q.x - p.x) * d / L, z = p.z + (q.z - p.z) * d / L, key = Math.round(x / 3) + "," + Math.round(z / 3) + "," + Math.round(p.y);
         if (posts.has(key)) continue; posts.add(key);
-        const post = box(0.16, p.y - rad, 0.16, M.galv); post.position.set(x, (p.y - rad) / 2, z); world.add(post);
-        const cap = box(0.9, 0.1, 0.18, M.galv); cap.position.set(x, p.y - rad - 0.02, z); world.add(cap);
+        inst.posts.push({ x, z, h: p.y - rad }); inst.caps.push({ x, z, y: p.y - rad - 0.02 });
       }
     }
-    const rec = { s, tube, mat, dense, cum, len, rad, flowing, parts: [] };
+    const rec = { s, tube, mat, tex, dense, cum, len, rad, flowing, parts: [], path };
     if (flowing && len > 0.5) {
       const dens = { gas: 1.0, liquid: 0.7, water: 0.7, "two-phase": 0.9 }[s.service] || 0.8;
       const nP = Math.max(4, Math.min(140, Math.round(len * dens)));
@@ -696,6 +928,17 @@
       for (let k = 0; k < nP; k++) rec.parts.push({ f: k / nP + (Math.sin(k * 12.9898 + s.id.length) * 0.5 + 0.5) * 0.4 / nP, svc: s.service === "two-phase" ? (k % 2 ? "gas" : "liquid") : s.service });
     }
     S.pipes.push(rec);
+  }
+  function applyPipeLook() {                    // service colours, stripes (flow) or see-through pipes with beads
+    for (const p of S.pipes) {
+      const col = new T.Color(SERVICE[p.s.service] || 0xcccccc);
+      p.mat.color.copy(p.flowing ? col : new T.Color(0x8d969e));
+      p.mat.emissive.set(p.flowing ? (FLOWCOL[p.s.service] || 0xffffff) : 0x000000); p.mat.emissiveIntensity = p.flowing ? 1.0 : 0;
+      p.mat.metalness = p.flowing ? 0.3 : 0.6;
+      const tr = S.beads && p.flowing;
+      p.mat.transparent = tr; p.mat.opacity = tr ? 0.5 : 1; p.mat.depthWrite = !tr; p.mat.needsUpdate = true;
+      if (p.tex) p.mat.emissiveMap = S.flow ? p.tex : null;
+    }
   }
 
   // ------------------------------------------------------------------ flow particles (one instanced mesh)
@@ -719,9 +962,10 @@
   }
   const tmpV = new T.Vector3();
   function updateFlow(t) {
-    if (!flowMesh) return;
-    flowMesh.visible = S.flow;
-    if (!S.flow) return;
+    if (!flowMesh && !S.pipes.length) return;
+    if (flowMesh) flowMesh.visible = S.flow && S.beads;
+    for (const p of S.pipes) if (p.tex && S.flow) p.tex.offset.x = -((t * p.speed / STRIPE_PERIOD) % 1);
+    if (!(S.flow && S.beads) || !flowMesh) return;
     let i = 0;
     for (const p of S.pipes) {
       const r = Math.max(0.04, p.rad * 0.46);
@@ -739,13 +983,17 @@
   const XRAY_MATS = [M.vessel, M.vesselDk, M.white, M.blue];
   function applyToggles() {
     for (const l of S.labels) l.visible = S.labelsOn;
-    for (const m of XRAY_MATS) { m.transparent = S.xray; m.opacity = S.xray ? 0.22 : 1; m.depthWrite = !S.xray; m.needsUpdate = true; }
-    world.traverse((o) => { if (o.userData && o.userData.internal) o.visible = S.xray; });
-    scene.background = skyTexture(S.dusk ? sky.dusk : sky.day);
-    hemi.intensity = S.dusk ? 0.22 : 0.55; sun.intensity = S.dusk ? 0.7 : 2.4; sun.color.set(S.dusk ? 0xffb27a : 0xfff2dc);
-    renderer.toneMappingExposure = S.dusk ? 0.85 : 1.05; scene.environmentIntensity = S.dusk ? 0.25 : 0.7;
-    if (scene.fog) scene.fog.color.set(S.dusk ? 0x202a3a : 0xc9d6df);
-    for (const b of ["bFlow", "bLabels", "bXray", "bNight", "bRot"]) { const el = $(b), on = { bFlow: S.flow, bLabels: S.labelsOn, bXray: S.xray, bNight: S.dusk, bRot: S.rot }[b]; el.classList.toggle("on", !!on); }
+    for (const m of [...XRAY_MATS, ...TINTED]) { m.transparent = S.xray; m.opacity = S.xray ? 0.22 : 1; m.depthWrite = !S.xray; m.needsUpdate = true; }
+    world.traverse((o) => { if (o.userData && o.userData.internal) o.visible = S.xray; }); shadowsDirty(2);
+    const th = THEMES[themeName];
+    scene.background = skyTexture(S.dusk ? sky.dusk : (th.sky || sky.day));
+    hemi.intensity = S.dusk ? 0.22 : th.hemi; sun.intensity = S.dusk ? 0.7 : th.sun; sun.color.set(S.dusk ? 0xffb27a : 0xfff2dc);
+    renderer.toneMappingExposure = S.dusk ? 0.85 : th.exposure; scene.environmentIntensity = S.dusk ? 0.25 : th.env;
+    if (scene.fog) scene.fog.color.set(S.dusk ? 0x202a3a : th.fog);
+    applyPipeLook();
+    for (const b of ["bFlow", "bBeads", "bLabels", "bXray", "bNight", "bRot", "bEdit", "bSnap"]) { const el = $(b), on = { bFlow: S.flow, bBeads: S.beads, bLabels: S.labelsOn, bXray: S.xray, bNight: S.dusk, bRot: S.rot, bEdit: S.edit, bSnap: S.snap }[b]; if (el) el.classList.toggle("on", !!on); }
+    const et = $("editTools"); if (et) et.style.display = S.edit ? "flex" : "none";
+    const ht = $("hint"); if (ht) ht.textContent = S.edit ? "EDIT: drag equipment to move · R: rotate · select a pipe and drag its handles · Ctrl+Z undo" : "drag: rotate · right-drag / Shift: pan · wheel: zoom · click: inspect · double-click: fly to";
   }
 
   // ------------------------------------------------------------------ camera (orbit / pan / zoom / fly-to)
@@ -767,15 +1015,16 @@
   function lerp(a, b, t) { return a + (b - a) * t; }
   const ease = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
-  const ptr = new Map(); let drag = null, moved = 0;
+  const ptr = new Map(); let drag = null, moved = 0, pendingHover = null;
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId); ptr.set(e.pointerId, { x: e.clientX, y: e.clientY });
     drag = { mode: e.button === 2 || e.shiftKey || e.button === 1 ? "pan" : "rot", x: e.clientX, y: e.clientY }; moved = 0; cam.fly = null; S.rot = false; applyToggles();
+    if (S.edit && e.button === 0 && !e.shiftKey && ptr.size === 1 && editDown(e)) drag.mode = "edit";
   });
   canvas.addEventListener("pointermove", (e) => {
     const p = ptr.get(e.pointerId);
-    if (!p) { hoverAt(e); return; }
+    if (!p) { pendingHover = e; return; }
     const old = { x: p.x, y: p.y }; p.x = e.clientX; p.y = e.clientY;
     if (ptr.size === 2) {                    // pinch
       const [a, b] = [...ptr.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y);
@@ -784,6 +1033,7 @@
     }
     const dx = e.clientX - old.x, dy = e.clientY - old.y; moved += Math.abs(dx) + Math.abs(dy);
     if (!drag) return;
+    if (drag.mode === "edit") { editMove(e); return; }
     if (drag.mode === "rot") { cam.vt -= dx * 0.0052; cam.vp -= dy * 0.0052; cam.theta -= dx * 0.0052; cam.phi = Math.max(0.02, Math.min(1.52, cam.phi - dy * 0.0052)); }
     else {
       const k = cam.radius * 0.0014, right = new T.Vector3().setFromMatrixColumn(camera.matrix, 0), fwd = new T.Vector3(-Math.sin(cam.theta), 0, -Math.cos(cam.theta));
@@ -792,12 +1042,150 @@
   });
   const up = (e) => {
     ptr.delete(e.pointerId);
-    if (drag && moved < 5 && e.type === "pointerup") pickAt(e, false);
+    if (drag && drag.mode === "edit") editUp();
+    else if (drag && moved < 5 && e.type === "pointerup") pickAt(e, false);
     if (!ptr.size) drag = null; else if (drag) drag.pinch = 0;
   };
   canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
   canvas.addEventListener("dblclick", (e) => pickAt(e, true));
   canvas.addEventListener("wheel", (e) => { e.preventDefault(); cam.fly = null; const f = Math.exp(e.deltaY * 0.0012); cam.radius = Math.max(3, Math.min(900, cam.radius * f)); }, { passive: false });
+
+
+  // ------------------------------------------------------------------ layout editing (move / rotate equipment, drag pipe runs)
+  const SNAP_U = 1.0, SNAP_P = 0.5;
+  const snapV = (v, g) => (S.snap ? Math.round(v / g) * g : Math.round(v * 20) / 20);
+  const groundPlane = new T.Plane(new T.Vector3(0, 1, 0), 0), planeTmp = new T.Vector3();
+  function rayAt(e) { const r = canvas.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); return ray; }
+  function groundPoint(e, y) { groundPlane.constant = -(y || 0); return rayAt(e).ray.intersectPlane(groundPlane, planeTmp) ? planeTmp.clone() : null; }
+  function verticalPoint(e, at_) {            // point on a camera-facing vertical plane through at_
+    const n = new T.Vector3(camera.position.x - at_.x, 0, camera.position.z - at_.z).normalize();
+    const pl = new T.Plane().setFromNormalAndCoplanarPoint(n, at_);
+    return rayAt(e).ray.intersectPlane(pl, planeTmp) ? planeTmp.clone() : null;
+  }
+  function beginEdit() { if (!S.inEdit) { S.hist.push(JSON.stringify(S.layout)); S.fut = []; S.inEdit = true; S.editChanged = false; } }
+  function snapshotLayout() {
+    const L = { units: {}, routes: JSON.parse(JSON.stringify(S.layout.routes || {})) };
+    for (const id in S.units) { const u = S.units[id].u; L.units[id] = { x: Math.round(u.x * 100) / 100, z: Math.round(u.z * 100) / 100, rot: (u.rot || 0) % 4 }; }
+    return L;
+  }
+  function postLayout(extra) {
+    S.pendingEcho = true;
+    post("streamlit:setComponentValue", { value: Object.assign({ nonce: Date.now() + "-" + (++S.nonce), layout: S.layout }, extra || {}), dataType: "json" });
+  }
+  function endEdit() {
+    if (!S.inEdit) return; S.inEdit = false;
+    if (!S.editChanged) { S.hist.pop(); return; }
+    S.layout = snapshotLayout(); postLayout(); shadowsDirty(3); updateUndoButtons();
+  }
+  function updateUndoButtons() { const u = $("bUndo"), r = $("bRedo"); if (u) u.disabled = !S.hist.length; if (r) r.disabled = !S.fut.length; }
+  function invalidateRoutes(uid) { for (const s of S.streams) if (s.src[0] === uid || s.dst[0] === uid) delete S.layout.routes[s.id]; }
+  let rebuildQueued = false;
+  function schedulePipes() { if (rebuildQueued) return; rebuildQueued = true; setTimeout(() => { rebuildQueued = false; buildPipes(); if (S.sel && S.sel.kind === "stream") refreshHandles(); refreshOutline(); }, 40); }
+  function refreshOutline() { if (boxSel) { scene.remove(boxSel); boxSel = null; } if (S.sel) { boxSel = outline(S.sel.kind, S.sel.id, new T.Color(0x2dd4c4)); if (boxSel) scene.add(boxSel); } }
+  function applyLayoutFromHistory(json) {
+    S.layout = JSON.parse(json); postLayout(); const sel = S.sel; build(S.scene); legend(S.scene);
+    if (sel && ((sel.kind === "unit" && S.units[sel.id]) || (sel.kind === "stream" && S.pipes.find((q) => q.s.id === sel.id)))) select(sel.kind, sel.id, false); else select(null);
+    updateUndoButtons();
+  }
+  function undo() { if (!S.hist.length) return; S.fut.push(JSON.stringify(S.layout)); applyLayoutFromHistory(S.hist.pop()); }
+  function redo() { if (!S.fut.length) return; S.hist.push(JSON.stringify(S.layout)); applyLayoutFromHistory(S.fut.pop()); }
+  function rotateSel() {
+    if (!S.sel || S.sel.kind !== "unit") return;
+    const R = S.units[S.sel.id]; beginEdit(); R.u.rot = ((R.u.rot || 0) + 1) % 4; invalidateRoutes(R.u.id); placeUnit(R); S.editChanged = true;
+    buildPipes(); refreshOutline(); endEdit();
+  }
+  function resetLayout() { S.hist.push(JSON.stringify(S.layout)); S.fut = []; S.layout = { units: {}, routes: {} }; postLayout({ reset: true }); const sel = S.sel; build(S.scene); legend(S.scene); if (sel && S.units[sel.id]) select(sel.kind, sel.id, false); else select(null); updateUndoButtons(); }
+
+  // unit drag
+  let ud = null;
+  function startUnitDrag(id, e) {
+    const R = S.units[id], g0 = groundPoint(e, 0); if (!g0) return;
+    beginEdit(); ud = { R, g0, x0: R.u.x, z0: R.u.z };
+  }
+  function moveUnit(e) {
+    const g = groundPoint(e, 0); if (!g || !ud) return;
+    const nx = snapV(ud.x0 + (g.x - ud.g0.x), SNAP_U), nz = snapV(ud.z0 + (g.z - ud.g0.z), SNAP_U);
+    if (nx === ud.R.u.x && nz === ud.R.u.z) return;
+    ud.R.u.x = nx; ud.R.u.z = nz; S.editChanged = true; invalidateRoutes(ud.R.u.id); placeUnit(ud.R); schedulePipes(); shadowsDirty(2);
+  }
+
+  // pipe handles
+  const axisOf = (a, b) => { const d = [Math.abs(b.x - a.x), Math.abs(b.y - a.y), Math.abs(b.z - a.z)]; const m = Math.max(...d); if (m < 1e-4) return null; return ["x", "y", "z"][d.indexOf(m)]; };
+  function refreshHandles() {
+    clearHandles();
+    if (!S.edit || !S.sel || S.sel.kind !== "stream") return;
+    const rec = S.pipes.find((q) => q.s.id === S.sel.id); if (!rec) return;
+    const P = rec.path, n = P.length, add = (pos, color, hd) => {
+      const m = new T.Mesh(new T.OctahedronGeometry(0.34, 0), new T.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }));
+      m.position.copy(pos); m.renderOrder = 40; m.userData.handle = hd; scene.add(m); S.handles.push(m);
+    };
+    for (let k = 1; k <= n - 3; k++) {
+      const a = P[k], b = P[k + 1]; if (a.distanceTo(b) < 0.7) continue;
+      const ax = axisOf(a, b), prev = axisOf(P[k - 1], a), next = axisOf(b, P[k + 2]);
+      const ok = ["x", "z"].filter((q) => q !== ax && (prev === null || prev === q) && (next === null || next === q));
+      if (ok.length) add(a.clone().add(b).multiplyScalar(0.5), 0x2dd4c4, { sid: rec.s.id, kind: "seg", k, axes: ok });
+    }
+    const top = Math.max(...P.map((q) => q.y)), idx = []; for (let i = 2; i <= n - 3; i++) if (P[i].y >= top - 0.01) idx.push(i);
+    if (idx.length >= 2 && top > Math.max(P[0].y, P[n - 1].y) + 0.3) {
+      const c = new T.Vector3(); idx.forEach((i) => c.add(P[i])); c.multiplyScalar(1 / idx.length); c.y += 0.9;
+      add(c, 0xff9f1c, { sid: rec.s.id, kind: "elev", idx });
+    }
+  }
+  let hd = null;
+  function hitHandle(e) { if (!S.handles.length) return null; const hs = rayAt(e).intersectObjects(S.handles, false); return hs.length ? hs[0].object.userData.handle : null; }
+  function startHandleDrag(h, e) {
+    const rec = S.pipes.find((q) => q.s.id === h.sid); if (!rec) return;
+    const base = rec.path.map((v) => v.clone()), at_ = h.kind === "elev" ? base[h.idx[0]].clone() : base[h.k].clone().add(base[h.k + 1]).multiplyScalar(0.5);
+    const p0 = h.kind === "elev" ? verticalPoint(e, at_) : groundPoint(e, at_.y); if (!p0) return;
+    beginEdit(); hd = { h, rec, base, p0, at: at_, axis: h.axes && h.axes.length === 1 ? h.axes[0] : null };
+  }
+  function moveHandle(e) {
+    if (!hd) return; const { h, base } = hd;
+    const P = base.map((v) => v.clone());
+    if (h.kind === "elev") {
+      const q = verticalPoint(e, hd.at); if (!q) return;
+      const floor = Math.max(P[0].y, P[P.length - 1].y) + 0.5;
+      const ny = Math.max(floor, Math.min(40, snapV(base[h.idx[0]].y + (q.y - hd.p0.y), SNAP_P)));
+      for (const i of h.idx) P[i].y = ny;
+    } else {
+      const q = groundPoint(e, hd.at.y); if (!q) return;
+      const dx = q.x - hd.p0.x, dz = q.z - hd.p0.z;
+      if (!hd.axis) { if (Math.max(Math.abs(dx), Math.abs(dz)) < 0.4) return; hd.axis = Math.abs(dx) >= Math.abs(dz) ? "x" : "z"; if (!h.axes.includes(hd.axis)) hd.axis = h.axes[0]; }
+      const d = hd.axis === "x" ? dx : dz, nv = snapV(base[h.k][hd.axis] + d, SNAP_P);
+      P[h.k][hd.axis] = nv; P[h.k + 1][hd.axis] = nv;
+    }
+    hd.rec.path = P; S.layout.routes[hd.h.sid] = P.map((v) => [Math.round(v.x * 100) / 100, Math.round(v.y * 100) / 100, Math.round(v.z * 100) / 100]); S.editChanged = true; schedulePipesKeep(hd.h.sid);
+  }
+  function schedulePipesKeep() { schedulePipes(); }
+  function cleanRoute(sid) {                    // drop zero-length and collinear points (keeps the end points)
+    const r = S.layout.routes[sid]; if (!r) return;
+    const pts = r.map((q) => new T.Vector3(q[0], q[1], q[2])), out = [pts[0]];
+    for (let i = 1; i < pts.length; i++) if (pts[i].distanceTo(out[out.length - 1]) > 0.02) out.push(pts[i]);
+    const res = [out[0]];
+    for (let i = 1; i < out.length - 1; i++) { const a = out[i].clone().sub(out[i - 1]).normalize(), b = out[i + 1].clone().sub(out[i]).normalize(); if (a.dot(b) < 0.999) res.push(out[i]); }
+    res.push(out[out.length - 1]);
+    S.layout.routes[sid] = res.map((v) => [Math.round(v.x * 100) / 100, Math.round(v.y * 100) / 100, Math.round(v.z * 100) / 100]);
+  }
+  function autoRouteSel() {
+    if (!S.sel || S.sel.kind !== "stream") return; beginEdit(); delete S.layout.routes[S.sel.id]; S.editChanged = true; buildPipes(); refreshHandles(); refreshOutline(); endEdit();
+  }
+  function editDown(e) {
+    const h = hitHandle(e); if (h) { startHandleDrag(h, e); return !!hd; }
+    const o = hit(e); if (o && o.kind === "unit") { select("unit", o.id, false); startUnitDrag(o.id, e); return !!ud; }
+    return false;
+  }
+  function editMove(e) { if (ud) moveUnit(e); else if (hd) moveHandle(e); }
+  function editUp() {
+    if (hd) { cleanRoute(hd.h.sid); buildPipes(); const sid = hd.h.sid; hd = null; endEdit(); if (S.sel && S.sel.kind === "stream" && S.sel.id === sid) refreshHandles(); refreshOutline(); }
+    else if (ud) { ud = null; endEdit(); refreshOutline(); }
+  }
+  window.addEventListener("keydown", (e) => {
+    if (!S.edit) return;
+    if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+    else if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); }
+    else if (e.key === "r" || e.key === "R") rotateSel();
+    else if (e.key === "Escape") select(null);
+  });
 
   // ------------------------------------------------------------------ picking, hover, info panel
   const ray = new T.Raycaster(), ndc = new T.Vector2();
@@ -860,7 +1248,7 @@
     S.sel = kind ? { kind, id } : null;
     if (boxSel) { scene.remove(boxSel); boxSel = null; }
     if (kind) { boxSel = outline(kind, id, new T.Color(0x2dd4c4)); if (boxSel) scene.add(boxSel); }
-    showInfo(kind, id);
+    showInfo(kind, id); refreshHandles();
     if (kind && fly) {
       let c, r;
       if (kind === "unit") { const b = S.units[id].box, v = b.getCenter(new T.Vector3()), sz = b.getSize(new T.Vector3()); c = v; r = Math.max(8, Math.max(sz.x, sz.y, sz.z) * 2.4); }
@@ -901,7 +1289,9 @@
     for (const s of S.sprites) if (s.kind === "beacon") { const k = 0.7 + 0.5 * Math.sin(clock * 5); s.o.scale.setScalar(k); }
     updateFlow(clock);
     if (boxSel) boxSel.material.opacity = 0.7 + 0.3 * Math.sin(clock * 4);
+    if (shadowFrames > 0) { renderer.shadowMap.needsUpdate = true; shadowFrames--; }
     renderer.render(scene, camera);
+    if (pendingHover) { const e = pendingHover; pendingHover = null; hoverAt(e); }
     requestAnimationFrame(frame);
   }
 
@@ -913,10 +1303,16 @@
   window.addEventListener("resize", resize);
   document.querySelectorAll("#bar button[data-v]").forEach((b) => b.addEventListener("click", () => view(b.dataset.v)));
   $("bFlow").onclick = () => { S.flow = !S.flow; applyToggles(); };
+  function setTheme(n) { if (!THEMES[n]) return; themeName = n; applyPalette(); if (S.scene) { const sel = S.sel; build(S.scene); legend(S.scene); if (sel && ((sel.kind === "unit" && S.units[sel.id]) || (sel.kind === "stream" && S.pipes.find((q) => q.s.id === sel.id)))) select(sel.kind, sel.id, false); } else applyToggles(); }
+  $("selTheme").onchange = (e) => setTheme(e.target.value);
+  $("bBeads").onclick = () => { S.beads = !S.beads; applyToggles(); };
   $("bLabels").onclick = () => { S.labelsOn = !S.labelsOn; applyToggles(); };
   $("bXray").onclick = () => { S.xray = !S.xray; applyToggles(); };
   $("bNight").onclick = () => { S.dusk = !S.dusk; applyToggles(); };
   $("bRot").onclick = () => { S.rot = !S.rot; applyToggles(); };
+  $("bEdit").onclick = () => { S.edit = !S.edit; if (!S.edit) clearHandles(); else refreshHandles(); applyToggles(); updateUndoButtons(); };
+  $("bSnap").onclick = () => { S.snap = !S.snap; applyToggles(); };
+  $("bRotU").onclick = rotateSel; $("bUndo").onclick = undo; $("bRedo").onclick = redo; $("bAuto").onclick = autoRouteSel; $("bResetL").onclick = resetLayout;
   $("bShot").onclick = () => { renderer.render(scene, camera); const a = document.createElement("a"); a.download = "plant_3d.png"; a.href = canvas.toDataURL("image/png"); a.click(); };
 
   function legend(sc) {
@@ -930,13 +1326,22 @@
   function post(type, data) { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, data || {}), "*"); }
   function setScene(sc, ports) {
     S.ports = ports || S.ports;
-    const sg = sigOf(sc);
+    const lay = sc.layout || { units: {}, routes: {} }, layJ = JSON.stringify(lay), lv = (sc.meta && sc.meta.layoutVer) || 0;
+    let force = false;
+    if (S.layoutVer !== lv) { S.layoutVer = lv; S.layout = JSON.parse(layJ); S.hist = []; S.fut = []; S.pyLayout = layJ; force = true; }
+    else if (layJ !== S.pyLayout) {            // the Python side changed the layout: either the echo of our own edit or something else (another case, a reset)
+      S.pyLayout = layJ;
+      if (layJ !== JSON.stringify(S.layout) && !S.pendingEcho) { S.layout = JSON.parse(layJ); S.hist = []; S.fut = []; force = true; }
+    }
+    S.pendingEcho = false;
+    const sg = sigOf(Object.assign({}, sc, { layout: null }));
     S.scene = sc;
     $("stageName").innerHTML = `Stage: <b>${esc((sc.meta && sc.meta.stageName) || "")}</b>${sc.meta && !sc.meta.solved ? " · not solved" : ""}`;
-    if (sg === S.sig) return;
+    if (sg === S.sig && !force) return;
     const first = !S.sig; S.sig = sg;
+    for (const u of sc.units || []) { u.ox = u.x; u.oz = u.z; }
     const prevSel = S.sel;
-    build(sc); buildFlow(); legend(sc);
+    build(sc); legend(sc);
     if (first) { const c = S.centre, R = S.size; cam.target.set(c.x, R * 0.05, c.z); cam.radius = Math.max(26, R * 0.72); cam.theta = 0.85; cam.phi = 1.0; }
     if (prevSel && ((prevSel.kind === "unit" && S.units[prevSel.id]) || (prevSel.kind === "stream" && S.pipes.find((q) => q.s.id === prevSel.id)))) select(prevSel.kind, prevSel.id, false); else select(null);
     if ((sc.units || []).length === 0) { $("msg").style.display = "flex"; $("msg").textContent = "Nothing to show yet: build a flowsheet first."; } else $("msg").style.display = "none";
@@ -950,9 +1355,9 @@
   });
   // test hooks
   window.__p3d = { state: S, select: (k, id, fly) => select(k, id, !!fly), view, setScene, counts: () => ({ units: Object.keys(S.units).length, pipes: S.pipes.length, particles: flowCount, pickables: S.pickables.length }),
-                   info: () => $("infoBody").innerText, fps: () => ({ ema, lowQ }), setFlow: (v) => { S.flow = v; applyToggles(); }, renderer, cam };
+                   info: () => $("infoBody").innerText, fps: () => ({ ema, lowQ }), setFlow: (v) => { S.flow = v; applyToggles(); }, renderer, cam, scene, camera, setTheme, theme: () => themeName, screenOf: (id, dy) => { const R = S.units[id], c = R.box.getCenter(new T.Vector3()); c.y = R.box.min.y + (dy === undefined ? 0.8 : dy); c.project(camera); const r = canvas.getBoundingClientRect(); return { x: r.left + (c.x + 1) / 2 * r.width, y: r.top + (1 - c.y) / 2 * r.height }; }, screenOfPoint: (x, y, z) => { const c = new T.Vector3(x, y, z).project(camera), r = canvas.getBoundingClientRect(); return { x: r.left + (c.x + 1) / 2 * r.width, y: r.top + (1 - c.y) / 2 * r.height }; }, edit: { snapshot: snapshotLayout, undo, redo, rotate: rotateSel, moveUnit: (id, x, z) => { const R = S.units[id]; beginEdit(); R.u.x = x; R.u.z = z; invalidateRoutes(id); placeUnit(R); S.editChanged = true; buildPipes(); endEdit(); }, layout: () => S.layout, setEdit: (v) => { S.edit = v; if (!v) clearHandles(); else refreshHandles(); applyToggles(); }, handles: () => S.handles.map((h) => h.userData.handle), dragHandle: (i, kind, val) => { const h = S.handles[i].userData.handle; const rec = S.pipes.find((q) => q.s.id === h.sid); beginEdit(); const P = rec.path.map((v) => v.clone()); if (h.kind === 'elev') h.idx.forEach((k) => { P[k].y = val; }); else { const ax = h.axes[0]; P[h.k][ax] = val; P[h.k + 1][ax] = val; } S.layout.routes[h.sid] = P.map((v) => [v.x, v.y, v.z]); S.editChanged = true; cleanRoute(h.sid); buildPipes(); refreshHandles(); endEdit(); }, autoRoute: autoRouteSel, reset: resetLayout } };
   canvas.style.cursor = "grab";
-  resize(); applyToggles();
+  applyPalette(); resize(); applyToggles();
   if (/[?&]lite=1/.test(location.search)) lowQuality();
   requestAnimationFrame(frame);
   post("streamlit:componentReady", { apiVersion: 1 });

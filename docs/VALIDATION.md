@@ -67,6 +67,13 @@ the app with your own trusted cases without putting them in the public repositor
    shown in the property views (e.g. `Outlet P [bar(a)]`) or the stream property labels (e.g. `Temperature [°C]`).
 3. Run `python tests/validate_against.py my_cases.csv report.csv`.
 
+Shortcut (v7.10.1): `python tests/make_reference_template.py "<example name or flowsheet.json>" my_cases.csv [tolerance %]`
+writes a sheet pre-filled with every unit result and stream property the app computes and an empty `reference`
+column. Type the HYSYS / Aspen / PIPESIM values into `reference` (same units), keep only those rows (rows with an
+empty reference are skipped anyway) and run step 3. **ProcessFlow Studio has not been compared with HYSYS or any other
+commercial simulator by its author: the checks above are against published data, exact solutions and textbook
+cases. Agreement with a commercial tool must be established on your own cases with this procedure.**
+
 The script solves each flowsheet once, prints app value, reference and pass/fail per row, and writes the report.
 Reference cases from company tools or field data therefore never enter the public code base.
 * Phasing and facilities (v7.6): stage views solve the same specifications (nothing is re-tuned between stages); the gas turbine is a screening model (constant efficiency, rating derated 0.7 %/K above 15 °C, no part-load curve); the phase splitter is an ideal split with optional carry-over; the platform is a drawing area only.
@@ -76,5 +83,6 @@ Reference cases from company tools or field data therefore never enter the publi
 * Two-stage membrane (v7.8): component and energy balance over the unit, same CO₂ specification as the single stage, lower methane loss; the recompressor uses an ideal-gas adiabatic estimate (γ = 1.3).
 * Phase economics (v7.8): cost = C_ref (S/S_ref)^n, installed = equipment × installation factor × (1 + contingency), NPV = −CAPEX + net benefit × annuity, all checked by hand; the reference costs are generic placeholders, not vendor or project data.
 * SURF equipment (v7.8): choke, manifold, flow meter, pig station, hydrocyclone and electric heater are screening models checked for mass and energy balance and monotonic behaviour; no vendor performance data.
-* 3D view (v7.10): the scene is built from the solved model and checked for one object per unit and one pipe per stream, flow particles only where something flows, picking and info panel, and stage filtering; shapes are schematic and pipe diameters indicative (velocity-based screening), not for engineering use. Tested with software WebGL only.
+* 3D layout editing (v7.10.2): positions, rotations and routes are stored as plain numbers in the flowsheet (`layout3d`), sanitised on the Python side, excluded from the solution hash, and checked by real mouse drags in headless Chromium (move, snap, rotate, undo / redo, pipe handles, echo and reset). Hand-routed pipes are not checked for clashes or code spacing.
+* 3D view (v7.10): the scene is built from the solved model and checked for one object per unit and one pipe per stream, flow particles only where something flows, picking and info panel, and stage filtering; shapes are detailed but generic (API-style compressor train, pump, shell-and-tube exchanger, separators; no vendor drawings or dimensions) and pipe diameters indicative (velocity-based screening), not for engineering use. Tested with software WebGL only.
 * Stage-specific specs, tornado, cases (v7.9): checked by comparing stages (override absent today, present after its phase, model untouched), by monotonic response of the power to efficiency, and by a save / reopen round trip of cases. Sizing ranges are generic screening limits, not vendor limits.

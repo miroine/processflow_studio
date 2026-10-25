@@ -158,6 +158,10 @@ and steps never jump over a feed ramp's breakpoint. UI: loading a flowsheet clea
 default vessel volumes are no longer pinned into the settings, the dynamic model assembly is cached between reruns and the default Python script
 works on an empty flowsheet.
 
+**v7.10.2:** editable 3D layout (move / rotate equipment, drag pipe runs and rack height, undo / redo, stored in the flowsheet file), Studio and Realistic looks with service-coloured pipes and flow stripes, and a much faster view (static meshes merged: about 3.5× fewer draw calls, static shadows, instanced supports).
+
+**v7.10.1:** more detailed (generic, non-vendor) 3D equipment — compressor train with motor, gearbox, coupling guards, barrel with bolted covers and seals, lube-oil console, anti-surge loop; API-style pump; shell-and-tube exchanger with a visible tube bundle (X-ray); vessels with instruments, relief valve, internals; and a reference-comparison sheet generator (`tests/make_reference_template.py`).
+
 **v7.10 additions:** a 3D view of the current design (button on the Flowsheet tab): orbit and inspect every item with its description and results, animated flow along the pipes, X-ray, night mode and phase-aware display (Three.js, vendored, MIT). Also: connections can now change per phase (`until`).
 
 **v7.9 additions:** stage-specific specifications (a parameter that takes a new value from a chosen phase on), import of your own cost table (CSV, kept in the saved file only), a one-click printable phase report, a sensitivity (tornado) tab, sizing-range checks in the advisor, recycle convergence feedback and named cases in one file.

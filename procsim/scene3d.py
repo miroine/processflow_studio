@@ -179,6 +179,41 @@ def _bridge_logical(streams, recycles):
     return out
 
 
+
+def scene_origin(model):
+    """Centre (2D pixels) of all drawn units - the origin of the scene frame."""
+    pos = [(u["x"], u["y"]) for u in model["units"].values() if u["type"] not in LOGICAL and u["type"] != "platform"]
+    return [sum(p[0] for p in pos) / len(pos), sum(p[1] for p in pos) / len(pos)] if pos else [0.0, 0.0]
+
+
+def sanitize_layout(lay):
+    """The hand-edited 3D layout stored in ``model["layout3d"]``: unit positions / rotations and pipe routes in scene metres.
+    Anything malformed is dropped (the component value comes from a browser)."""
+    out = {"units": {}, "routes": {}, "origin": None, "ver": 0}
+    if not isinstance(lay, dict):
+        return out
+
+    def num(v, lim=5000.0):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return round(f, 3) if abs(f) <= lim else None
+    for k, v in (lay.get("units") or {}).items():
+        if isinstance(v, dict) and num(v.get("x")) is not None and num(v.get("z")) is not None:
+            out["units"][str(k)] = {"x": num(v["x"]), "z": num(v["z"]), "rot": int(num(v.get("rot", 0), 8) or 0) % 4}
+    for k, pts in (lay.get("routes") or {}).items():
+        if isinstance(pts, (list, tuple)) and 2 <= len(pts) <= 40:
+            q = [[num(c, 5000.0) for c in p] for p in pts if isinstance(p, (list, tuple)) and len(p) == 3]
+            if len(q) == len(pts) and all(None not in p for p in q):
+                out["routes"][str(k)] = q
+    o = lay.get("origin")
+    if isinstance(o, (list, tuple)) and len(o) == 2 and all(isinstance(c, (int, float)) for c in o):
+        out["origin"] = [float(o[0]), float(o[1])]
+    out["ver"] = int(lay.get("ver", 0) or 0)
+    return out
+
+
 def build_scene(model, sol=None, fmt=None, qfmt=None, solved_ok=True):
     """JSON-ready scene.  ``fmt(v)`` / ``qfmt(label, v)`` format numbers like the rest of the app (unit systems)."""
     fmt = fmt or (lambda v: f"{v:.4g}" if isinstance(v, (int, float)) else str(v))
@@ -186,9 +221,12 @@ def build_scene(model, sol=None, fmt=None, qfmt=None, solved_ok=True):
     sm = PH.stage_model(model)
     stage = PH.resolve_stage(model)
     units, streams = sm["units"], sm["streams"]
-    pos = [(u["x"], u["y"]) for u in units.values() if u["type"] not in LOGICAL and u["type"] != "platform"]
+    lay = sanitize_layout(model.get("layout3d"))
+    pos = [(u["x"], u["y"]) for u in model["units"].values() if u["type"] not in LOGICAL and u["type"] != "platform"]
     cx = sum(p[0] for p in pos) / len(pos) if pos else 0.0
     cy = sum(p[1] for p in pos) / len(pos) if pos else 0.0
+    if lay.get("origin"):                       # an edited layout keeps its own origin so that moving things in 2D does not shift it
+        cx, cy = lay["origin"]
     cur = sol is not None and solved_ok
     out_u, out_s, plat = [], [], []
     for uid, u in units.items():
@@ -240,5 +278,6 @@ def build_scene(model, sol=None, fmt=None, qfmt=None, solved_ok=True):
         out_s.append(e)
     out_s = _bridge_logical(out_s, {uid for uid, u in units.items() if u["type"] == "recycle"})
     return _plain({"units": out_u, "streams": out_s, "platforms": plat,
-                   "meta": {"stage": stage, "stageName": PH.stage_name(model, stage), "solved": bool(cur),
+                   "layout": {"units": lay["units"], "routes": lay["routes"]},
+                   "meta": {"layoutVer": int(lay.get("ver", 0)), "stage": stage, "stageName": PH.stage_name(model, stage), "solved": bool(cur),
                             "phases": [{"id": p["id"], "name": p["name"], "color": PH.phase_color(model, p["id"])} for p in PH.phase_list(model)]}})

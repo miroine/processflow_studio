@@ -346,7 +346,7 @@ def process_canvas_value(key="pfd"):
 def model_hash(model):
     m = copy.deepcopy(model)
     for k in ("economics", "capex", "umbilical", "layout", "cooldown", "scenarios", "heating", "fieldlife",
-              "fieldlife_result", "waxsand", "power", "fa2", "design", "prognosis", "prognosis_result", "profile", "profile_result", "dynamics", "calibration", "calibration_applied", "calibration_summary", "phasecost", "phasecost_result", "cases", "case_active"):   # post-processing settings and results: editing them never re-solves
+              "fieldlife_result", "waxsand", "power", "fa2", "design", "prognosis", "prognosis_result", "profile", "profile_result", "dynamics", "calibration", "calibration_applied", "calibration_summary", "phasecost", "phasecost_result", "cases", "case_active", "layout3d"):   # post-processing settings and results: editing them never re-solves
         m.pop(k, None)
     m["units"] = {k: u for k, u in m["units"].items() if u["type"] != "platform"}      # drawing areas never change the solution
     for u in m["units"].values():
